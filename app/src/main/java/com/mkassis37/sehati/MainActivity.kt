@@ -533,6 +533,8 @@ private fun LabResultsScreen(member: FamilyMember, records: List<LabResult>, add
         Text("فحوصات " + member.fullName, style = MaterialTheme.typography.titleLarge)
         Text("تُحفظ كل نتيجة بتاريخها ومجالها المرجعي، وتبقى متاحة للمقارنة لسنوات.", style = MaterialTheme.typography.bodySmall)
         Button(onClick = { showAdd = true }, modifier = Modifier.fillMaxWidth()) { Text("إضافة نتيجة فحص") }
+        LabPdfReader(onExtractedText = { /* النص للمعاينة فقط؛ لا يُحفظ قبل مراجعة المستخدم */ })
+        Text("أو أدخل النتيجة يدويًا", style = MaterialTheme.typography.titleSmall)
         if (tests.isNotEmpty()) {
             Text("الفحص")
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {

@@ -18,6 +18,22 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        create("release") {
+            val storePath = providers.gradleProperty("sehatiStoreFile").orNull
+            val storePass = providers.gradleProperty("sehatiStorePassword").orNull
+            val keyAliasValue = providers.gradleProperty("sehatiKeyAlias").orNull
+            val keyPass = providers.gradleProperty("sehatiKeyPassword").orNull
+            if (!storePath.isNullOrBlank() && !storePass.isNullOrBlank() &&
+                !keyAliasValue.isNullOrBlank() && !keyPass.isNullOrBlank()) {
+                storeFile = file(storePath)
+                storePassword = storePass
+                keyAlias = keyAliasValue
+                keyPassword = keyPass
+            }
+        }
+    }
+
     buildTypes {
         debug {
             applicationIdSuffix = ".debug"
@@ -25,6 +41,7 @@ android {
         }
         release {
             isMinifyEnabled = true
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

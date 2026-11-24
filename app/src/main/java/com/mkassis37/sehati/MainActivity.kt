@@ -146,6 +146,7 @@ private fun SehatiApp(db: SehatiDatabase) {
         ProcessLifecycleOwner.get().lifecycle.addObserver(observer)
         onDispose { ProcessLifecycleOwner.get().lifecycle.removeObserver(observer) }
     }
+    LaunchedEffect(Unit) { documentStore.clearTemporaryPdfs() }
     LaunchedEffect(Unit) {
         if (!BuildConfig.DEBUG) {
             updateStatus = "جارٍ فحص الإصدارات..."

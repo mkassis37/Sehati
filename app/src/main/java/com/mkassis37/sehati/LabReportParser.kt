@@ -16,12 +16,12 @@ data class LabReportCandidate(
 )
 
 object LabReportParser {
-    private val numericResult = Regex("""^([+-]?(?:\\d+(?:[.,]\\d*)?|[.,]\\d+))\\s*([LH*])?$""")
-    private val numericRange = Regex("""^([+-]?(?:\\d+(?:[.,]\\d*)?|[.,]\\d+))\\s*[-–]\\s*([+-]?(?:\\d+(?:[.,]\\d*)?|[.,]\\d+))$""")
-    private val upperLimit = Regex("""^(?:Ref\\s*:\\s*)?<=\\s*([+-]?(?:\\d+(?:[.,]\\d*)?|[.,]\\d+))$""", RegexOption.IGNORE_CASE)
-    private val lowerLimit = Regex("""^(?:Ref\\s*:\\s*)?>=\\s*([+-]?(?:\\d+(?:[.,]\\d*)?|[.,]\\d+))$""", RegexOption.IGNORE_CASE)
+    private val numericResult = Regex("""^([+-]?(?:\d+(?:[.,]\d*)?|[.,]\d+))\s*([LH*])?$""")
+    private val numericRange = Regex("""^([+-]?(?:\d+(?:[.,]\d*)?|[.,]\d+))\s*[-–]\s*([+-]?(?:\d+(?:[.,]\d*)?|[.,]\d+))$""")
+    private val upperLimit = Regex("""^(?:Ref\s*:\s*)?<=\s*([+-]?(?:\d+(?:[.,]\d*)?|[.,]\d+))$""", RegexOption.IGNORE_CASE)
+    private val lowerLimit = Regex("""^(?:Ref\s*:\s*)?>=\s*([+-]?(?:\d+(?:[.,]\d*)?|[.,]\d+))$""", RegexOption.IGNORE_CASE)
     private val inlineRow = Regex(
-        """^(.+?)\\s+([+-]?(?:\\d+(?:[.,]\\d*)?|[.,]\\d+))\\s*([LH*])?\\s+(.+?)\\s+([A-Za-zµμ/%0-9'._/-]+)$"""
+        """^(.+?)\s+([+-]?(?:\d+(?:[.,]\d*)?|[.,]\d+))\s*([LH*])?\s+(.+?)\s+([A-Za-zµμ/%0-9'._/-]+)$"""
     )
 
     fun parse(text: String): List<LabReportCandidate> {

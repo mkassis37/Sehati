@@ -544,7 +544,7 @@ private fun LabResultsScreen(member: FamilyMember, records: List<LabResult>, add
                 listOf(0, 1, 3, 5).forEach { count -> FilterChip(selected = years == count, onClick = { years = count }, label = { Text(if (count == 0) "كل السنوات" else count.toString() + " سنوات") }) }
             }
         }
-        if (latest != null) {
+        if (latest != null && selectedTest.isNotBlank()) {
             Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                 Text("أحدث نتيجة: " + latest.testName, style = MaterialTheme.typography.titleMedium)
                 Text(latest.value.toString() + " " + latest.unit, style = MaterialTheme.typography.headlineSmall)
@@ -572,6 +572,7 @@ private fun LabResultsScreen(member: FamilyMember, records: List<LabResult>, add
                 } }
             }
         }
+        if (selectedTest.isBlank() && tests.isNotEmpty()) Text("اختاري فحصًا محددًا لعرض المقارنة والرسم البياني؛ لا نقارن فحوصات مختلفة أو بوحدات مختلفة.")
         Text("سجل النتائج (" + filtered.size + ")", style = MaterialTheme.typography.titleMedium)
         if (filtered.isEmpty()) Text("لا توجد نتائج ضمن الاختيار الحالي. أضف أول فحص للبدء.")
         filtered.forEach { row -> Card(Modifier.fillMaxWidth()) { Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.SpaceBetween) {

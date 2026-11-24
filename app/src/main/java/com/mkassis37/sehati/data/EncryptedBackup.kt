@@ -24,6 +24,7 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
         val allergies = dao.getAllAllergies()
         val labResults = dao.getAllLabResults()
         val documents = dao.getAllDocuments()
+        val medications = dao.getAllMedications()
         val payload = JSONObject()
             .put("format", "sehati-backup")
             .put("version", 1)
@@ -47,6 +48,16 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
                     .put("referenceHigh", r.referenceHigh ?: JSONObject.NULL)
                     .put("performedAt", r.performedAt).put("laboratory", r.laboratory)
                     .put("source", r.source).put("notes", r.notes).put("createdAt", r.createdAt)) }
+            })
+            .put("medications", JSONArray().apply {
+                medications.forEach { m -> put(JSONObject()
+                    .put("id", m.id).put("memberId", m.memberId).put("name", m.name)
+                    .put("strength", m.strength).put("dosage", m.dosage).put("form", m.form)
+                    .put("frequency", m.frequency).put("scheduledTimes", m.scheduledTimes)
+                    .put("startDate", m.startDate).put("endDate", m.endDate)
+                    .put("prescribingDoctor", m.prescribingDoctor).put("instructions", m.instructions)
+                    .put("notes", m.notes).put("isActive", m.isActive)
+                    .put("createdAt", m.createdAt).put("updatedAt", m.updatedAt)) }
             })
             .put("documents", JSONArray().apply {
                 documents.forEach { doc ->
@@ -112,6 +123,18 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
                 source = o.optString("source", "manual"), notes = o.optString("notes"),
                 createdAt = o.optLong("createdAt"))
         }
+        val medicationArray = root.optJSONArray("medications") ?: JSONArray()
+        val medicationRows = (0 until medicationArray.length()).map { i ->
+            val o = medicationArray.getJSONObject(i)
+            MedicationRecord(id = o.getLong("id"), memberId = o.getLong("memberId"),
+                name = o.getString("name"), strength = o.optString("strength"),
+                dosage = o.optString("dosage"), form = o.optString("form"),
+                frequency = o.optString("frequency"), scheduledTimes = o.optString("scheduledTimes"),
+                startDate = o.optString("startDate"), endDate = o.optString("endDate"),
+                prescribingDoctor = o.optString("prescribingDoctor"), instructions = o.optString("instructions"),
+                notes = o.optString("notes"), isActive = o.optBoolean("isActive", true),
+                createdAt = o.optLong("createdAt"), updatedAt = o.optLong("updatedAt"))
+        }
         val documentArray = root.optJSONArray("documents") ?: JSONArray()
         val documentRows = (0 until documentArray.length()).map { i ->
             val o = documentArray.getJSONObject(i)
@@ -125,6 +148,7 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
         }
         require(allergyRows.all { row -> memberRows.any { it.id == row.memberId } } &&
             labRows.all { row -> memberRows.any { it.id == row.memberId } } &&
+            medicationRows.all { row -> memberRows.any { it.id == row.memberId } } &&
             documentRows.all { row -> memberRows.any { it.id == row.memberId } }) {
             "Backup contains records without a matching family member."
         }
@@ -142,10 +166,12 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
                 dao.clearAllergies()
                 dao.clearLabResults()
                 dao.clearDocuments()
+                dao.clearMedications()
                 dao.clearMembers()
                 dao.insertMembers(memberRows)
                 dao.insertAllergies(allergyRows)
                 dao.insertLabResults(labRows)
+                dao.insertMedications(medicationRows)
                 dao.insertDocuments(createdFiles)
             }
             oldDocuments.forEach(documentStore::delete)
@@ -180,6 +206,7 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
     data class BackupPreview(val memberNames: List<String>, val allergyCount: Int, internal val payload: JSONObject) {
         val labResultCount: Int get() = payload.optJSONArray("labResults")?.length() ?: 0
         val documentCount: Int get() = payload.optJSONArray("documents")?.length() ?: 0
+        val medicationCount: Int get() = payload.optJSONArray("medications")?.length() ?: 0
         val documentNames: List<String> get() = buildList {
             val docs = payload.optJSONArray("documents") ?: return@buildList
             for (i in 0 until docs.length()) add(docs.getJSONObject(i).optString("displayName"))

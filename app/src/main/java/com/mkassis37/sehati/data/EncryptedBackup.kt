@@ -180,6 +180,10 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
     data class BackupPreview(val memberNames: List<String>, val allergyCount: Int, internal val payload: JSONObject) {
         val labResultCount: Int get() = payload.optJSONArray("labResults")?.length() ?: 0
         val documentCount: Int get() = payload.optJSONArray("documents")?.length() ?: 0
+        val documentNames: List<String> get() = buildList {
+            val docs = payload.optJSONArray("documents") ?: return@buildList
+            for (i in 0 until docs.length()) add(docs.getJSONObject(i).optString("displayName"))
+        }
     }
     companion object { private val MAGIC = byteArrayOf(0x53, 0x48, 0x54, 0x42) }
 }

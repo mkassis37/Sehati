@@ -17,12 +17,17 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.WarningAmber
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -31,7 +36,9 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -48,6 +55,9 @@ import com.mkassis37.sehati.data.AllergyRecord
 import com.mkassis37.sehati.data.MedicalProfile
 import com.mkassis37.sehati.data.SehatiDatabase
 import com.mkassis37.sehati.ui.theme.SehatiTheme
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneOffset
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -92,13 +102,13 @@ private fun SehatiApp(database: SehatiDatabase) {
                 NavigationBarItem(
                     selected = section == AppSection.PROFILE,
                     onClick = { section = AppSection.PROFILE },
-                    icon = { androidx.compose.material3.Icon(Icons.Outlined.Person, contentDescription = null) },
+                    icon = { Icon(Icons.Outlined.Person, contentDescription = null) },
                     label = { Text("الملف الطبي") }
                 )
                 NavigationBarItem(
                     selected = section == AppSection.ALLERGIES,
                     onClick = { section = AppSection.ALLERGIES },
-                    icon = { androidx.compose.material3.Icon(Icons.Outlined.WarningAmber, contentDescription = null) },
+                    icon = { Icon(Icons.Outlined.WarningAmber, contentDescription = null) },
                     label = { Text("الحساسيات") }
                 )
             }
@@ -127,39 +137,162 @@ private fun ProfileScreen(
     modifier: Modifier = Modifier
 ) {
     val scope = rememberCoroutineScope()
-    var name by remember(profile) { mutableStateOf(profile?.fullName.orEmpty()) }
-    var dob by remember(profile) { mutableStateOf(profile?.dateOfBirth.orEmpty()) }
-    var blood by remember(profile) { mutableStateOf(profile?.bloodGroup.orEmpty()) }
-    var notes by remember(profile) { mutableStateOf(profile?.medicalNotes.orEmpty()) }
+    var name by rememberSaveable { mutableStateOf("") }
+    var dob by rememberSaveable { mutableStateOf("") }
+    var blood by rememberSaveable { mutableStateOf("") }
+    var notes by rememberSaveable { mutableStateOf("") }
+    var isSaving by remember { mutableStateOf(false) }
+    var saveMessage by rememberSaveable { mutableStateOf("") }
+
+    // Load an existing profile without wiping text the user is currently entering.
+    LaunchedEffect(profile?.updatedAt) {
+        profile?.let {
+            name = it.fullName
+            dob = it.dateOfBirth
+            blood = it.bloodGroup
+            notes = it.medicalNotes
+        }
+    }
 
     Column(
         modifier = modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Text("المعلومات الأساسية", style = MaterialTheme.typography.titleLarge)
-        Text("يمكنك حفظ معلوماتك وتعديلها لاحقًا.", style = MaterialTheme.typography.bodyMedium)
-        OutlinedTextField(name, { name = it }, label = { Text("الاسم الكامل") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-        OutlinedTextField(dob, { dob = it }, label = { Text("تاريخ الميلاد") }, modifier = Modifier.fillMaxWidth(), singleLine = true, placeholder = { Text("مثال: 1990-05-20") })
-        OutlinedTextField(blood, { blood = it }, label = { Text("فصيلة الدم") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-        OutlinedTextField(notes, { notes = it }, label = { Text("التاريخ والملاحظات الطبية") }, modifier = Modifier.fillMaxWidth(), minLines = 4)
+        Text("أدخل بياناتك ثم اضغط حفظ الملف الطبي.", style = MaterialTheme.typography.bodyMedium)
+        OutlinedTextField(
+            value = name,
+            onValueChange = { name = it; saveMessage = "" },
+            label = { Text("الاسم الكامل") },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true
+        )
+        DatePickerField(
+            label = "تاريخ الميلاد",
+            date = dob,
+            onDateSelected = { dob = it; saveMessage = "" },
+            modifier = Modifier.fillMaxWidth()
+        )
+        OutlinedTextField(
+            value = blood,
+            onValueChange = { blood = it; saveMessage = "" },
+            label = { Text("فصيلة الدم") },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true
+        )
+        OutlinedTextField(
+            value = notes,
+            onValueChange = { notes = it; saveMessage = "" },
+            label = { Text("التاريخ والملاحظات الطبية") },
+            modifier = Modifier.fillMaxWidth(),
+            minLines = 4
+        )
         Button(
+            enabled = !isSaving,
             onClick = {
                 scope.launch {
-                    saveProfile(
-                        MedicalProfile(
-                            fullName = name.trim(),
-                            dateOfBirth = dob.trim(),
-                            bloodGroup = blood.trim(),
-                            medicalNotes = notes.trim()
+                    isSaving = true
+                    saveMessage = ""
+                    try {
+                        saveProfile(
+                            MedicalProfile(
+                                fullName = name.trim(),
+                                dateOfBirth = dob,
+                                bloodGroup = blood.trim(),
+                                medicalNotes = notes.trim(),
+                                updatedAt = System.currentTimeMillis()
+                            )
                         )
-                    )
+                        saveMessage = "تم حفظ الملف الطبي بنجاح."
+                    } catch (_: Exception) {
+                        saveMessage = "تعذّر حفظ الملف. لم تُحذف البيانات المدخلة؛ حاول مرة أخرى."
+                    } finally {
+                        isSaving = false
+                    }
                 }
             },
             modifier = Modifier.fillMaxWidth()
-        ) { Text("حفظ الملف الطبي") }
-        Spacer(Modifier.height(8.dp))
-        Text("تُحفظ المعلومات على هذا الجهاز داخل قاعدة بيانات مشفّرة.", style = MaterialTheme.typography.bodySmall)
+        ) {
+            Text(if (isSaving) "جارٍ الحفظ..." else "حفظ الملف الطبي")
+        }
+        if (saveMessage.isNotBlank()) {
+            Text(
+                saveMessage,
+                color = if (saveMessage.startsWith("تم")) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodyMedium
+            )
+        }
+        Text(
+            "تُحفظ المعلومات على هذا الجهاز داخل قاعدة بيانات مشفّرة.",
+            style = MaterialTheme.typography.bodySmall
+        )
     }
+}
+
+/**
+ * Shared date field for all screens: opens the Material date picker.
+ * Tapping the month/year heading allows direct year selection; month arrows
+ * remain available for quick month-to-month navigation.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DatePickerField(
+    label: String,
+    date: String,
+    onDateSelected: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var showPicker by rememberSaveable { mutableStateOf(false) }
+    OutlinedTextField(
+        value = date.toDisplayDate(),
+        onValueChange = {},
+        readOnly = true,
+        label = { Text(label) },
+        placeholder = { Text("اختر التاريخ") },
+        trailingIcon = {
+            IconButton(onClick = { showPicker = true }) {
+                Icon(Icons.Outlined.CalendarMonth, contentDescription = "اختيار التاريخ")
+            }
+        },
+        modifier = modifier
+    )
+    if (showPicker) {
+        val initialMillis = date.toUtcMillis() ?: System.currentTimeMillis()
+        val state = rememberDatePickerState(initialSelectedDateMillis = initialMillis)
+        DatePickerDialog(
+            onDismissRequest = { showPicker = false },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        state.selectedDateMillis?.let { millis ->
+                            onDateSelected(
+                                Instant.ofEpochMilli(millis).atZone(ZoneOffset.UTC).toLocalDate().toString()
+                            )
+                        }
+                        showPicker = false
+                    }
+                ) { Text("اختيار") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showPicker = false }) { Text("إلغاء") }
+            }
+        ) {
+            DatePicker(state = state, showModeToggle = true)
+        }
+    }
+}
+
+private fun String.toUtcMillis(): Long? = runCatching {
+    LocalDate.parse(this).atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
+}.getOrNull()
+
+private fun String.toDisplayDate(): String {
+    if (isBlank()) return ""
+    return runCatching {
+        val d = LocalDate.parse(this)
+        "%02d/%02d/%04d".format(d.dayOfMonth, d.monthValue, d.year)
+    }.getOrDefault(this)
 }
 
 @Composable
@@ -173,13 +306,17 @@ private fun AllergyScreen(
     var showDialog by rememberSaveable { mutableStateOf(false) }
 
     Column(modifier = modifier.fillMaxSize().padding(16.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+            modifier = Modifier.fillMaxWidth()
+        ) {
             Column {
                 Text("سجل الحساسيات", style = MaterialTheme.typography.titleLarge)
                 Text("أضف المواد والأعراض وردود الفعل.", style = MaterialTheme.typography.bodySmall)
             }
             Button(onClick = { showDialog = true }) {
-                androidx.compose.material3.Icon(Icons.Outlined.Add, contentDescription = null)
+                Icon(Icons.Outlined.Add, contentDescription = null)
                 Text("إضافة")
             }
         }

@@ -49,4 +49,22 @@ interface MedicalDao {
 
     @Query("DELETE FROM allergy_records WHERE id = :recordId AND memberId = :memberId")
     suspend fun deleteAllergy(recordId: Long, memberId: Long)
+
+    @Query("SELECT * FROM lab_results WHERE memberId = :memberId ORDER BY performedAt DESC, id DESC")
+    fun observeLabResults(memberId: Long): Flow<List<LabResult>>
+
+    @Query("SELECT * FROM lab_results ORDER BY id")
+    suspend fun getAllLabResults(): List<LabResult>
+
+    @Insert
+    suspend fun insertLabResults(records: List<LabResult>)
+
+    @Insert
+    suspend fun addLabResult(record: LabResult): Long
+
+    @Query("DELETE FROM lab_results WHERE id = :recordId AND memberId = :memberId")
+    suspend fun deleteLabResult(recordId: Long, memberId: Long)
+
+    @Query("DELETE FROM lab_results")
+    suspend fun clearLabResults()
 }

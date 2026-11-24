@@ -22,6 +22,7 @@ class EncryptedBackup(private val database: SehatiDatabase) {
         val dao = database.medicalDao()
         val members = dao.getAllMembers()
         val allergies = dao.getAllAllergies()
+        val labResults = dao.getAllLabResults()
         val payload = JSONObject()
             .put("format", "sehati-backup")
             .put("version", 1)
@@ -36,6 +37,15 @@ class EncryptedBackup(private val database: SehatiDatabase) {
                     .put("id", a.id).put("memberId", a.memberId).put("category", a.category)
                     .put("substance", a.substance).put("reaction", a.reaction).put("severity", a.severity)
                     .put("notes", a.notes).put("createdAt", a.createdAt)) }
+            })
+            .put("labResults", JSONArray().apply {
+                labResults.forEach { r -> put(JSONObject()
+                    .put("id", r.id).put("memberId", r.memberId).put("testName", r.testName)
+                    .put("value", r.value).put("unit", r.unit)
+                    .put("referenceLow", r.referenceLow ?: JSONObject.NULL)
+                    .put("referenceHigh", r.referenceHigh ?: JSONObject.NULL)
+                    .put("performedAt", r.performedAt).put("laboratory", r.laboratory)
+                    .put("source", r.source).put("notes", r.notes).put("createdAt", r.createdAt)) }
             }).toString().toByteArray(Charsets.UTF_8)
 
         val salt = ByteArray(16).also(SecureRandom()::nextBytes)
@@ -65,6 +75,7 @@ class EncryptedBackup(private val database: SehatiDatabase) {
         val root = preview.payload
         val members = root.getJSONArray("members")
         val allergies = root.getJSONArray("allergies")
+        val labResults = root.optJSONArray("labResults") ?: JSONArray()
         val memberRows = (0 until members.length()).map { i ->
             val o = members.getJSONObject(i)
             FamilyMember(id = o.getLong("id"), fullName = o.getString("fullName"),
@@ -78,15 +89,29 @@ class EncryptedBackup(private val database: SehatiDatabase) {
                 reaction = o.optString("reaction"), severity = o.optString("severity"),
                 notes = o.optString("notes"), createdAt = o.optLong("createdAt"))
         }
-        require(allergyRows.all { row -> memberRows.any { it.id == row.memberId } }) {
+        val labRows = (0 until labResults.length()).map { i ->
+            val o = labResults.getJSONObject(i)
+            LabResult(id = o.getLong("id"), memberId = o.getLong("memberId"),
+                testName = o.getString("testName"), value = o.getDouble("value"),
+                unit = o.optString("unit"),
+                referenceLow = if (o.isNull("referenceLow")) null else o.getDouble("referenceLow"),
+                referenceHigh = if (o.isNull("referenceHigh")) null else o.getDouble("referenceHigh"),
+                performedAt = o.getString("performedAt"), laboratory = o.optString("laboratory"),
+                source = o.optString("source", "manual"), notes = o.optString("notes"),
+                createdAt = o.optLong("createdAt"))
+        }
+        require(allergyRows.all { row -> memberRows.any { it.id == row.memberId } } &&
+            labRows.all { row -> memberRows.any { it.id == row.memberId } }) {
             "Backup contains allergy records without a matching family member."
         }
         database.withTransaction {
             val dao = database.medicalDao()
             dao.clearAllergies()
+            dao.clearLabResults()
             dao.clearMembers()
             dao.insertMembers(memberRows)
             dao.insertAllergies(allergyRows)
+            dao.insertLabResults(labRows)
         }
     }
 
@@ -112,6 +137,8 @@ class EncryptedBackup(private val database: SehatiDatabase) {
         return SecretKeySpec(bytes, "AES")
     }
 
-    data class BackupPreview(val memberNames: List<String>, val allergyCount: Int, internal val payload: JSONObject)
+    data class BackupPreview(val memberNames: List<String>, val allergyCount: Int, internal val payload: JSONObject) {
+        val labResultCount: Int get() = payload.optJSONArray("labResults")?.length() ?: 0
+    }
     companion object { private val MAGIC = byteArrayOf(0x53, 0x48, 0x54, 0x42) }
 }

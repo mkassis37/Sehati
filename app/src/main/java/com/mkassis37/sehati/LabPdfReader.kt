@@ -34,7 +34,10 @@ import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.tasks.await
+import com.google.android.gms.tasks.Task
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.withContext
 
 /**
@@ -86,7 +89,7 @@ fun LabPdfReader(onExtractedText: (String) -> Unit) {
                                 )
                                 page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
                                 if (index == 0) firstBitmap = bitmap
-                                val recognized = recognizer.process(InputImage.fromBitmap(bitmap, 0)).await()
+                                val recognized = recognizer.process(InputImage.fromBitmap(bitmap, 0)).awaitResult()
                                 text.append("\n\n--- الصفحة ${index + 1} ---\n")
                                     .append(recognized.text)
                                 if (index != 0) bitmap.recycle()
@@ -111,6 +114,27 @@ fun LabPdfReader(onExtractedText: (String) -> Unit) {
         }
     }
 
+    LaunchedEffect(selectedUri, pageIndex, pageCount) {
+        val uri = selectedUri ?: return@LaunchedEffect
+        if (pageCount == 0) return@LaunchedEffect
+        try {
+            val bitmap = withContext(Dispatchers.IO) {
+                val descriptor = context.contentResolver.openFileDescriptor(uri, "r") ?: error("تعذر فتح الملف")
+                descriptor.use { parcel ->
+                    PdfRenderer(parcel).use { renderer ->
+                        renderer.openPage(pageIndex).use { page ->
+                            val scale = minOf(2.0, 1800.0 / page.width, 2400.0 / page.height)
+                            Bitmap.createBitmap((page.width * scale).toInt().coerceAtLeast(1), (page.height * scale).toInt().coerceAtLeast(1), Bitmap.Config.ARGB_8888).also {
+                                page.render(it, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                            }
+                        }
+                    }
+                }
+            }
+            pageBitmap?.takeIf { it !== bitmap }?.recycle()
+            pageBitmap = bitmap
+        } catch (_: Exception) { status = "تعذر عرض الصفحة ${pageIndex + 1}." }
+    }
     Card(Modifier.fillMaxWidth()) {
         Column(
             Modifier.fillMaxWidth().heightIn(max = 720.dp).verticalScroll(rememberScrollState()),
@@ -125,19 +149,11 @@ fun LabPdfReader(onExtractedText: (String) -> Unit) {
             Text(status, style = MaterialTheme.typography.bodySmall)
             if (busy) CircularProgressIndicator()
             pageBitmap?.let { bitmap ->
-                Text("معاينة الصفحة 1 من $pageCount", style = MaterialTheme.typography.titleSmall)
-                Image(
-                    bitmap.asImageBitmap(),
-                    contentDescription = "صورة الصفحة الأولى من تقرير المختبر",
-                    modifier = Modifier.fillMaxWidth()
-                )
+                Text("معاينة الصفحة ${pageIndex + 1} من $pageCount", style = MaterialTheme.typography.titleSmall)
+                Image(bitmap.asImageBitmap(), contentDescription = "معاينة صفحة من تقرير المختبر", modifier = Modifier.fillMaxWidth())
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(enabled = pageIndex > 0, onClick = { pageIndex-- }) { Text("الصفحة السابقة") }
                     Button(enabled = pageIndex < pageCount - 1, onClick = { pageIndex++ }) { Text("الصفحة التالية") }
-                }
-                if (pageIndex > 0) {
-                    Text("معاينة جميع الصفحات ستُستكمل في عارض الصفحات؛ النص المستخرج أعلاه يشمل الصفحات كاملة.",
-                        style = MaterialTheme.typography.bodySmall)
                 }
             }
             if (extractedText.isNotBlank()) {
@@ -151,4 +167,10 @@ fun LabPdfReader(onExtractedText: (String) -> Unit) {
             }
         }
     }
+}
+
+private suspend fun <T> Task<T>.awaitResult(): T = suspendCancellableCoroutine { continuation ->
+    addOnSuccessListener { result -> if (continuation.isActive) continuation.resume(result) }
+    addOnFailureListener { error -> if (continuation.isActive) continuation.resumeWithException(error) }
+    addOnCanceledListener { continuation.cancel() }
 }

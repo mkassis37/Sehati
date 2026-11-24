@@ -17,8 +17,8 @@ data class LabReportCandidate(
 )
 
 object LabReportParser {
-    private val isoDate = Regex("""\\b(\\d{4}-\\d{2}-\\d{2})\\b""")
-    private val monthDate = Regex("""\\b([A-Za-z]{3,9})\\s+(\\d{1,2}),\\s*(\\d{4})\\b""")
+    private val isoDate = Regex("""\b(\d{4}-\d{2}-\d{2})\b""")
+    private val monthDate = Regex("""\b([A-Za-z]{3,9})\s+(\d{1,2}),\s*(\d{4})\b""")
     private val numericResult = Regex("""^([+-]?(?:\d+(?:[.,]\d*)?|[.,]\d+))\s*([LH*])?$""")
     private val numericRange = Regex("""^([+-]?(?:\d+(?:[.,]\d*)?|[.,]\d+))\s*[-–]\s*([+-]?(?:\d+(?:[.,]\d*)?|[.,]\d+))$""")
     private val upperLimit = Regex("""^(?:Ref\s*:\s*)?<=\s*([+-]?(?:\d+(?:[.,]\d*)?|[.,]\d+))$""", RegexOption.IGNORE_CASE)
@@ -95,11 +95,14 @@ object LabReportParser {
     }
  
     private fun extractReportDate(lines: List<String>): String? {
-        val joined = lines.joinToString(" ")
-        isoDate.find(joined)?.groupValues?.get(1)?.let { value ->
+        val dateSource = lines.firstOrNull {
+            it.contains("specimen date", true) || it.contains("sampling date", true)
+        } ?: lines.firstOrNull { it.contains("result date", true) }
+            ?: lines.joinToString(" ")
+        isoDate.find(dateSource)?.groupValues?.get(1)?.let { value ->
             runCatching { java.time.LocalDate.parse(value) }.getOrNull()?.let { return it.toString() }
         }
-        monthDate.find(joined)?.let { match ->
+        monthDate.find(dateSource)?.let { match ->
             val value = match.value
             val parsed = listOf("MMM d, yyyy", "MMMM d, yyyy").firstNotNullOfOrNull { pattern ->
                 runCatching {

@@ -16,13 +16,13 @@ data class LabReportCandidate(
 
 object LabReportParser {
     private val rowPattern = Regex(
-        """^(.+?)\\s+([+-]?\\d+(?:[.,]\\d+)?)\\s*([A-Za-zµμ/%³²0-9._/-]*)\\s*(?:\\(?\\s*([+-]?\\d+(?:[.,]\\d+)?)\\s*[-–]\\s*([+-]?\\d+(?:[.,]\\d+)?)\\s*\\)?)?$"""
+        """^(.+?)\s+([+-]?\d+(?:[.,]\d+)?)\s*([A-Za-zµμ/%³²0-9._/-]*)\s*(?:\(?\s*([+-]?\d+(?:[.,]\d+)?)\s*[-–]\s*([+-]?\d+(?:[.,]\d+)?)\s*\)?)?$"""
     )
 
     fun parse(text: String): List<LabReportCandidate> {
         val candidates = linkedMapOf<String, LabReportCandidate>()
         text.lineSequence().forEach { raw ->
-            val line = raw.replace('|', ' ').replace(Regex("""\\s+"""), " ").trim()
+            val line = raw.replace('|', ' ').replace(Regex("""\s+"""), " ").trim()
             if (line.length < 5 || line.startsWith("---") || line.contains("Reference range", true) ||
                 line.contains("Test name", true) || line.contains("Result", true)) return@forEach
             val match = rowPattern.matchEntire(line) ?: return@forEach

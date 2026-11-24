@@ -522,6 +522,7 @@ private fun MemberDetailsScreen(
 private fun LabResultsScreen(member: FamilyMember, records: List<LabResult>, addResult: suspend (LabResult) -> Long, deleteResult: suspend (Long) -> Unit, modifier: Modifier = Modifier) {
     val scope = rememberCoroutineScope()
     var showAdd by rememberSaveable(member.id) { mutableStateOf(false) }
+    var reviewCandidate by remember(member.id) { mutableStateOf<LabReportCandidate?>(null) }
     var selectedTest by rememberSaveable(member.id) { mutableStateOf("") }
     var years by rememberSaveable(member.id) { mutableIntStateOf(0) }
     val tests = records.map { it.testName }.distinct().sorted()
@@ -533,7 +534,10 @@ private fun LabResultsScreen(member: FamilyMember, records: List<LabResult>, add
         Text("فحوصات " + member.fullName, style = MaterialTheme.typography.titleLarge)
         Text("تُحفظ كل نتيجة بتاريخها ومجالها المرجعي، وتبقى متاحة للمقارنة لسنوات.", style = MaterialTheme.typography.bodySmall)
         Button(onClick = { showAdd = true }, modifier = Modifier.fillMaxWidth()) { Text("إضافة نتيجة فحص") }
-        LabPdfReader(onExtractedText = { /* النص للمعاينة فقط؛ لا يُحفظ قبل مراجعة المستخدم */ })
+        LabPdfReader(
+            onExtractedText = { /* تتم المعاينة محليًا فقط؛ لا يُحفظ النص الخام */ },
+            onCandidateSelected = { candidate -> reviewCandidate = candidate; showAdd = true }
+        )
         Text("أو أدخل النتيجة يدويًا", style = MaterialTheme.typography.titleSmall)
         if (tests.isNotEmpty()) {
             Text("الفحص")
@@ -582,13 +586,13 @@ private fun LabResultsScreen(member: FamilyMember, records: List<LabResult>, add
             TextButton(onClick = { scope.launch { deleteResult(row.id) } }) { Text("حذف") }
         } } }
     }
-    if (showAdd) AddLabResultDialog(member.id, { showAdd = false }) { row -> scope.launch { addResult(row) }; showAdd = false }
+    if (showAdd) AddLabResultDialog(member.id, { showAdd = false; reviewCandidate = null }, reviewCandidate) { row -> scope.launch { addResult(row) }; showAdd = false; reviewCandidate = null }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun AddLabResultDialog(memberId: Long, onDismiss: () -> Unit, onSave: (LabResult) -> Unit) {
-    var name by rememberSaveable { mutableStateOf("") }; var result by rememberSaveable { mutableStateOf("") }; var unit by rememberSaveable { mutableStateOf("") }; var low by rememberSaveable { mutableStateOf("") }; var high by rememberSaveable { mutableStateOf("") }; var date by rememberSaveable { mutableStateOf(LocalDate.now().toString()) }; var lab by rememberSaveable { mutableStateOf("") }; var notes by rememberSaveable { mutableStateOf("") }; var error by rememberSaveable { mutableStateOf("") }
+private fun AddLabResultDialog(memberId: Long, onDismiss: () -> Unit, initialCandidate: LabReportCandidate? = null, onSave: (LabResult) -> Unit) {
+    var name by rememberSaveable(initialCandidate?.testName) { mutableStateOf(initialCandidate?.testName.orEmpty()) }; var result by rememberSaveable(initialCandidate?.value) { mutableStateOf(initialCandidate?.value?.toString().orEmpty()) }; var unit by rememberSaveable(initialCandidate?.unit) { mutableStateOf(initialCandidate?.unit.orEmpty()) }; var low by rememberSaveable(initialCandidate?.referenceLow) { mutableStateOf(initialCandidate?.referenceLow?.toString().orEmpty()) }; var high by rememberSaveable(initialCandidate?.referenceHigh) { mutableStateOf(initialCandidate?.referenceHigh?.toString().orEmpty()) }; var date by rememberSaveable(initialCandidate?.testName) { mutableStateOf(LocalDate.now().toString()) }; var lab by rememberSaveable(initialCandidate?.testName) { mutableStateOf("") }; var notes by rememberSaveable(initialCandidate?.sourceLine) { mutableStateOf(initialCandidate?.let { "اقتراح مستخرج من PDF. راجع النتيجة والوحدة والمجال والتاريخ مقابل التقرير الأصلي." }.orEmpty()) }; var error by rememberSaveable { mutableStateOf("") }
     AlertDialog(onDismissRequest = onDismiss, title = { Text("إضافة نتيجة فحص") }, text = { Column(Modifier.fillMaxWidth().heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         OutlinedTextField(name, { name = it }, label = { Text("اسم الفحص") }, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(result, { result = it }, label = { Text("النتيجة الرقمية") }, modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
@@ -599,7 +603,7 @@ private fun AddLabResultDialog(memberId: Long, onDismiss: () -> Unit, onSave: (L
         OutlinedTextField(lab, { lab = it }, label = { Text("اسم المختبر (اختياري)") }, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(notes, { notes = it }, label = { Text("ملاحظات") }, modifier = Modifier.fillMaxWidth())
         if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
-    } }, confirmButton = { TextButton(onClick = { val number = result.toDoubleOrNull(); val lower = low.takeIf { it.isNotBlank() }?.toDoubleOrNull(); val upper = high.takeIf { it.isNotBlank() }?.toDoubleOrNull(); if (name.isBlank() || number == null || (low.isNotBlank() && lower == null) || (high.isNotBlank() && upper == null) || (lower != null && upper != null && lower > upper)) error = "تحقق من اسم الفحص والنتيجة والمجال المرجعي." else onSave(LabResult(memberId = memberId, testName = name.trim(), value = number, unit = unit.trim(), referenceLow = lower, referenceHigh = upper, performedAt = date, laboratory = lab.trim(), notes = notes.trim())) }) { Text("حفظ النتيجة") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("إلغاء") } })
+    } }, confirmButton = { TextButton(onClick = { val number = result.toDoubleOrNull(); val lower = low.takeIf { it.isNotBlank() }?.toDoubleOrNull(); val upper = high.takeIf { it.isNotBlank() }?.toDoubleOrNull(); if (name.isBlank() || number == null || (low.isNotBlank() && lower == null) || (high.isNotBlank() && upper == null) || (lower != null && upper != null && lower > upper)) error = "تحقق من اسم الفحص والنتيجة والمجال المرجعي." else onSave(LabResult(memberId = memberId, testName = name.trim(), value = number, unit = unit.trim(), referenceLow = lower, referenceHigh = upper, performedAt = date, laboratory = lab.trim(), source = if (initialCandidate != null) "pdf_review" else "manual", notes = notes.trim())) }) { Text("حفظ النتيجة") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("إلغاء") } })
 }
 @Composable
 private fun DetailLine(label: String, value: String) {

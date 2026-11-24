@@ -31,7 +31,7 @@ object LabReportParser {
             val unit = match.groupValues[3].trim()
             val low = match.groupValues[4].takeIf { it.isNotBlank() }?.replace(',', '.')?.toDoubleOrNull()
             val high = match.groupValues[5].takeIf { it.isNotBlank() }?.replace(',', '.')?.toDoubleOrNull()
-            if (name.length < 2 || name.length > 70 || name.none { it.isLetter() } ||
+            if (name.length < 2 || name.length > 70 || name.none { it.isLetter() } || unit.startsWith("-") ||
                 value.isNaN() || value.isInfinite() || (low != null && high != null && low > high)) return@forEach
             val candidate = LabReportCandidate(name, value, unit, low, high, line)
             candidates[name.lowercase()] = candidate

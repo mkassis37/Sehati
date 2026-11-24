@@ -2,6 +2,7 @@ package com.mkassis37.sehati
 
 import android.os.Bundle
 import android.os.Build
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -54,6 +55,7 @@ import java.time.LocalDate
 import java.time.ZoneOffset
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import com.mkassis37.sehati.update.ReleaseUpdater
 import com.mkassis37.sehati.update.SehatiRelease
 
@@ -61,10 +63,21 @@ class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val db = SehatiDatabase.getInstance(applicationContext)
+        window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
         setContent {
+            var showSplash by remember { mutableStateOf(true) }
             SehatiTheme {
                 CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
-                    SehatiApp(db)
+                    if (showSplash) {
+                        SehatiSplashScreen()
+                        LaunchedEffect(Unit) {
+                            delay(1800)
+                            showSplash = false
+                            window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
+                        }
+                    } else {
+                        SehatiApp(db)
+                    }
                 }
             }
         }

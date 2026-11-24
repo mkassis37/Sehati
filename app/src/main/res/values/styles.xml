@@ -6,6 +6,6 @@
         <item name="android:windowLightStatusBar">true</item>
         <item name="android:statusBarColor">@color/sehati_mint</item>
         <item name="android:navigationBarColor">@color/sehati_mint</item>
-        <item name="android:windowBackground">@drawable/sehati_splash</item>
+        <item name="android:windowBackground">@color/sehati_mint</item>
     </style>
 </resources>

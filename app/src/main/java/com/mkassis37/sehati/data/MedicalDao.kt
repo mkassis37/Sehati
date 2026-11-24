@@ -68,6 +68,27 @@ interface MedicalDao {
     @Query("DELETE FROM lab_results")
     suspend fun clearLabResults()
 
+    @Query("SELECT * FROM medication_records WHERE memberId = :memberId ORDER BY isActive DESC, name COLLATE NOCASE")
+    fun observeMedications(memberId: Long): Flow<List<MedicationRecord>>
+
+    @Insert
+    suspend fun addMedication(record: MedicationRecord): Long
+
+    @Update
+    suspend fun updateMedication(record: MedicationRecord)
+
+    @Query("DELETE FROM medication_records WHERE id = :recordId AND memberId = :memberId")
+    suspend fun deleteMedication(recordId: Long, memberId: Long)
+
+    @Query("SELECT * FROM medication_records ORDER BY id")
+    suspend fun getAllMedications(): List<MedicationRecord>
+
+    @Insert
+    suspend fun insertMedications(records: List<MedicationRecord>)
+
+    @Query("DELETE FROM medication_records")
+    suspend fun clearMedications()
+
     @Query("SELECT * FROM medical_documents WHERE memberId = :memberId ORDER BY addedAt DESC")
     fun observeDocuments(memberId: Long): Flow<List<MedicalDocument>>
 

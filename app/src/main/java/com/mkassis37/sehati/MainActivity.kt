@@ -1,6 +1,7 @@
 package com.mkassis37.sehati
 
 import android.os.Bundle
+import android.content.Intent
 import android.os.Build
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
@@ -9,6 +10,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import androidx.fragment.app.FragmentActivity
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -50,6 +52,8 @@ import androidx.compose.ui.unit.dp
 import com.mkassis37.sehati.data.AllergyRecord
 import com.mkassis37.sehati.data.FamilyMember
 import com.mkassis37.sehati.data.LabResult
+import com.mkassis37.sehati.data.MedicalDocument
+import com.mkassis37.sehati.data.SecureMedicalDocumentStore
 import com.mkassis37.sehati.data.SehatiDatabase
 import com.mkassis37.sehati.ui.theme.SehatiTheme
 import java.time.Instant
@@ -96,7 +100,8 @@ private fun SehatiApp(db: SehatiDatabase) {
     val context = LocalContext.current
     val activity = context as? FragmentActivity
     val lockStore = remember { AppLockStore(context.applicationContext) }
-    val backup = remember { EncryptedBackup(db) }
+    val documentStore = remember { SecureMedicalDocumentStore(context.applicationContext) }
+    val backup = remember { EncryptedBackup(db, documentStore) }
     val releaseUpdater = remember { ReleaseUpdater(context.applicationContext) }
     var availableRelease by remember { mutableStateOf<SehatiRelease?>(null) }
     var updateStatus by remember { mutableStateOf("لم يتم فحص التحديثات بعد.") }
@@ -164,6 +169,8 @@ private fun SehatiApp(db: SehatiDatabase) {
     val allergies by allergyFlow.collectAsState(initial = emptyList())
     val labFlow = remember(selectedId) { selectedId?.let { dao.observeLabResults(it) } ?: flowOf(emptyList()) }
     val labResults by labFlow.collectAsState(initial = emptyList())
+    val documentFlow = remember(selectedId) { selectedId?.let { dao.observeDocuments(it) } ?: flowOf(emptyList()) }
+    val medicalDocuments by documentFlow.collectAsState(initial = emptyList())
 
     val title = when (screen) {
         Screen.MEMBERS -> "أفراد العائلة"
@@ -279,8 +286,29 @@ private fun SehatiApp(db: SehatiDatabase) {
             }
 
             Screen.LAB_RESULTS -> if (selected != null) {
-                LabResultsScreen(selected, labResults, { dao.addLabResult(it) },
-                    { dao.deleteLabResult(it, selected.id) }, Modifier.padding(padding))
+                LabResultsScreen(
+                    selected, labResults, medicalDocuments,
+                    addResult = { dao.addLabResult(it) },
+                    deleteResult = { dao.deleteLabResult(it, selected.id) },
+                    saveDocument = { uri ->
+                        val name = context.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)
+                            ?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
+                            ?: "تقرير طبي.pdf"
+                        val saved = documentStore.save(uri, selected.id, name)
+                        dao.addDocument(saved)
+                    },
+                    openDocument = { document ->
+                        val file = documentStore.createTemporaryPdf(document)
+                        val contentUri = FileProvider.getUriForFile(context, "com.mkassis37.sehati.fileprovider", file)
+                        context.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(contentUri, "application/pdf")
+                            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
+                    },
+                    deleteDocument = { document ->
+                        dao.deleteDocument(document.id, selected.id)
+                        documentStore.delete(document)
+                    },
+                    modifier = Modifier.padding(padding)
+                )
             }
             Screen.ALLERGIES -> if (selected != null) {
                 AllergyScreen(selected, allergies,

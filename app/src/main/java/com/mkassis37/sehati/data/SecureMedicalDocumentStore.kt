@@ -14,12 +14,14 @@ import javax.crypto.CipherInputStream
 import javax.crypto.CipherOutputStream
 import javax.crypto.KeyGenerator
 import javax.crypto.spec.GCMParameterSpec
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /** App-private PDF storage encrypted with an Android Keystore key. */
 class SecureMedicalDocumentStore(private val context: Context) {
     private val directory = File(context.filesDir, "medical_documents")
 
-    suspend fun save(uri: Uri, memberId: Long, displayName: String): MedicalDocument {
+    suspend fun save(uri: Uri, memberId: Long, displayName: String): MedicalDocument = withContext(Dispatchers.IO) {
         val input = context.contentResolver.openInputStream(uri)
             ?: throw IllegalArgumentException("تعذر فتح الملف المحدد.")
         val id = UUID.randomUUID().toString()
@@ -59,10 +61,11 @@ class SecureMedicalDocumentStore(private val context: Context) {
             relativePath = target.relativeTo(directory).path, sizeBytes = plainSize)
     }
 
-    fun readPlaintextBytes(document: MedicalDocument): ByteArray =
+    suspend fun readPlaintextBytes(document: MedicalDocument): ByteArray = withContext(Dispatchers.IO) {
         decryptFile(resolve(document.relativePath)).use { it.readBytes() }
+    }
 
-    fun restore(document: MedicalDocument, plaintext: ByteArray): MedicalDocument {
+    suspend fun restore(document: MedicalDocument, plaintext: ByteArray): MedicalDocument = withContext(Dispatchers.IO) {
         require(plaintext.size <= MAX_DOCUMENT_BYTES && plaintext.size >= 5 && String(plaintext.copyOfRange(0, 5), Charsets.US_ASCII) == "%PDF-")
         val target = resolve(document.relativePath)
         target.parentFile?.mkdirs()
@@ -76,7 +79,7 @@ class SecureMedicalDocumentStore(private val context: Context) {
         return document.copy(sizeBytes = plaintext.size.toLong())
     }
 
-    fun createTemporaryPdf(document: MedicalDocument): File {
+    suspend fun createTemporaryPdf(document: MedicalDocument): File = withContext(Dispatchers.IO) {
         val output = File(context.cacheDir, "sehati-${document.id}.pdf")
         decryptFile(resolve(document.relativePath)).use { input ->
             FileOutputStream(output).use { input.copyTo(it) }

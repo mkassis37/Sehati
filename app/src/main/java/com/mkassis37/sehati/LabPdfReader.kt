@@ -2,6 +2,11 @@ package com.mkassis37.sehati
 
 import android.graphics.Bitmap
 import android.graphics.pdf.PdfRenderer
+import com.googlecode.tesseract.android.TessBaseAPI
+import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
+import org.apache.pdfbox.pdmodel.PDDocument
+import org.apache.pdfbox.text.PDFTextStripper
+import java.io.File
 import android.net.Uri
 import android.os.ParcelFileDescriptor
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -73,32 +78,52 @@ fun LabPdfReader(onExtractedText: (String) -> Unit, onCandidateSelected: (LabRep
         busy = true
         try {
             val result = withContext(Dispatchers.IO) {
+                PDFBoxResourceLoader.init(context.applicationContext)
+                val selectableText = context.contentResolver.openInputStream(uri)?.use { input ->
+                    runCatching { PDDocument.load(input).use { PDFTextStripper().getText(it) } }.getOrDefault("")
+                }.orEmpty()
                 val descriptor = context.contentResolver.openFileDescriptor(uri, "r")
                     ?: error("لم يتمكن أندرويد من فتح الملف. جرّبي حفظ PDF على الجهاز أولًا.")
                 descriptor.use { parcel ->
                     PdfRenderer(parcel).use { renderer ->
                         require(renderer.pageCount > 0) { "ملف PDF لا يحتوي صفحات." }
                         val pages = renderer.pageCount
-                        val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
-                        val text = StringBuilder()
                         var firstBitmap: Bitmap? = null
-                        for (index in 0 until pages) {
-                            renderer.openPage(index).use { page ->
-                                val scale = minOf(2.0, 1800.0 / page.width, 2400.0 / page.height)
-                                val bitmap = Bitmap.createBitmap(
-                                    (page.width * scale).toInt().coerceAtLeast(1),
-                                    (page.height * scale).toInt().coerceAtLeast(1),
-                                    Bitmap.Config.ARGB_8888
-                                )
-                                page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                                if (index == 0) firstBitmap = bitmap
-                                val recognized = recognizer.process(InputImage.fromBitmap(bitmap, 0)).awaitResult()
-                                text.append("\n\n--- الصفحة ${index + 1} ---\n")
-                                    .append(recognized.text)
-                                if (index != 0) bitmap.recycle()
+                        val text = StringBuilder()
+                        val hasTextLayer = selectableText.trim().length > 40
+                        if (hasTextLayer) {
+                            text.append(selectableText)
+                        } else {
+                            val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+                            val tess = runCatching { createArabicTesseract(context) }.getOrNull()
+                            try {
+                                for (index in 0 until pages) {
+                                    renderer.openPage(index).use { page ->
+                                        val scale = minOf(2.0, 1800.0 / page.width, 2400.0 / page.height)
+                                        val bitmap = Bitmap.createBitmap(
+                                            (page.width * scale).toInt().coerceAtLeast(1),
+                                            (page.height * scale).toInt().coerceAtLeast(1),
+                                            Bitmap.Config.ARGB_8888
+                                        )
+                                        page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                                        if (index == 0) firstBitmap = bitmap
+                                        val arabic = runCatching {
+                                            tess?.setImage(bitmap)
+                                            tess?.getUTF8Text().orEmpty()
+                                        }.getOrDefault("")
+                                        val latin = runCatching {
+                                            recognizer.process(InputImage.fromBitmap(bitmap, 0)).awaitResult().text
+                                        }.getOrDefault("")
+                                        text.append("\n\n--- الصفحة ${index + 1} ---\n")
+                                            .append(arabic).append("\n").append(latin)
+                                        if (index != 0) bitmap.recycle()
+                                    }
+                                }
+                            } finally {
+                                tess?.recycle()
+                                recognizer.close()
                             }
                         }
-                        recognizer.close()
                         Triple(firstBitmap, pages, text.toString().trim())
                     }
                 }
@@ -186,6 +211,25 @@ fun LabPdfReader(onExtractedText: (String) -> Unit, onCandidateSelected: (LabRep
                 )
             }
         }
+    }
+}
+
+private fun createArabicTesseract(context: android.content.Context): TessBaseAPI {
+    val root = File(context.filesDir, "tesseract")
+    val data = File(root, "tessdata")
+    if (!data.exists()) data.mkdirs()
+    val model = File(data, "ara.traineddata")
+    if (!model.exists()) {
+        context.assets.open("tessdata/ara.traineddata").use { input ->
+            model.outputStream().use { output -> input.copyTo(output) }
+        }
+    }
+    return TessBaseAPI().also { api ->
+        if (!api.init(root.absolutePath, "ara")) {
+            api.recycle()
+            throw IllegalStateException("تعذر تهيئة نموذج اللغة العربية")
+        }
+        api.setPageSegMode(TessBaseAPI.PageSegMode.PSM_AUTO)
     }
 }
 

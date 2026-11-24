@@ -57,7 +57,7 @@ class SecureMedicalDocumentStore(private val context: Context) {
             target.delete()
             throw error
         }
-        return MedicalDocument(memberId = memberId, displayName = displayName.take(180),
+        MedicalDocument(memberId = memberId, displayName = displayName.take(180),
             relativePath = target.relativeTo(directory).path, sizeBytes = plainSize)
     }
 
@@ -76,7 +76,7 @@ class SecureMedicalDocumentStore(private val context: Context) {
             file.write(cipher.iv)
             CipherOutputStream(file, cipher).use { it.write(plaintext) }
         }
-        return document.copy(sizeBytes = plaintext.size.toLong())
+        document.copy(sizeBytes = plaintext.size.toLong())
     }
 
     suspend fun createTemporaryPdf(document: MedicalDocument): File = withContext(Dispatchers.IO) {
@@ -84,7 +84,7 @@ class SecureMedicalDocumentStore(private val context: Context) {
         decryptFile(resolve(document.relativePath)).use { input ->
             FileOutputStream(output).use { input.copyTo(it) }
         }
-        return output
+        output
     }
 
     fun delete(document: MedicalDocument) { resolve(document.relativePath).delete() }

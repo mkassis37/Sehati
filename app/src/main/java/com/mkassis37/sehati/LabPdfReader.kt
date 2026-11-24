@@ -101,6 +101,7 @@ fun LabPdfReader(onExtractedText: (String) -> Unit, onCandidateSelected: (LabRep
                         if (hasTextLayer) {
                             text.append(selectableText)
                         } else {
+                            if (selectableText.isNotBlank()) text.append(selectableText).append("\n\n")
                             val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
                             val tess = runCatching { createArabicTesseract(context) }.getOrNull()
                             try {

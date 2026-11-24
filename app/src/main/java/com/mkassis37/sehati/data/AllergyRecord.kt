@@ -1,11 +1,13 @@
 package com.mkassis37.sehati.data
 
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 
-@Entity(tableName = "allergy_records")
+@Entity(tableName = "allergy_records", indices = [Index(value = ["memberId"])])
 data class AllergyRecord(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val memberId: Long = 1,
     val category: String,
     val substance: String,
     val reaction: String,

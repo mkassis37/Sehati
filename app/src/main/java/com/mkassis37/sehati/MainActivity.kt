@@ -212,7 +212,7 @@ private fun SehatiApp(db: SehatiDatabase) {
             Screen.FORM -> if (editingId == null) Screen.MEMBERS else Screen.DETAILS
             Screen.DETAILS -> Screen.MEMBERS
             Screen.ALLERGIES, Screen.LAB_RESULTS, Screen.MEDICATIONS -> Screen.DETAILS
-            Screen.SETTINGS, Screen.MEDICATIONS, Screen.APPOINTMENTS, Screen.DOCUMENTS,
+            Screen.SETTINGS, Screen.APPOINTMENTS, Screen.DOCUMENTS,
             Screen.REPORTS, Screen.REMINDERS -> Screen.MEMBERS
             Screen.MEMBERS -> Screen.MEMBERS
         }
@@ -482,6 +482,7 @@ private fun SehatiApp(db: SehatiDatabase) {
                 preview.memberNames.forEach { Text("• $it") }
                 Text("عدد سجلات الحساسية: ${preview.allergyCount}")
                 Text("عدد نتائج الفحوصات: ${preview.labResultCount}")
+                Text("عدد الأدوية والعلاجات: ${preview.medicationCount}")
                 Text("عدد التقارير والمرفقات: ${preview.documentCount}")
                 preview.documentNames.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall) }
                 Text("استعادة النسخة ستستبدل البيانات الحالية بالكامل.")

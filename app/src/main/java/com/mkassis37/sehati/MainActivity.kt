@@ -22,6 +22,7 @@ import androidx.activity.compose.setContent
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ProcessLifecycleOwner
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -84,7 +85,7 @@ class MainActivity : FragmentActivity() {
     }
 }
 
-private enum class Screen { MEMBERS, DETAILS, FORM, ALLERGIES, SETTINGS, MEDICATIONS, APPOINTMENTS, DOCUMENTS, REPORTS, REMINDERS }
+private enum class Screen { MEMBERS, DETAILS, FORM, ALLERGIES, LAB_RESULTS, SETTINGS, MEDICATIONS, APPOINTMENTS, DOCUMENTS, REPORTS, REMINDERS }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -160,12 +161,15 @@ private fun SehatiApp(db: SehatiDatabase) {
         selectedId?.let { dao.observeAllergies(it) } ?: flowOf(emptyList())
     }
     val allergies by allergyFlow.collectAsState(initial = emptyList())
+    val labFlow = remember(selectedId) { selectedId?.let { dao.observeLabResults(it) } ?: flowOf(emptyList()) }
+    val labResults by labFlow.collectAsState(initial = emptyList())
 
     val title = when (screen) {
         Screen.MEMBERS -> "أفراد العائلة"
         Screen.DETAILS -> selected?.fullName ?: "الملف الطبي"
         Screen.FORM -> if (editingId == null) "إضافة فرد" else "تعديل البيانات"
         Screen.ALLERGIES -> "سجل الحساسيات"
+        Screen.LAB_RESULTS -> "الفحوصات المخبرية"
         Screen.SETTINGS -> "الإعدادات"
         Screen.MEDICATIONS -> "الأدوية والعلاجات"
         Screen.APPOINTMENTS -> "المواعيد الطبية"
@@ -180,7 +184,7 @@ private fun SehatiApp(db: SehatiDatabase) {
         screen = when (screen) {
             Screen.FORM -> if (editingId == null) Screen.MEMBERS else Screen.DETAILS
             Screen.DETAILS -> Screen.MEMBERS
-            Screen.ALLERGIES -> Screen.DETAILS
+            Screen.ALLERGIES, Screen.LAB_RESULTS -> Screen.DETAILS
             Screen.SETTINGS, Screen.MEDICATIONS, Screen.APPOINTMENTS, Screen.DOCUMENTS,
             Screen.REPORTS, Screen.REMINDERS -> Screen.MEMBERS
             Screen.MEMBERS -> Screen.MEMBERS
@@ -245,7 +249,8 @@ private fun SehatiApp(db: SehatiDatabase) {
 
             Screen.DETAILS -> if (selected != null) {
                 MemberDetailsScreen(selected, { editingId = selected.id; screen = Screen.FORM },
-                    { screen = Screen.ALLERGIES }, allergies.size, Modifier.padding(padding))
+                    { screen = Screen.ALLERGIES }, allergies.size,
+                    { screen = Screen.LAB_RESULTS }, labResults.size, Modifier.padding(padding))
             } else {
                 MembersScreen(members, { editingId = null; screen = Screen.FORM },
                     { selectedId = it; screen = Screen.DETAILS }, Modifier.padding(padding))
@@ -272,6 +277,10 @@ private fun SehatiApp(db: SehatiDatabase) {
                     }, Modifier.padding(padding))
             }
 
+            Screen.LAB_RESULTS -> if (selected != null) {
+                LabResultsScreen(selected, labResults, { dao.addLabResult(it) },
+                    { dao.deleteLabResult(it, selected.id) }, Modifier.padding(padding))
+            }
             Screen.ALLERGIES -> if (selected != null) {
                 AllergyScreen(selected, allergies,
                     addAllergy = { dao.addAllergy(it) },
@@ -463,6 +472,8 @@ private fun MemberDetailsScreen(
     onEdit: () -> Unit,
     onAllergies: () -> Unit,
     allergyCount: Int,
+    onLabResults: () -> Unit,
+    labCount: Int,
     modifier: Modifier = Modifier
 ) {
     Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(18.dp),
@@ -491,9 +502,98 @@ private fun MemberDetailsScreen(
                 Text("$allergyCount")
             }
         }
+        Card(Modifier.fillMaxWidth().clickable(onClick = onLabResults)) {
+            Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("الفحوصات المخبرية", style = MaterialTheme.typography.titleMedium)
+                    Text("إدخال النتائج ومقارنتها عبر السنوات", style = MaterialTheme.typography.bodySmall)
+                }
+                Text(labCount.toString())
+            }
+        }
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun LabResultsScreen(member: FamilyMember, records: List<LabResult>, addResult: suspend (LabResult) -> Long, deleteResult: suspend (Long) -> Unit, modifier: Modifier = Modifier) {
+    val scope = rememberCoroutineScope()
+    var showAdd by rememberSaveable(member.id) { mutableStateOf(false) }
+    var selectedTest by rememberSaveable(member.id) { mutableStateOf("") }
+    var years by rememberSaveable(member.id) { mutableIntStateOf(0) }
+    val tests = records.map { it.testName }.distinct().sorted()
+    val filtered = records.filter { selectedTest.isBlank() || it.testName == selectedTest }.filter { row -> years == 0 || runCatching { LocalDate.parse(row.performedAt).isAfter(LocalDate.now().minusYears(years.toLong()).minusDays(1)) }.getOrDefault(false) }
+    val chronological = filtered.sortedBy { it.performedAt }
+    val latest = chronological.lastOrNull()
+    val previous = chronological.dropLast(1).lastOrNull()
+    Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text("فحوصات " + member.fullName, style = MaterialTheme.typography.titleLarge)
+        Text("تُحفظ كل نتيجة بتاريخها ومجالها المرجعي، وتبقى متاحة للمقارنة لسنوات.", style = MaterialTheme.typography.bodySmall)
+        Button(onClick = { showAdd = true }, modifier = Modifier.fillMaxWidth()) { Text("إضافة نتيجة فحص") }
+        if (tests.isNotEmpty()) {
+            Text("الفحص")
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                FilterChip(selected = selectedTest.isBlank(), onClick = { selectedTest = "" }, label = { Text("الكل") })
+                tests.forEach { name -> FilterChip(selected = selectedTest == name, onClick = { selectedTest = name }, label = { Text(name) }) }
+            }
+            Text("الفترة الزمنية")
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                listOf(0, 1, 3, 5).forEach { count -> FilterChip(selected = years == count, onClick = { years = count }, label = { Text(if (count == 0) "كل السنوات" else count.toString() + " سنوات") }) }
+            }
+        }
+        if (latest != null) {
+            Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                Text("أحدث نتيجة: " + latest.testName, style = MaterialTheme.typography.titleMedium)
+                Text(latest.value.toString() + " " + latest.unit, style = MaterialTheme.typography.headlineSmall)
+                Text("التاريخ: " + latest.performedAt.toDisplayDate())
+                if (previous != null) Text("مقارنة بالسابقة: " + (latest.value - previous.value).toString() + " " + latest.unit + " (" + previous.performedAt.toDisplayDate() + ")") else Text("لا توجد نتيجة أقدم للمقارنة.")
+                val low = latest.referenceLow; val high = latest.referenceHigh
+                if (low != null || high != null) {
+                    val status = when { low != null && latest.value < low -> "أقل من المجال المرجعي المسجل"; high != null && latest.value > high -> "أعلى من المجال المرجعي المسجل"; else -> "ضمن المجال المرجعي المسجل" }
+                    Text(status, color = if (status.startsWith("ضمن")) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
+                    Text("المجال: " + (low?.toString() ?: "—") + " إلى " + (high?.toString() ?: "—") + " " + latest.unit)
+                }
+            } }
+            if (chronological.size >= 2) {
+                Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("التغير عبر الزمن", style = MaterialTheme.typography.titleMedium)
+                    Canvas(Modifier.fillMaxWidth().height(150.dp)) {
+                        val values = chronological.map { it.value }; val min = values.minOrNull() ?: 0.0; val max = values.maxOrNull() ?: 1.0; val range = (max - min).takeIf { it > 0.0 } ?: 1.0
+                        val points = values.mapIndexed { index, value -> androidx.compose.ui.geometry.Offset(if (values.size == 1) size.width / 2 else size.width * index / (values.size - 1), size.height - ((value - min) / range).toFloat() * (size.height - 16.dp.toPx()) - 8.dp.toPx()) }
+                        points.zipWithNext().forEach { pair -> drawLine(MaterialTheme.colorScheme.primary, pair.first, pair.second, strokeWidth = 4f) }
+                        points.forEach { drawCircle(MaterialTheme.colorScheme.tertiary, 5f, it) }
+                    }
+                    Text(chronological.first().performedAt.toDisplayDate() + " ← " + chronological.last().performedAt.toDisplayDate(), style = MaterialTheme.typography.labelSmall)
+                } }
+            }
+        }
+        Text("سجل النتائج (" + filtered.size + ")", style = MaterialTheme.typography.titleMedium)
+        if (filtered.isEmpty()) Text("لا توجد نتائج ضمن الاختيار الحالي. أضف أول فحص للبدء.")
+        filtered.forEach { row -> Card(Modifier.fillMaxWidth()) { Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) { Text(row.testName, style = MaterialTheme.typography.titleSmall); Text(row.value.toString() + " " + row.unit); Text(row.performedAt.toDisplayDate() + " • " + row.laboratory.ifBlank { "المختبر غير محدد" }, style = MaterialTheme.typography.bodySmall); Text("المرجع: " + (row.referenceLow?.toString() ?: "—") + " إلى " + (row.referenceHigh?.toString() ?: "—"), style = MaterialTheme.typography.bodySmall); if (row.notes.isNotBlank()) Text(row.notes, style = MaterialTheme.typography.bodySmall) }
+            TextButton(onClick = { scope.launch { deleteResult(row.id) } }) { Text("حذف") }
+        } } }
+    }
+    if (showAdd) AddLabResultDialog(member.id, { showAdd = false }) { row -> scope.launch { addResult(row) }; showAdd = false }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AddLabResultDialog(memberId: Long, onDismiss: () -> Unit, onSave: (LabResult) -> Unit) {
+    var name by rememberSaveable { mutableStateOf("") }; var result by rememberSaveable { mutableStateOf("") }; var unit by rememberSaveable { mutableStateOf("") }; var low by rememberSaveable { mutableStateOf("") }; var high by rememberSaveable { mutableStateOf("") }; var date by rememberSaveable { mutableStateOf(LocalDate.now().toString()) }; var lab by rememberSaveable { mutableStateOf("") }; var notes by rememberSaveable { mutableStateOf("") }; var error by rememberSaveable { mutableStateOf("") }
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("إضافة نتيجة فحص") }, text = { Column(Modifier.fillMaxWidth().heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedTextField(name, { name = it }, label = { Text("اسم الفحص") }, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(result, { result = it }, label = { Text("النتيجة الرقمية") }, modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
+        OutlinedTextField(unit, { unit = it }, label = { Text("الوحدة") }, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(low, { low = it }, label = { Text("الحد الأدنى المرجعي (اختياري)") }, modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
+        OutlinedTextField(high, { high = it }, label = { Text("الحد الأعلى المرجعي (اختياري)") }, modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
+        DatePickerField("تاريخ الفحص", date, { date = it }, Modifier.fillMaxWidth())
+        OutlinedTextField(lab, { lab = it }, label = { Text("اسم المختبر (اختياري)") }, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(notes, { notes = it }, label = { Text("ملاحظات") }, modifier = Modifier.fillMaxWidth())
+        if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
+    } }, confirmButton = { TextButton(onClick = { val number = result.toDoubleOrNull(); val lower = low.takeIf { it.isNotBlank() }?.toDoubleOrNull(); val upper = high.takeIf { it.isNotBlank() }?.toDoubleOrNull(); if (name.isBlank() || number == null || (low.isNotBlank() && lower == null) || (high.isNotBlank() && upper == null) || (lower != null && upper != null && lower > upper)) error = "تحقق من اسم الفحص والنتيجة والمجال المرجعي." else onSave(LabResult(memberId = memberId, testName = name.trim(), value = number, unit = unit.trim(), referenceLow = lower, referenceHigh = upper, performedAt = date, laboratory = lab.trim(), notes = notes.trim())) }) { Text("حفظ النتيجة") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("إلغاء") } })
+}
 @Composable
 private fun DetailLine(label: String, value: String) {
     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {

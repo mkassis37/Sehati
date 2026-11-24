@@ -46,6 +46,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.awaitPointerEvent
+import androidx.compose.ui.input.pointer.awaitPointerEventScope
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
@@ -69,7 +72,7 @@ class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val db = SehatiDatabase.getInstance(applicationContext)
-        window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
+        window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN or WindowManager.LayoutParams.FLAG_SECURE)
         setContent {
             var showSplash by remember { mutableStateOf(true) }
             SehatiTheme {
@@ -109,6 +112,7 @@ private fun SehatiApp(db: SehatiDatabase) {
     var appInForeground by remember { mutableStateOf(true) }
     var locked by remember { mutableStateOf(lockStore.isEnabled()) }
     var lastBackgroundAt by remember { mutableLongStateOf(0L) }
+    var lastInteractionAt by remember { mutableLongStateOf(System.currentTimeMillis()) }
     var settingsRefresh by remember { mutableIntStateOf(0) }
     var showPinSetup by remember { mutableStateOf(false) }
     var showBackupPassword by remember { mutableStateOf(false) }
@@ -128,6 +132,7 @@ private fun SehatiApp(db: SehatiDatabase) {
             when (event) {
                 Lifecycle.Event.ON_START -> {
                     appInForeground = true
+                    lastInteractionAt = System.currentTimeMillis()
                     if (lockStore.isEnabled() && lastBackgroundAt > 0L &&
                         System.currentTimeMillis() - lastBackgroundAt >= lockStore.timeoutMinutes() * 60_000L) locked = true
                 }
@@ -154,6 +159,18 @@ private fun SehatiApp(db: SehatiDatabase) {
     var screen by rememberSaveable { mutableStateOf(Screen.MEMBERS) }
     var selectedId by rememberSaveable { mutableStateOf<Long?>(null) }
     var editingId by rememberSaveable { mutableStateOf<Long?>(null) }
+    LaunchedEffect(lockStore.isEnabled(), lockStore.timeoutMinutes(), appInForeground, locked) {
+        while (lockStore.isEnabled() && appInForeground && !locked) {
+            delay(1_000)
+            if (System.currentTimeMillis() - lastInteractionAt >= lockStore.timeoutMinutes() * 60_000L) {
+                screen = Screen.MEMBERS
+                selectedId = null
+                editingId = null
+                locked = true
+                break
+            }
+        }
+    }
     LaunchedEffect(appInForeground) {
         if (!appInForeground) {
             // Hide an open medical record when the app leaves the foreground.
@@ -222,7 +239,14 @@ private fun SehatiApp(db: SehatiDatabase) {
         return
     }
 
-    Scaffold(topBar = {
+    Scaffold(modifier = Modifier.pointerInput(Unit) {
+        awaitPointerEventScope {
+            while (true) {
+                awaitPointerEvent()
+                lastInteractionAt = System.currentTimeMillis()
+            }
+        }
+    }, topBar = {
         TopAppBar(
             title = {
                 Column {

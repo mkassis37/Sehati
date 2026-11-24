@@ -68,7 +68,7 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
         val encrypted = cipher.doFinal(payload)
         val envelope = MAGIC + byteArrayOf(1) + salt + cipher.iv + encrypted
         resolver.openOutputStream(uri, "wt")!!.use { it.write(envelope) }
-        payload.fill(0); key.encoded.fill(0)
+        payload.fill(0)
     }
 
     suspend fun preview(resolver: ContentResolver, uri: Uri, password: CharArray): BackupPreview {
@@ -174,7 +174,7 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
         val spec = PBEKeySpec(password, salt, 310_000, 256)
         val bytes = try { SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).encoded }
             finally { spec.clearPassword() }
-        return SecretKeySpec(bytes, "AES")
+        return try { SecretKeySpec(bytes, "AES") } finally { bytes.fill(0) }
     }
 
     data class BackupPreview(val memberNames: List<String>, val allergyCount: Int, internal val payload: JSONObject) {

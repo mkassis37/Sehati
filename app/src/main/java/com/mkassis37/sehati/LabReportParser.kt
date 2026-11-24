@@ -12,10 +12,13 @@ data class LabReportCandidate(
     val referenceLow: Double?,
     val referenceHigh: Double?,
     val flag: String,
+    val performedAt: String?,
     val sourceLine: String
 )
 
 object LabReportParser {
+    private val isoDate = Regex("""\\b(\\d{4}-\\d{2}-\\d{2})\\b""")
+    private val monthDate = Regex("""\\b([A-Za-z]{3,9})\\s+(\\d{1,2}),\\s*(\\d{4})\\b""")
     private val numericResult = Regex("""^([+-]?(?:\d+(?:[.,]\d*)?|[.,]\d+))\s*([LH*])?$""")
     private val numericRange = Regex("""^([+-]?(?:\d+(?:[.,]\d*)?|[.,]\d+))\s*[-–]\s*([+-]?(?:\d+(?:[.,]\d*)?|[.,]\d+))$""")
     private val upperLimit = Regex("""^(?:Ref\s*:\s*)?<=\s*([+-]?(?:\d+(?:[.,]\d*)?|[.,]\d+))$""", RegexOption.IGNORE_CASE)
@@ -28,6 +31,7 @@ object LabReportParser {
         val lines = text.lineSequence().map { it.replace('\u00a0', ' ').trim() }
             .filter { it.isNotBlank() }.toList()
         val found = linkedMapOf<String, LabReportCandidate>()
+        val reportDate = extractReportDate(lines)
 
         fun numeric(value: String): Double? = value.replace(',', '.').toDoubleOrNull()
             ?.takeIf { it.isFinite() }
@@ -54,7 +58,7 @@ object LabReportParser {
             if (name.length !in 2..70 || name.none { it.isLetter() } ||
                 unit.isBlank() || unit.length > 24) return
             val candidate = LabReportCandidate(name, value, unit, ref.first, ref.second,
-                result.groupValues[2], source)
+                result.groupValues[2], reportDate, source)
             found[name.lowercase()] = candidate
         }
 
@@ -88,5 +92,22 @@ object LabReportParser {
             add(name, value + flag, ref, unit, line)
         }
         return found.values.toList()
+    }
+ 
+    private fun extractReportDate(lines: List<String>): String? {
+        val joined = lines.joinToString(" ")
+        isoDate.find(joined)?.groupValues?.get(1)?.let { value ->
+            runCatching { java.time.LocalDate.parse(value) }.getOrNull()?.let { return it.toString() }
+        }
+        monthDate.find(joined)?.let { match ->
+            val value = match.value
+            val parsed = listOf("MMM d, yyyy", "MMMM d, yyyy").firstNotNullOfOrNull { pattern ->
+                runCatching {
+                    java.time.LocalDate.parse(value, java.time.format.DateTimeFormatter.ofPattern(pattern, java.util.Locale.US))
+                }.getOrNull()
+            }
+            if (parsed != null) return parsed.toString()
+        }
+        return null
     }
 }

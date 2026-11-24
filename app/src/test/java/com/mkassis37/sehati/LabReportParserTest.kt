@@ -34,4 +34,10 @@ class LabReportParserTest {
         assertEquals(1, rows.size)
         assertEquals(22.3, rows[0].value, 0.0001)
     }
+
+    @Test
+    fun doesNotTreatMicroscopyRangeAsNumericResult() {
+        val rows = LabReportParser.parse("Pus Cells 2-3")
+        assertTrue(rows.isEmpty())
+    }
 }

@@ -8,7 +8,7 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
 
-@Database(entities = [FamilyMember::class, AllergyRecord::class, LabResult::class], version = 3, exportSchema = true)
+@Database(entities = [FamilyMember::class, AllergyRecord::class, LabResult::class, MedicalDocument::class], version = 4, exportSchema = true)
 abstract class SehatiDatabase : RoomDatabase() {
     abstract fun medicalDao(): MedicalDao
 
@@ -54,6 +54,20 @@ abstract class SehatiDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""CREATE TABLE IF NOT EXISTS medical_documents (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                    memberId INTEGER NOT NULL,
+                    displayName TEXT NOT NULL,
+                    relativePath TEXT NOT NULL,
+                    mimeType TEXT NOT NULL,
+                    sizeBytes INTEGER NOT NULL,
+                    addedAt INTEGER NOT NULL
+                )""")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_medical_documents_memberId_addedAt ON medical_documents(memberId, addedAt)")
+            }
+        }
         fun getInstance(context: Context): SehatiDatabase =
             INSTANCE ?: synchronized(this) {
                 INSTANCE ?: buildDatabase(context.applicationContext).also { INSTANCE = it }
@@ -65,7 +79,7 @@ abstract class SehatiDatabase : RoomDatabase() {
             val factory = SupportOpenHelperFactory(passphrase)
             return Room.databaseBuilder(context, SehatiDatabase::class.java, "sehati.db")
                 .openHelperFactory(factory)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                 .build()
         }
     }

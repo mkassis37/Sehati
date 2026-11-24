@@ -2,6 +2,7 @@ package com.mkassis37.sehati
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -71,6 +72,18 @@ private fun SehatiApp(db: SehatiDatabase) {
         Screen.ALLERGIES -> "سجل الحساسيات"
     }
 
+    // Keep Android system-back inside the app instead of finishing the Activity.
+    // Details returns to the family list so another member can be selected.
+    val navigateBack: () -> Unit = {
+        screen = when (screen) {
+            Screen.FORM -> if (editingId == null) Screen.MEMBERS else Screen.DETAILS
+            Screen.DETAILS -> Screen.MEMBERS
+            Screen.ALLERGIES -> Screen.DETAILS
+            Screen.MEMBERS -> Screen.MEMBERS
+        }
+    }
+    BackHandler(enabled = screen != Screen.MEMBERS) { navigateBack() }
+
     Scaffold(topBar = {
         TopAppBar(
             title = {
@@ -81,13 +94,9 @@ private fun SehatiApp(db: SehatiDatabase) {
             },
             navigationIcon = {
                 if (screen != Screen.MEMBERS) {
-                    IconButton(onClick = {
-                        screen = when (screen) {
-                            Screen.FORM -> if (editingId == null) Screen.MEMBERS else Screen.DETAILS
-                            Screen.DETAILS, Screen.ALLERGIES -> Screen.DETAILS
-                            Screen.MEMBERS -> Screen.MEMBERS
-                        }
-                    }) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "رجوع") }
+                    IconButton(onClick = navigateBack) {
+                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "رجوع")
+                    }
                 }
             }
         )

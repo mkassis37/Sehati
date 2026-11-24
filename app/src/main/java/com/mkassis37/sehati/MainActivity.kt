@@ -74,6 +74,7 @@ private enum class Screen { MEMBERS, DETAILS, FORM, ALLERGIES, SETTINGS, MEDICAT
 @Composable
 private fun SehatiApp(db: SehatiDatabase) {
     val dao = db.medicalDao()
+    val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val activity = context as? FragmentActivity
     val lockStore = remember { AppLockStore(context.applicationContext) }
@@ -600,14 +601,43 @@ private fun String.toDisplayDate(): String {
 
 
 @Composable
-private fun SettingsHub(onMedications: () -> Unit, onAppointments: () -> Unit, onDocuments: () -> Unit, onReports: () -> Unit, onReminders: () -> Unit, modifier: Modifier = Modifier) {
+private fun SettingsHub(
+    lockEnabled: Boolean, biometricEnabled: Boolean, timeoutMinutes: Int,
+    onSetPin: () -> Unit, onLockEnabled: (Boolean) -> Unit, onBiometric: (Boolean) -> Unit,
+    onTimeout: (Int) -> Unit, onExport: () -> Unit, onImport: () -> Unit,
+    onMedications: () -> Unit, onAppointments: () -> Unit, onDocuments: () -> Unit,
+    onReports: () -> Unit, onReminders: () -> Unit, modifier: Modifier = Modifier
+) {
     Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("إعدادات صحتي", style = MaterialTheme.typography.headlineSmall)
         Text("إدارة التطبيق والخدمات الصحية الحالية والمستقبلية.")
         Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("إدارة التطبيق", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
-            Text("الأمان والقفل — سيتم ربط إعدادات PIN والبصمة هنا")
-            Text("النسخ الاحتياطي والاستعادة — النسخ المشفر وحفظه على الجهاز")
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) { Text("قفل التطبيق"); Text("رمز PIN من 6 أرقام", style = MaterialTheme.typography.bodySmall) }
+                Switch(checked = lockEnabled, onCheckedChange = onLockEnabled)
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) { Text("تغيير أو إعداد PIN"); Text("الرمز الاحتياطي لفتح التطبيق", style = MaterialTheme.typography.bodySmall) }
+                TextButton(onClick = onSetPin) { Text("إعداد") }
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) { Text("فتح بالبصمة أو قفل الجهاز"); Text("عند دعم الجهاز", style = MaterialTheme.typography.bodySmall) }
+                Switch(checked = biometricEnabled, onCheckedChange = onBiometric)
+            }
+            Text("القفل بعد مغادرة التطبيق: $timeoutMinutes دقيقة")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(1, 5, 10, 30).forEach { minutes ->
+                    FilterChip(selected = timeoutMinutes == minutes, onClick = { onTimeout(minutes) }, label = { Text("$minutes د") })
+                }
+            }
+            Divider()
+            Text("النسخ الاحتياطي المشفّر", style = MaterialTheme.typography.titleSmall)
+            Text("كلمة مرور مستقلة عن PIN، لا تقل عن 10 أحرف. لا يتم رفع أي بيانات تلقائيًا.", style = MaterialTheme.typography.bodySmall)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = onExport) { Text("إنشاء نسخة") }
+                OutlinedButton(onClick = onImport) { Text("استعادة نسخة") }
+            }
             Text("المظهر واللغة — تخصيص الواجهة والخطوط")
         } }
         Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -643,4 +673,59 @@ private fun FutureScreen(title: String, description: String, modifier: Modifier 
             Text("سيتم تفعيل وظائفه وربطه بملفات أفراد العائلة في مرحلة التطوير الخاصة به.", style = MaterialTheme.typography.bodySmall)
         } }
     }
+}
+
+
+@Composable
+private fun LockScreen(store: AppLockStore, onUnlocked: () -> Unit, onBiometric: () -> Unit) {
+    var pin by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf("") }
+    Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
+        Text("صحتي", style = MaterialTheme.typography.headlineLarge)
+        Text("التطبيق مقفل لحماية الملفات الطبية", style = MaterialTheme.typography.bodyMedium)
+        Spacer(Modifier.height(20.dp))
+        OutlinedTextField(value = pin, onValueChange = { if (it.length <= 6 && it.all(Char::isDigit)) pin = it; error = "" },
+            label = { Text("رمز PIN من 6 أرقام") }, singleLine = true, visualTransformation = PasswordVisualTransformation(),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+        if (store.isTemporarilyLocked()) Text("محاولات كثيرة. حاول بعد " + (store.remainingLockMillis()/1000) + " ثانية.", color = MaterialTheme.colorScheme.error)
+        if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
+        Button(enabled = pin.length == 6 && !store.isTemporarilyLocked(), onClick = {
+            if (store.verifyPin(pin.toCharArray())) { pin = ""; onUnlocked() }
+            else { pin = ""; error = "الرمز غير صحيح." }
+        }, modifier = Modifier.fillMaxWidth()) { Text("فتح التطبيق") }
+        TextButton(onClick = onBiometric) { Text("استخدام البصمة / قفل الجهاز") }
+    }
+}
+
+@Composable
+private fun PinSetupDialog(onDismiss: () -> Unit, onSave: (String) -> Unit) {
+    var first by remember { mutableStateOf("") }
+    var second by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf("") }
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("إعداد رمز PIN") }, text = {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("اختر رمزًا من 6 أرقام وكرره للتأكيد.")
+            OutlinedTextField(first, { if (it.length <= 6 && it.all(Char::isDigit)) first = it }, label = { Text("PIN الجديد") }, visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+            OutlinedTextField(second, { if (it.length <= 6 && it.all(Char::isDigit)) second = it }, label = { Text("تأكيد PIN") }, visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+            if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
+        }
+    }, confirmButton = { TextButton(onClick = {
+        if (first.length != 6 || first != second) error = "تأكد من إدخال الرمز نفسه مرتين."
+        else onSave(first)
+    }) { Text("حفظ") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("إلغاء") } })
+}
+
+@Composable
+private fun BackupPasswordDialog(
+    mode: String, value: String, onValue: (String) -> Unit, message: String,
+    onDismiss: () -> Unit, onSubmit: () -> Unit
+) {
+    AlertDialog(onDismissRequest = onDismiss, title = { Text(if (mode == "export") "تشفير النسخة الاحتياطية" else "فتح النسخة الاحتياطية") },
+        text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(if (mode == "export") "أدخل كلمة مرور مستقلة لا تقل عن 10 أحرف. احتفظ بها؛ لا يمكن استعادة النسخة بدونها." else "أدخل كلمة المرور التي استُخدمت عند إنشاء النسخة.")
+            OutlinedTextField(value, onValue, label = { Text("كلمة مرور النسخة") }, visualTransformation = PasswordVisualTransformation(), singleLine = true)
+            if (message.isNotBlank()) Text(message, color = MaterialTheme.colorScheme.error)
+        } },
+        confirmButton = { TextButton(enabled = value.length >= (if (mode == "export") 10 else 1), onClick = onSubmit) { Text("متابعة") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("إلغاء") } })
 }

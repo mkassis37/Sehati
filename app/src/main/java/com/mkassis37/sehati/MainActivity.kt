@@ -296,6 +296,7 @@ private fun SehatiApp(db: SehatiDatabase) {
                             ?: "تقرير طبي.pdf"
                         val saved = documentStore.save(uri, selected.id, name)
                         dao.addDocument(saved)
+                        Unit
                     },
                     openDocument = { document ->
                         val file = documentStore.createTemporaryPdf(document)
@@ -308,6 +309,7 @@ private fun SehatiApp(db: SehatiDatabase) {
                             dao.deleteDocument(document.id, selected.id)
                             documentStore.delete(document)
                         }
+                        Unit
                     },
                     modifier = Modifier.padding(padding)
                 )

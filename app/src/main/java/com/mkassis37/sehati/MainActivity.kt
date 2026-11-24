@@ -547,7 +547,7 @@ private fun MemberDetailsScreen(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun LabResultsScreen(member: FamilyMember, records: List<LabResult>, addResult: suspend (LabResult) -> Long, deleteResult: suspend (Long) -> Unit, modifier: Modifier = Modifier) {
+private fun LabResultsScreen(member: FamilyMember, records: List<LabResult>, documents: List<MedicalDocument>, addResult: suspend (LabResult) -> Long, deleteResult: suspend (Long) -> Unit, saveDocument: suspend (Uri) -> Unit, openDocument: (MedicalDocument) -> Unit, deleteDocument: (MedicalDocument) -> Unit, modifier: Modifier = Modifier) {
     val scope = rememberCoroutineScope()
     var showAdd by rememberSaveable(member.id) { mutableStateOf(false) }
     var reviewCandidate by remember(member.id) { mutableStateOf<LabReportCandidate?>(null) }
@@ -564,8 +564,27 @@ private fun LabResultsScreen(member: FamilyMember, records: List<LabResult>, add
         Button(onClick = { showAdd = true }, modifier = Modifier.fillMaxWidth()) { Text("إضافة نتيجة فحص") }
         LabPdfReader(
             onExtractedText = { /* تتم المعاينة محليًا فقط؛ لا يُحفظ النص الخام */ },
-            onCandidateSelected = { candidate -> reviewCandidate = candidate; showAdd = true }
+            onCandidateSelected = { candidate -> reviewCandidate = candidate; showAdd = true },
+            onSavePdf = saveDocument
         )
+        Text("التقارير المحفوظة في ملف " + member.fullName, style = MaterialTheme.typography.titleMedium)
+        if (documents.isEmpty()) {
+            Text("لم يتم حفظ تقارير PDF لهذا الفرد بعد.", style = MaterialTheme.typography.bodySmall)
+        } else {
+            documents.forEach { document ->
+                Card(Modifier.fillMaxWidth()) {
+                    Row(Modifier.fillMaxWidth().padding(10.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                            Text(document.displayName, style = MaterialTheme.typography.titleSmall)
+                            Text(String.format("%.1f KB", document.sizeBytes / 1024.0), style = MaterialTheme.typography.bodySmall)
+                            Text(document.addedAt.toString(), style = MaterialTheme.typography.labelSmall)
+                        }
+                        TextButton(onClick = { openDocument(document) }) { Text("فتح") }
+                        TextButton(onClick = { deleteDocument(document) }) { Text("حذف") }
+                    }
+                }
+            }
+        }
         Text("أو أدخل النتيجة يدويًا", style = MaterialTheme.typography.titleSmall)
         if (tests.isNotEmpty()) {
             Text("الفحص")

@@ -34,13 +34,12 @@ class SecureMedicalDocumentStore(private val context: Context) {
                     file.write(MAGIC)
                     file.write(cipher.iv)
                     CipherOutputStream(file, cipher).use { encrypted ->
-                        val header = ByteArray(5)
-                        val headerCount = source.read(header)
-                        require(headerCount == 5 && String(header, Charsets.US_ASCII) == "%PDF-") {
+                        val header = readExactly(source, 5)
+                        require(String(header, Charsets.US_ASCII) == "%PDF-") {
                             "الملف المحدد ليس PDF صالحًا."
                         }
-                        plainSize += headerCount
-                        encrypted.write(header, 0, headerCount)
+                        plainSize += header.size
+                        encrypted.write(header)
                         val buffer = ByteArray(16 * 1024)
                         while (true) {
                             val count = source.read(buffer)
@@ -91,10 +90,9 @@ class SecureMedicalDocumentStore(private val context: Context) {
     private fun decryptFile(file: File): CipherInputStream {
         val input = FileInputStream(file)
         try {
-            val magic = ByteArray(4)
-            require(input.read(magic) == 4 && magic.contentEquals(MAGIC)) { "ملف طبي مشفر غير صالح." }
-            val iv = ByteArray(12)
-            require(input.read(iv) == 12) { "ملف طبي غير مكتمل." }
+            val magic = readExactly(input, 4)
+            require(magic.contentEquals(MAGIC)) { "ملف طبي مشفر غير صالح." }
+            val iv = readExactly(input, 12)
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
             cipher.init(Cipher.DECRYPT_MODE, getKey(), GCMParameterSpec(128, iv))
             return CipherInputStream(input, cipher)
@@ -102,6 +100,17 @@ class SecureMedicalDocumentStore(private val context: Context) {
             input.close()
             throw error
         }
+    }
+
+    private fun readExactly(input: java.io.InputStream, size: Int): ByteArray {
+        val bytes = ByteArray(size)
+        var offset = 0
+        while (offset < size) {
+            val count = input.read(bytes, offset, size - offset)
+            if (count < 0) throw IllegalArgumentException("ملف طبي غير مكتمل.")
+            offset += count
+        }
+        return bytes
     }
 
     private fun resolve(relativePath: String): File {

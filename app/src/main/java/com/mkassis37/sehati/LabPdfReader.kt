@@ -229,7 +229,7 @@ private fun createArabicTesseract(context: android.content.Context): TessBaseAPI
             api.recycle()
             throw IllegalStateException("تعذر تهيئة نموذج اللغة العربية")
         }
-        api.setPageSegMode(TessBaseAPI.PageSegMode.PSM_AUTO)
+        api.setPageSegMode(3)
     }
 }
 

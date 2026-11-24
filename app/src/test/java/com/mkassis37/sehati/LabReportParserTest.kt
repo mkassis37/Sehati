@@ -8,7 +8,7 @@ class LabReportParserTest {
     @Test
     fun parsesVerticalPdfTableWithFlagAndReferenceRange() {
         val rows = LabReportParser.parse(
-            "Test Name\nResult\nRef. Range\nUnit\n" +
+            "Specimen Date : Oct 20, 2026@12:24:13\nTest Name\nResult\nRef. Range\nUnit\n" +
             "Hemoglobin\n11.5 L\n13.2 - 16.6\ng/dL\n"
         )
         assertEquals(1, rows.size)
@@ -18,6 +18,7 @@ class LabReportParserTest {
         assertEquals(13.2, rows[0].referenceLow!!, 0.0001)
         assertEquals(16.6, rows[0].referenceHigh!!, 0.0001)
         assertEquals("L", rows[0].flag)
+        assertEquals("2026-10-20", rows[0].performedAt)
     }
 
     @Test

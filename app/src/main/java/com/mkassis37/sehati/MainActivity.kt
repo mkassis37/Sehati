@@ -304,8 +304,10 @@ private fun SehatiApp(db: SehatiDatabase) {
                             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
                     },
                     deleteDocument = { document ->
-                        dao.deleteDocument(document.id, selected.id)
-                        documentStore.delete(document)
+                        scope.launch {
+                            dao.deleteDocument(document.id, selected.id)
+                            documentStore.delete(document)
+                        }
                     },
                     modifier = Modifier.padding(padding)
                 )
@@ -430,6 +432,7 @@ private fun SehatiApp(db: SehatiDatabase) {
                 preview.memberNames.forEach { Text("• $it") }
                 Text("عدد سجلات الحساسية: ${preview.allergyCount}")
                 Text("عدد نتائج الفحوصات: ${preview.labResultCount}")
+                Text("عدد التقارير والمرفقات: ${preview.documentCount}")
                 Text("استعادة النسخة ستستبدل البيانات الحالية بالكامل.")
             } },
             confirmButton = { TextButton(onClick = {

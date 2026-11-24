@@ -459,6 +459,7 @@ private fun SehatiApp(db: SehatiDatabase) {
                 Text("عدد سجلات الحساسية: ${preview.allergyCount}")
                 Text("عدد نتائج الفحوصات: ${preview.labResultCount}")
                 Text("عدد التقارير والمرفقات: ${preview.documentCount}")
+                preview.documentNames.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall) }
                 Text("استعادة النسخة ستستبدل البيانات الحالية بالكامل.")
             } },
             confirmButton = { TextButton(onClick = {

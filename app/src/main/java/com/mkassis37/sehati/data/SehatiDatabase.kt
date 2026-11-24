@@ -8,7 +8,7 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
 
-@Database(entities = [FamilyMember::class, AllergyRecord::class], version = 2, exportSchema = true)
+@Database(entities = [FamilyMember::class, AllergyRecord::class, LabResult::class], version = 3, exportSchema = true)
 abstract class SehatiDatabase : RoomDatabase() {
     abstract fun medicalDao(): MedicalDao
 
@@ -34,6 +34,26 @@ abstract class SehatiDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""CREATE TABLE IF NOT EXISTS lab_results (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                    memberId INTEGER NOT NULL,
+                    testName TEXT NOT NULL,
+                    value REAL NOT NULL,
+                    unit TEXT NOT NULL,
+                    referenceLow REAL,
+                    referenceHigh REAL,
+                    performedAt TEXT NOT NULL,
+                    laboratory TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    notes TEXT NOT NULL,
+                    createdAt INTEGER NOT NULL
+                )""")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_lab_results_memberId_testName_performedAt ON lab_results(memberId, testName, performedAt)")
+            }
+        }
+
         fun getInstance(context: Context): SehatiDatabase =
             INSTANCE ?: synchronized(this) {
                 INSTANCE ?: buildDatabase(context.applicationContext).also { INSTANCE = it }
@@ -45,7 +65,7 @@ abstract class SehatiDatabase : RoomDatabase() {
             val factory = SupportOpenHelperFactory(passphrase)
             return Room.databaseBuilder(context, SehatiDatabase::class.java, "sehati.db")
                 .openHelperFactory(factory)
-                .addMigrations(MIGRATION_1_2)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                 .build()
         }
     }

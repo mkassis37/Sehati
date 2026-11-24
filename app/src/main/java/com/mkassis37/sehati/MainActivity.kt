@@ -899,7 +899,7 @@ private fun SettingsHub(
             Text(updateStatus, style = MaterialTheme.typography.bodySmall)
             OutlinedButton(enabled = !updateBusy, onClick = onCheckUpdates) { Text("فحص التحديثات الآن") }
             Text("يتم التحقق من بصمة SHA-256 قبل فتح مثبت أندرويد.", style = MaterialTheme.typography.bodySmall)
-            Text("المظهر واللغة — تخصيص الواجهة والخطوط")
+            Text("المظهر واللغة — قيد التطوير")
         } }
         Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text("الخدمات الصحية", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
@@ -911,7 +911,8 @@ private fun SettingsHub(
         } }
         Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp)) {
             Text("حول التطبيق", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
-            Text("معلومات صحتي والإصدار وحقوق الإعداد — سيتم استكمالها لاحقًا")
+            Text("صحتي - الإصدار ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
+            Text("فكرة وإعداد ميناس، بمساعدة ChatGPT", style = MaterialTheme.typography.bodySmall)
         } }
     }
 }

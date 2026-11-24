@@ -71,6 +71,7 @@ fun LabPdfReader(onExtractedText: (String) -> Unit, onCandidateSelected: (LabRep
             selectedUri = uri
             pageIndex = 0
             pageCount = 0
+            pageBitmap?.recycle()
             pageBitmap = null
             extractedText = ""
             candidates = emptyList()

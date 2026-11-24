@@ -2,6 +2,19 @@ package com.mkassis37.sehati
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.biometric.BiometricManager
+import androidx.biometric.BiometricPrompt
+import androidx.core.content.ContextCompat
+import androidx.fragment.app.FragmentActivity
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.foundation.text.KeyboardOptions
+import android.net.Uri
+import com.mkassis37.sehati.security.AppLockStore
+import com.mkassis37.sehati.data.EncryptedBackup
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.lifecycle.Lifecycle
@@ -41,7 +54,7 @@ import java.time.ZoneOffset
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val db = SehatiDatabase.getInstance(applicationContext)
@@ -61,12 +74,40 @@ private enum class Screen { MEMBERS, DETAILS, FORM, ALLERGIES, SETTINGS, MEDICAT
 @Composable
 private fun SehatiApp(db: SehatiDatabase) {
     val dao = db.medicalDao()
+    val context = LocalContext.current
+    val activity = context as? FragmentActivity
+    val lockStore = remember { AppLockStore(context.applicationContext) }
+    val backup = remember { EncryptedBackup(db) }
     var appInForeground by remember { mutableStateOf(true) }
+    var locked by remember { mutableStateOf(lockStore.isEnabled()) }
+    var lastBackgroundAt by remember { mutableLongStateOf(0L) }
+    var settingsRefresh by remember { mutableIntStateOf(0) }
+    var showPinSetup by remember { mutableStateOf(false) }
+    var showBackupPassword by remember { mutableStateOf(false) }
+    var backupMode by remember { mutableStateOf("export") }
+    var backupPassword by remember { mutableStateOf("") }
+    var backupUri by remember { mutableStateOf<Uri?>(null) }
+    var backupPreview by remember { mutableStateOf<EncryptedBackup.BackupPreview?>(null) }
+    var backupMessage by remember { mutableStateOf("") }
+    val createBackup = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
+        if (uri != null) { backupUri = uri; backupMode = "export"; showBackupPassword = true }
+    }
+    val openBackup = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) { backupUri = uri; backupMode = "preview"; showBackupPassword = true }
+    }
     DisposableEffect(Unit) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
-                Lifecycle.Event.ON_START -> appInForeground = true
-                Lifecycle.Event.ON_STOP -> appInForeground = false
+                Lifecycle.Event.ON_START -> {
+                    appInForeground = true
+                    if (lockStore.isEnabled() && lastBackgroundAt > 0L &&
+                        System.currentTimeMillis() - lastBackgroundAt >= lockStore.timeoutMinutes() * 60_000L) locked = true
+                }
+                Lifecycle.Event.ON_STOP -> {
+                    appInForeground = false
+                    lastBackgroundAt = System.currentTimeMillis()
+                    if (lockStore.isEnabled()) locked = true
+                }
                 else -> Unit
             }
         }
@@ -117,6 +158,28 @@ private fun SehatiApp(db: SehatiDatabase) {
         }
     }
     BackHandler(enabled = screen != Screen.MEMBERS) { navigateBack() }
+
+    if (locked && lockStore.isEnabled()) {
+        LockScreen(
+            store = lockStore,
+            onUnlocked = { locked = false },
+            onBiometric = {
+                val host = activity
+                if (host != null && lockStore.isBiometricEnabled() &&
+                    BiometricManager.from(host).canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL) == BiometricManager.BIOMETRIC_SUCCESS) {
+                    val prompt = BiometricPrompt(host, ContextCompat.getMainExecutor(host),
+                        object : BiometricPrompt.AuthenticationCallback() {
+                            override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) { locked = false }
+                        })
+                    prompt.authenticate(BiometricPrompt.PromptInfo.Builder()
+                        .setTitle("فتح صحتي").setSubtitle("تحقق من هويتك للمتابعة")
+                        .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL)
+                        .build())
+                }
+            }
+        )
+        return
+    }
 
     Scaffold(topBar = {
         TopAppBar(
@@ -187,6 +250,18 @@ private fun SehatiApp(db: SehatiDatabase) {
                     modifier = Modifier.padding(padding))
             }
             Screen.SETTINGS -> SettingsHub(
+                lockEnabled = lockStore.isEnabled(),
+                biometricEnabled = lockStore.isBiometricEnabled(),
+                timeoutMinutes = lockStore.timeoutMinutes(),
+                onSetPin = { showPinSetup = true },
+                onLockEnabled = { enabled ->
+                    if (enabled && !lockStore.hasPin()) showPinSetup = true
+                    else { lockStore.setEnabled(enabled); locked = false; settingsRefresh++ }
+                },
+                onBiometric = { enabled -> lockStore.setBiometricEnabled(enabled); settingsRefresh++ },
+                onTimeout = { lockStore.setTimeoutMinutes(it); settingsRefresh++ },
+                onExport = { createBackup.launch("sehati-backup.shtb") },
+                onImport = { openBackup.launch(arrayOf("*/*")) },
                 onMedications = { screen = Screen.MEDICATIONS },
                 onAppointments = { screen = Screen.APPOINTMENTS },
                 onDocuments = { screen = Screen.DOCUMENTS },
@@ -200,6 +275,72 @@ private fun SehatiApp(db: SehatiDatabase) {
             Screen.REMINDERS -> FutureScreen("التنبيهات والتذكيرات", "سيُضاف هنا تذكير المواعيد والمتابعات.", Modifier.padding(padding))
         }
     }
+
+    if (showPinSetup) PinSetupDialog(
+        onDismiss = { showPinSetup = false },
+        onSave = { pin ->
+            lockStore.setPin(pin.toCharArray())
+            lockStore.setEnabled(true)
+            locked = false
+            showPinSetup = false
+            settingsRefresh++
+        }
+    )
+
+    if (showBackupPassword) BackupPasswordDialog(
+        mode = backupMode,
+        value = backupPassword,
+        onValue = { backupPassword = it },
+        message = backupMessage,
+        onDismiss = { showBackupPassword = false; backupPassword = "" },
+        onSubmit = {
+            val uri = backupUri
+            val pass = backupPassword.toCharArray()
+            showBackupPassword = false
+            backupPassword = ""
+            if (uri != null) {
+                scope.launch {
+                    try {
+                        if (backupMode == "export") {
+                            backup.write(context.contentResolver, uri, pass)
+                            backupMessage = "تم إنشاء النسخة الاحتياطية المشفّرة."
+                        } else {
+                            backupPreview = backup.preview(context.contentResolver, uri, pass)
+                            backupMessage = ""
+                        }
+                    } catch (e: Exception) {
+                        backupMessage = "تعذّرت العملية. تأكد من كلمة المرور وسلامة الملف."
+                    }
+                }
+            }
+        }
+    )
+
+    backupPreview?.let { preview ->
+        AlertDialog(
+            onDismissRequest = { backupPreview = null },
+            title = { Text("معاينة النسخة الاحتياطية") },
+            text = { Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("عدد الأفراد: ${preview.memberNames.size}")
+                preview.memberNames.forEach { Text("• $it") }
+                Text("عدد سجلات الحساسية: ${preview.allergyCount}")
+                Text("استعادة النسخة ستستبدل البيانات الحالية بالكامل.")
+            } },
+            confirmButton = { TextButton(onClick = {
+                scope.launch {
+                    try { backup.restore(preview); backupMessage = "تمت استعادة النسخة الاحتياطية." }
+                    catch (_: Exception) { backupMessage = "فشلت الاستعادة ولم تكتمل." }
+                    finally { backupPreview = null }
+                }
+            }) { Text("استعادة واستبدال البيانات") } },
+            dismissButton = { TextButton(onClick = { backupPreview = null }) { Text("إلغاء") } }
+        )
+    }
+
+    if (backupMessage.isNotBlank()) AlertDialog(
+        onDismissRequest = { backupMessage = "" }, title = { Text("النسخ الاحتياطي") },
+        text = { Text(backupMessage) }, confirmButton = { TextButton(onClick = { backupMessage = "" }) { Text("حسنًا") } }
+    )
 }
 
 @Composable

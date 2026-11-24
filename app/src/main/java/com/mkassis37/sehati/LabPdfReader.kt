@@ -31,6 +31,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
@@ -39,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import com.google.android.gms.tasks.Task
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -51,8 +53,9 @@ import kotlinx.coroutines.withContext
  * OCR text is presented for human verification and is never written to the medical record automatically.
  */
 @Composable
-fun LabPdfReader(onExtractedText: (String) -> Unit, onCandidateSelected: (LabReportCandidate) -> Unit) {
+fun LabPdfReader(onExtractedText: (String) -> Unit, onCandidateSelected: (LabReportCandidate) -> Unit, onSavePdf: suspend (Uri) -> Unit) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var selectedUri by remember { mutableStateOf<Uri?>(null) }
     var pageBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var pageCount by remember { mutableIntStateOf(0) }
@@ -61,6 +64,8 @@ fun LabPdfReader(onExtractedText: (String) -> Unit, onCandidateSelected: (LabRep
     var candidates by remember { mutableStateOf<List<LabReportCandidate>>(emptyList()) }
     var status by remember { mutableStateOf("اختاري تقرير PDF من الهاتف.") }
     var busy by remember { mutableStateOf(false) }
+    var savingPdf by remember { mutableStateOf(false) }
+    var pdfSaved by remember { mutableStateOf(false) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             selectedUri = uri
@@ -69,6 +74,7 @@ fun LabPdfReader(onExtractedText: (String) -> Unit, onCandidateSelected: (LabRep
             pageBitmap = null
             extractedText = ""
             candidates = emptyList()
+            pdfSaved = false
             status = "تم اختيار التقرير. جارٍ فحص صفحاته..."
         }
     }
@@ -175,6 +181,17 @@ fun LabPdfReader(onExtractedText: (String) -> Unit, onCandidateSelected: (LabRep
                 style = MaterialTheme.typography.bodySmall
             )
             Button(onClick = { picker.launch(arrayOf("application/pdf")) }) { Text("اختيار تقرير PDF") }
+            if (selectedUri != null) {
+                Button(enabled = !busy && !savingPdf && !pdfSaved, onClick = {
+                    val uri = selectedUri ?: return@Button
+                    scope.launch {
+                        savingPdf = true
+                        try { onSavePdf(uri); pdfSaved = true; status = "تم حفظ نسخة مشفرة من التقرير ضمن الملف الطبي." }
+                        catch (error: Exception) { status = "تعذر حفظ التقرير: ${error.message ?: "خطأ غير معروف"}" }
+                        finally { savingPdf = false }
+                    }
+                }) { Text(if (pdfSaved) "تم حفظ التقرير" else if (savingPdf) "جارٍ حفظ التقرير..." else "حفظ PDF الأصلي في الملف") }
+            }
             Text(status, style = MaterialTheme.typography.bodySmall)
             if (busy) CircularProgressIndicator()
             pageBitmap?.let { bitmap ->

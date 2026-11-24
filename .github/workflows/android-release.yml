@@ -75,6 +75,12 @@ jobs:
           cp app/build/outputs/apk/release/app-release.apk release-assets/Sehati-${GITHUB_REF_NAME}.apk
           cp app/build/outputs/bundle/release/app-release.aab release-assets/Sehati-${GITHUB_REF_NAME}.aab
           sha256sum release-assets/* > release-assets/SHA256SUMS.txt
+          VERSION_CODE=$(grep -E 'versionCode[[:space:]]*=' app/build.gradle.kts | head -1 | sed -E 's/.*=[[:space:]]*([0-9]+).*/\1/')
+          VERSION_NAME=$(grep -E 'versionName[[:space:]]*=' app/build.gradle.kts | head -1 | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/')
+          APK_NAME="Sehati-${GITHUB_REF_NAME}.apk"
+          APK_SHA256=$(sha256sum "release-assets/$APK_NAME" | awk '{print $1}')
+          APK_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/$APK_NAME"
+          printf '{\n  "versionCode": %s,\n  "versionName": "%s",\n  "apkUrl": "%s",\n  "sha256": "%s"\n}\n' "$VERSION_CODE" "$VERSION_NAME" "$APK_URL" "$APK_SHA256" > release-assets/update.json
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
@@ -85,3 +91,4 @@ jobs:
             release-assets/Sehati-${{ github.ref_name }}.apk
             release-assets/Sehati-${{ github.ref_name }}.aab
             release-assets/SHA256SUMS.txt
+            release-assets/update.json

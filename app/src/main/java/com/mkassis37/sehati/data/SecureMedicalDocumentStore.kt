@@ -69,14 +69,19 @@ class SecureMedicalDocumentStore(private val context: Context) {
         require(plaintext.size <= MAX_DOCUMENT_BYTES && plaintext.size >= 5 && String(plaintext.copyOfRange(0, 5), Charsets.US_ASCII) == "%PDF-")
         val target = resolve(document.relativePath)
         target.parentFile?.mkdirs()
-        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-        cipher.init(Cipher.ENCRYPT_MODE, getKey())
-        FileOutputStream(target).use { file ->
-            file.write(MAGIC)
-            file.write(cipher.iv)
-            CipherOutputStream(file, cipher).use { it.write(plaintext) }
+        try {
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+            cipher.init(Cipher.ENCRYPT_MODE, getKey())
+            FileOutputStream(target).use { file ->
+                file.write(MAGIC)
+                file.write(cipher.iv)
+                CipherOutputStream(file, cipher).use { it.write(plaintext) }
+            }
+            document.copy(sizeBytes = plaintext.size.toLong())
+        } catch (error: Exception) {
+            target.delete()
+            throw error
         }
-        document.copy(sizeBytes = plaintext.size.toLong())
     }
 
     suspend fun createTemporaryPdf(document: MedicalDocument): File = withContext(Dispatchers.IO) {
@@ -89,6 +94,12 @@ class SecureMedicalDocumentStore(private val context: Context) {
 
     fun delete(document: MedicalDocument) { resolve(document.relativePath).delete() }
     fun deleteAll() { directory.deleteRecursively() }
+
+    fun clearTemporaryPdfs() {
+        context.cacheDir.listFiles()?.filter {
+            it.isFile && it.name.startsWith("sehati-") && it.name.endsWith(".pdf")
+        }?.forEach { it.delete() }
+    }
 
     private fun decryptFile(file: File): CipherInputStream {
         val input = FileInputStream(file)

@@ -54,6 +54,8 @@ import java.time.LocalDate
 import java.time.ZoneOffset
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
+import com.mkassis37.sehati.update.ReleaseUpdater
+import com.mkassis37.sehati.update.SehatiRelease
 
 class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -80,6 +82,10 @@ private fun SehatiApp(db: SehatiDatabase) {
     val activity = context as? FragmentActivity
     val lockStore = remember { AppLockStore(context.applicationContext) }
     val backup = remember { EncryptedBackup(db) }
+    val releaseUpdater = remember { ReleaseUpdater(context.applicationContext) }
+    var availableRelease by remember { mutableStateOf<SehatiRelease?>(null) }
+    var updateStatus by remember { mutableStateOf("لم يتم فحص التحديثات بعد.") }
+    var updateBusy by remember { mutableStateOf(false) }
     var appInForeground by remember { mutableStateOf(true) }
     var locked by remember { mutableStateOf(lockStore.isEnabled()) }
     var lastBackgroundAt by remember { mutableLongStateOf(0L) }
@@ -114,6 +120,15 @@ private fun SehatiApp(db: SehatiDatabase) {
         }
         ProcessLifecycleOwner.get().lifecycle.addObserver(observer)
         onDispose { ProcessLifecycleOwner.get().lifecycle.removeObserver(observer) }
+    }
+    LaunchedEffect(Unit) {
+        if (!BuildConfig.DEBUG) {
+            updateStatus = "جارٍ فحص الإصدارات..."
+            try {
+                availableRelease = releaseUpdater.checkForUpdate(BuildConfig.VERSION_CODE)
+                updateStatus = if (availableRelease == null) "أنت تستخدم أحدث إصدار." else "يتوفر تحديث ${availableRelease?.versionName}."
+            } catch (_: Exception) { updateStatus = "تعذر فحص التحديثات. تحقق من الإنترنت وحاول مجددًا." }
+        }
     }
     val members by dao.observeMembers().collectAsState(initial = emptyList())
     var screen by rememberSaveable { mutableStateOf(Screen.MEMBERS) }
@@ -269,6 +284,18 @@ private fun SehatiApp(db: SehatiDatabase) {
                 onDocuments = { screen = Screen.DOCUMENTS },
                 onReports = { screen = Screen.REPORTS },
                 onReminders = { screen = Screen.REMINDERS },
+                updateStatus = updateStatus,
+                onCheckUpdates = {
+                    scope.launch {
+                        updateBusy = true
+                        updateStatus = "جارٍ فحص الإصدارات..."
+                        try {
+                            availableRelease = releaseUpdater.checkForUpdate(BuildConfig.VERSION_CODE)
+                            updateStatus = if (availableRelease == null) "أنت تستخدم أحدث إصدار." else "يتوفر تحديث ${availableRelease?.versionName}."
+                        } catch (_: Exception) { updateStatus = "تعذر فحص التحديثات. حاول مجددًا." }
+                        finally { updateBusy = false }
+                    }
+                },
                 modifier = Modifier.padding(padding))
             Screen.MEDICATIONS -> FutureScreen("الأدوية والعلاجات", "سيُضاف هنا سجل الأدوية والجرعات لكل فرد.", Modifier.padding(padding))
             Screen.APPOINTMENTS -> FutureScreen("المواعيد الطبية", "سيُضاف هنا سجل المواعيد والزيارات الطبية.", Modifier.padding(padding))
@@ -276,6 +303,30 @@ private fun SehatiApp(db: SehatiDatabase) {
             Screen.REPORTS -> FutureScreen("التقارير الصحية", "سيُضاف هنا إنشاء ملخصات وتقارير صحية.", Modifier.padding(padding))
             Screen.REMINDERS -> FutureScreen("التنبيهات والتذكيرات", "سيُضاف هنا تذكير المواعيد والمتابعات.", Modifier.padding(padding))
         }
+    }
+
+    availableRelease?.let { release ->
+        AlertDialog(
+            onDismissRequest = { availableRelease = null },
+            title = { Text("يتوفر تحديث جديد لصحتي") },
+            text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(release.title, style = MaterialTheme.typography.titleMedium)
+                Text("الإصدار ${release.versionName} (رقم البناء ${release.versionCode})")
+                Text(release.notes.take(2500))
+                Text("سيتم التحقق من سلامة الملف قبل فتح مثبت أندرويد. لا تحذف التطبيق أثناء التحديث.", style = MaterialTheme.typography.bodySmall)
+                Text(updateStatus, style = MaterialTheme.typography.bodySmall)
+            } },
+            confirmButton = { TextButton(enabled = !updateBusy, onClick = {
+                scope.launch {
+                    updateBusy = true
+                    updateStatus = "جارٍ تنزيل التحديث والتحقق منه..."
+                    try { updateStatus = releaseUpdater.downloadVerifyAndInstall(release) }
+                    catch (_: Exception) { updateStatus = "تعذر تنزيل التحديث أو التحقق منه. لم يتم تشغيل المثبت." }
+                    finally { updateBusy = false }
+                }
+            }) { Text(if (updateBusy) "جارٍ العمل..." else "تنزيل وتثبيت") } },
+            dismissButton = { TextButton(onClick = { availableRelease = null }) { Text("لاحقًا") } }
+        )
     }
 
     if (showPinSetup) PinSetupDialog(
@@ -608,7 +659,8 @@ private fun SettingsHub(
     onSetPin: () -> Unit, onLockEnabled: (Boolean) -> Unit, onBiometric: (Boolean) -> Unit,
     onTimeout: (Int) -> Unit, onExport: () -> Unit, onImport: () -> Unit,
     onMedications: () -> Unit, onAppointments: () -> Unit, onDocuments: () -> Unit,
-    onReports: () -> Unit, onReminders: () -> Unit, modifier: Modifier = Modifier
+    onReports: () -> Unit, onReminders: () -> Unit,
+    updateStatus: String, onCheckUpdates: () -> Unit, modifier: Modifier = Modifier
 ) {
     val refresh = refreshToken
     Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -641,6 +693,11 @@ private fun SettingsHub(
                 Button(onClick = onExport) { Text("إنشاء نسخة") }
                 OutlinedButton(onClick = onImport) { Text("استعادة نسخة") }
             }
+            Divider()
+            Text("تحديث التطبيق", style = MaterialTheme.typography.titleSmall)
+            Text(updateStatus, style = MaterialTheme.typography.bodySmall)
+            OutlinedButton(enabled = !updateBusy, onClick = onCheckUpdates) { Text("فحص التحديثات الآن") }
+            Text("يتم التحقق من بصمة SHA-256 قبل فتح مثبت أندرويد.", style = MaterialTheme.typography.bodySmall)
             Text("المظهر واللغة — تخصيص الواجهة والخطوط")
         } }
         Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {

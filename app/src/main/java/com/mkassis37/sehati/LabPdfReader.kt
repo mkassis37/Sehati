@@ -45,13 +45,14 @@ import kotlinx.coroutines.withContext
  * OCR text is presented for human verification and is never written to the medical record automatically.
  */
 @Composable
-fun LabPdfReader(onExtractedText: (String) -> Unit) {
+fun LabPdfReader(onExtractedText: (String) -> Unit, onCandidateSelected: (LabReportCandidate) -> Unit) {
     val context = LocalContext.current
     var selectedUri by remember { mutableStateOf<Uri?>(null) }
     var pageBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var pageCount by remember { mutableIntStateOf(0) }
     var pageIndex by remember { mutableIntStateOf(0) }
     var extractedText by remember { mutableStateOf("") }
+    var candidates by remember { mutableStateOf<List<LabReportCandidate>>(emptyList()) }
     var status by remember { mutableStateOf("اختاري تقرير PDF من الهاتف.") }
     var busy by remember { mutableStateOf(false) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -61,6 +62,7 @@ fun LabPdfReader(onExtractedText: (String) -> Unit) {
             pageCount = 0
             pageBitmap = null
             extractedText = ""
+            candidates = emptyList()
             status = "تم اختيار التقرير. جارٍ فحص صفحاته..."
         }
     }
@@ -103,6 +105,7 @@ fun LabPdfReader(onExtractedText: (String) -> Unit) {
             pageBitmap = result.first
             pageCount = result.second
             extractedText = result.third
+            candidates = LabReportParser.parse(result.third)
             onExtractedText(result.third)
             status = if (result.third.isBlank())
                 "تم فتح PDF، لكن لم يظهر نص قابل للقراءة. تحققي من وضوح الصفحات أو أدخلي النتائج يدويًا."
@@ -154,6 +157,22 @@ fun LabPdfReader(onExtractedText: (String) -> Unit) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(enabled = pageIndex > 0, onClick = { pageIndex-- }) { Text("الصفحة السابقة") }
                     Button(enabled = pageIndex < pageCount - 1, onClick = { pageIndex++ }) { Text("الصفحة التالية") }
+                }
+            }
+            if (candidates.isNotEmpty()) {
+                Text("نتائج مرشحة للمراجعة (${candidates.size})", style = MaterialTheme.typography.titleSmall)
+                Text("هذه اقتراحات آلية أولية وليست نتائج معتمدة. افتحي كل نتيجة وراجعيها مع التقرير قبل الحفظ.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                candidates.forEach { candidate ->
+                    Card(Modifier.fillMaxWidth()) {
+                        Column(Modifier.fillMaxWidth().padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(candidate.testName, style = MaterialTheme.typography.titleSmall)
+                            Text(candidate.value.toString() + " " + candidate.unit)
+                            Text("المرجع المقروء: " + (candidate.referenceLow?.toString() ?: "—") + " إلى " + (candidate.referenceHigh?.toString() ?: "—"), style = MaterialTheme.typography.bodySmall)
+                            Text("النص الأصلي: " + candidate.sourceLine, style = MaterialTheme.typography.bodySmall)
+                            Button(onClick = { onCandidateSelected(candidate) }) { Text("مراجعة وإدخال هذه النتيجة") }
+                        }
+                    }
                 }
             }
             if (extractedText.isNotBlank()) {

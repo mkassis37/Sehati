@@ -16,6 +16,7 @@ import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.WarningAmber
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -49,7 +50,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private enum class Screen { MEMBERS, DETAILS, FORM, ALLERGIES }
+private enum class Screen { MEMBERS, DETAILS, FORM, ALLERGIES, SETTINGS, MEDICATIONS, APPOINTMENTS, DOCUMENTS, REPORTS, REMINDERS }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -70,6 +71,12 @@ private fun SehatiApp(db: SehatiDatabase) {
         Screen.DETAILS -> selected?.fullName ?: "الملف الطبي"
         Screen.FORM -> if (editingId == null) "إضافة فرد" else "تعديل البيانات"
         Screen.ALLERGIES -> "سجل الحساسيات"
+        Screen.SETTINGS -> "الإعدادات"
+        Screen.MEDICATIONS -> "الأدوية والعلاجات"
+        Screen.APPOINTMENTS -> "المواعيد الطبية"
+        Screen.DOCUMENTS -> "الملفات الطبية"
+        Screen.REPORTS -> "التقارير الصحية"
+        Screen.REMINDERS -> "التنبيهات والتذكيرات"
     }
 
     // Keep Android system-back inside the app instead of finishing the Activity.
@@ -79,6 +86,8 @@ private fun SehatiApp(db: SehatiDatabase) {
             Screen.FORM -> if (editingId == null) Screen.MEMBERS else Screen.DETAILS
             Screen.DETAILS -> Screen.MEMBERS
             Screen.ALLERGIES -> Screen.DETAILS
+            Screen.SETTINGS, Screen.MEDICATIONS, Screen.APPOINTMENTS, Screen.DOCUMENTS,
+            Screen.REPORTS, Screen.REMINDERS -> Screen.MEMBERS
             Screen.MEMBERS -> Screen.MEMBERS
         }
     }
@@ -90,6 +99,13 @@ private fun SehatiApp(db: SehatiDatabase) {
                 Column {
                     Text(title)
                     if (screen == Screen.MEMBERS) Text("ملف صحي مستقل لكل فرد", style = MaterialTheme.typography.labelSmall)
+                }
+            },
+            actions = {
+                if (screen == Screen.MEMBERS) {
+                    IconButton(onClick = { screen = Screen.SETTINGS }) {
+                        Icon(Icons.Outlined.Settings, contentDescription = "الإعدادات")
+                    }
                 }
             },
             navigationIcon = {
@@ -145,6 +161,18 @@ private fun SehatiApp(db: SehatiDatabase) {
                     deleteAllergy = { dao.deleteAllergy(it, selected.id) },
                     modifier = Modifier.padding(padding))
             }
+            Screen.SETTINGS -> SettingsHub(
+                onMedications = { screen = Screen.MEDICATIONS },
+                onAppointments = { screen = Screen.APPOINTMENTS },
+                onDocuments = { screen = Screen.DOCUMENTS },
+                onReports = { screen = Screen.REPORTS },
+                onReminders = { screen = Screen.REMINDERS },
+                modifier = Modifier.padding(padding))
+            Screen.MEDICATIONS -> FutureScreen("الأدوية والعلاجات", "سيُضاف هنا سجل الأدوية والجرعات لكل فرد.", Modifier.padding(padding))
+            Screen.APPOINTMENTS -> FutureScreen("المواعيد الطبية", "سيُضاف هنا سجل المواعيد والزيارات الطبية.", Modifier.padding(padding))
+            Screen.DOCUMENTS -> FutureScreen("الملفات الطبية", "سيُضاف هنا تنظيم الوثائق والصور الطبية.", Modifier.padding(padding))
+            Screen.REPORTS -> FutureScreen("التقارير الصحية", "سيُضاف هنا إنشاء ملخصات وتقارير صحية.", Modifier.padding(padding))
+            Screen.REMINDERS -> FutureScreen("التنبيهات والتذكيرات", "سيُضاف هنا تذكير المواعيد والمتابعات.", Modifier.padding(padding))
         }
     }
 }
@@ -402,4 +430,51 @@ private fun String.toDisplayDate(): String {
         val d = LocalDate.parse(this)
         "%02d/%02d/%04d".format(d.dayOfMonth, d.monthValue, d.year)
     }.getOrDefault(this)
+}
+
+
+@Composable
+private fun SettingsHub(onMedications: () -> Unit, onAppointments: () -> Unit, onDocuments: () -> Unit, onReports: () -> Unit, onReminders: () -> Unit, modifier: Modifier = Modifier) {
+    Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text("إعدادات صحتي", style = MaterialTheme.typography.headlineSmall)
+        Text("إدارة التطبيق والخدمات الصحية الحالية والمستقبلية.")
+        Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("إدارة التطبيق", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+            Text("الأمان والقفل — سيتم ربط إعدادات PIN والبصمة هنا")
+            Text("النسخ الاحتياطي والاستعادة — النسخ المشفر وحفظه على الجهاز")
+            Text("المظهر واللغة — تخصيص الواجهة والخطوط")
+        } }
+        Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("الخدمات الصحية", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+            FutureEntry("الأدوية والعلاجات", "سجل الأدوية والجرعات", onMedications)
+            FutureEntry("المواعيد الطبية", "المراجعات والفحوصات", onAppointments)
+            FutureEntry("الملفات الطبية", "الوثائق والصور الطبية", onDocuments)
+            FutureEntry("التقارير الصحية", "ملخصات وتقارير لكل فرد", onReports)
+            FutureEntry("التنبيهات والتذكيرات", "المواعيد والمتابعات القادمة", onReminders)
+        } }
+        Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp)) {
+            Text("حول التطبيق", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+            Text("معلومات صحتي والإصدار وحقوق الإعداد — سيتم استكمالها لاحقًا")
+        } }
+    }
+}
+
+@Composable
+private fun FutureEntry(title: String, subtitle: String, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 10.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) { Text(title); Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        Text("فتح", color = MaterialTheme.colorScheme.primary)
+    }
+}
+
+@Composable
+private fun FutureScreen(title: String, description: String, modifier: Modifier = Modifier) {
+    Column(modifier.fillMaxSize().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text(title, style = MaterialTheme.typography.headlineSmall)
+        Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("القسم ضمن مسارات التطبيق", style = MaterialTheme.typography.titleMedium)
+            Text(description)
+            Text("سيتم تفعيل وظائفه وربطه بملفات أفراد العائلة في مرحلة التطوير الخاصة به.", style = MaterialTheme.typography.bodySmall)
+        } }
+    }
 }

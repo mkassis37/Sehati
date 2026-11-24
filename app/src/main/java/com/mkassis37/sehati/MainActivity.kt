@@ -1,6 +1,7 @@
 package com.mkassis37.sehati
 
 import android.os.Bundle
+import android.os.Build
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -107,7 +108,6 @@ private fun SehatiApp(db: SehatiDatabase) {
                 Lifecycle.Event.ON_STOP -> {
                     appInForeground = false
                     lastBackgroundAt = System.currentTimeMillis()
-                    if (lockStore.isEnabled()) locked = true
                 }
                 else -> Unit
             }
@@ -167,14 +167,14 @@ private fun SehatiApp(db: SehatiDatabase) {
             onBiometric = {
                 val host = activity
                 if (host != null && lockStore.isBiometricEnabled() &&
-                    BiometricManager.from(host).canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL) == BiometricManager.BIOMETRIC_SUCCESS) {
+                    BiometricManager.from(host).canAuthenticate((if (Build.VERSION.SDK_INT >= 30) BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL else BiometricManager.Authenticators.BIOMETRIC_STRONG)) == BiometricManager.BIOMETRIC_SUCCESS) {
                     val prompt = BiometricPrompt(host, ContextCompat.getMainExecutor(host),
                         object : BiometricPrompt.AuthenticationCallback() {
                             override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) { locked = false }
                         })
                     prompt.authenticate(BiometricPrompt.PromptInfo.Builder()
                         .setTitle("فتح صحتي").setSubtitle("تحقق من هويتك للمتابعة")
-                        .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL)
+                        .setAllowedAuthenticators(if (Build.VERSION.SDK_INT >= 30) BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL else BiometricManager.Authenticators.BIOMETRIC_STRONG)
                         .build())
                 }
             }
@@ -251,6 +251,7 @@ private fun SehatiApp(db: SehatiDatabase) {
                     modifier = Modifier.padding(padding))
             }
             Screen.SETTINGS -> SettingsHub(
+                refreshToken = settingsRefresh,
                 lockEnabled = lockStore.isEnabled(),
                 biometricEnabled = lockStore.isBiometricEnabled(),
                 timeoutMinutes = lockStore.timeoutMinutes(),
@@ -602,12 +603,14 @@ private fun String.toDisplayDate(): String {
 
 @Composable
 private fun SettingsHub(
+    refreshToken: Int,
     lockEnabled: Boolean, biometricEnabled: Boolean, timeoutMinutes: Int,
     onSetPin: () -> Unit, onLockEnabled: (Boolean) -> Unit, onBiometric: (Boolean) -> Unit,
     onTimeout: (Int) -> Unit, onExport: () -> Unit, onImport: () -> Unit,
     onMedications: () -> Unit, onAppointments: () -> Unit, onDocuments: () -> Unit,
     onReports: () -> Unit, onReminders: () -> Unit, modifier: Modifier = Modifier
 ) {
+    val refresh = refreshToken
     Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("إعدادات صحتي", style = MaterialTheme.typography.headlineSmall)
         Text("إدارة التطبيق والخدمات الصحية الحالية والمستقبلية.")

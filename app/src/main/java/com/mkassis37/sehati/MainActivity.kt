@@ -323,10 +323,16 @@ private fun SehatiApp(db: SehatiDatabase) {
                         Unit
                     },
                     openDocument = { document ->
-                        val file = documentStore.createTemporaryPdf(document)
-                        val contentUri = FileProvider.getUriForFile(context, "com.mkassis37.sehati.fileprovider", file)
-                        context.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(contentUri, "application/pdf")
-                            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
+                        scope.launch {
+                            try {
+                                val file = documentStore.createTemporaryPdf(document)
+                                val contentUri = FileProvider.getUriForFile(context, context.packageName + ".fileprovider", file)
+                                context.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(contentUri, "application/pdf")
+                                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
+                            } catch (_: Exception) {
+                                android.widget.Toast.makeText(context, "تعذر فتح التقرير. تأكد من وجود تطبيق لعرض PDF.", android.widget.Toast.LENGTH_LONG).show()
+                            }
+                        }
                     },
                     deleteDocument = { document ->
                         scope.launch {

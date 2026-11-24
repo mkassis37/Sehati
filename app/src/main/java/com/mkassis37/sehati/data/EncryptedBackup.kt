@@ -112,18 +112,46 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
                 source = o.optString("source", "manual"), notes = o.optString("notes"),
                 createdAt = o.optLong("createdAt"))
         }
-        require(allergyRows.all { row -> memberRows.any { it.id == row.memberId } } &&
-            labRows.all { row -> memberRows.any { it.id == row.memberId } }) {
-            "Backup contains allergy records without a matching family member."
+        val documentArray = root.optJSONArray("documents") ?: JSONArray()
+        val documentRows = (0 until documentArray.length()).map { i ->
+            val o = documentArray.getJSONObject(i)
+            val memberId = o.getLong("memberId")
+            val id = o.optLong("id")
+            val relativePath = "$memberId/restore-$id-${System.nanoTime()}.shtd"
+            MedicalDocument(id = id, memberId = memberId,
+                displayName = o.getString("displayName"), relativePath = relativePath,
+                mimeType = o.optString("mimeType", "application/pdf"),
+                sizeBytes = o.optLong("sizeBytes"), addedAt = o.optLong("addedAt"))
         }
-        database.withTransaction {
+        require(allergyRows.all { row -> memberRows.any { it.id == row.memberId } } &&
+            labRows.all { row -> memberRows.any { it.id == row.memberId } } &&
+            documentRows.all { row -> memberRows.any { it.id == row.memberId } }) {
+            "Backup contains records without a matching family member."
+        }
+        val createdFiles = mutableListOf<MedicalDocument>()
+        try {
+            documentRows.forEachIndexed { index, row ->
+                val encoded = documentArray.getJSONObject(index).getString("content")
+                val plain = Base64.decode(encoded, Base64.DEFAULT)
+                try { createdFiles += documentStore.restore(row, plain) }
+                finally { plain.fill(0) }
+            }
             val dao = database.medicalDao()
-            dao.clearAllergies()
-            dao.clearLabResults()
-            dao.clearMembers()
-            dao.insertMembers(memberRows)
-            dao.insertAllergies(allergyRows)
-            dao.insertLabResults(labRows)
+            val oldDocuments = dao.getAllDocuments()
+            database.withTransaction {
+                dao.clearAllergies()
+                dao.clearLabResults()
+                dao.clearDocuments()
+                dao.clearMembers()
+                dao.insertMembers(memberRows)
+                dao.insertAllergies(allergyRows)
+                dao.insertLabResults(labRows)
+                dao.insertDocuments(createdFiles)
+            }
+            oldDocuments.forEach(documentStore::delete)
+        } catch (error: Exception) {
+            createdFiles.forEach(documentStore::delete)
+            throw error
         }
     }
 
@@ -151,6 +179,7 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
 
     data class BackupPreview(val memberNames: List<String>, val allergyCount: Int, internal val payload: JSONObject) {
         val labResultCount: Int get() = payload.optJSONArray("labResults")?.length() ?: 0
+        val documentCount: Int get() = payload.optJSONArray("documents")?.length() ?: 0
     }
     companion object { private val MAGIC = byteArrayOf(0x53, 0x48, 0x54, 0x42) }
 }

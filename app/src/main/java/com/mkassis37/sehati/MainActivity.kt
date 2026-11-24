@@ -44,10 +44,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
-import androidx.room.RoomDatabase
 import com.mkassis37.sehati.data.AllergyRecord
 import com.mkassis37.sehati.data.MedicalProfile
 import com.mkassis37.sehati.data.SehatiDatabase
+import com.mkassis37.sehati.ui.theme.SehatiTheme
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -55,7 +55,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val database = SehatiDatabase.getInstance(applicationContext)
         setContent {
-            MaterialTheme {
+            SehatiTheme {
                 androidx.compose.runtime.CompositionLocalProvider(
                     LocalLayoutDirection provides LayoutDirection.Rtl
                 ) {
@@ -107,17 +107,13 @@ private fun SehatiApp(database: SehatiDatabase) {
         when (section) {
             AppSection.PROFILE -> ProfileScreen(
                 profile = profile,
-                onSave = { updated -> 
-                    // Database writes are dispatched from the screen's coroutine scope.
-                },
-                dao = dao,
+                saveProfile = { dao.saveProfile(it) },
                 modifier = Modifier.padding(padding)
             )
             AppSection.ALLERGIES -> AllergyScreen(
                 records = allergies,
-                onAdd = { record -> },
-                onDelete = { id -> },
-                dao = dao,
+                addAllergy = { dao.addAllergy(it) },
+                deleteAllergy = { dao.deleteAllergy(it) },
                 modifier = Modifier.padding(padding)
             )
         }
@@ -127,8 +123,7 @@ private fun SehatiApp(database: SehatiDatabase) {
 @Composable
 private fun ProfileScreen(
     profile: MedicalProfile?,
-    onSave: (MedicalProfile) -> Unit,
-    dao: com.mkassis37.sehati.data.MedicalDao,
+    saveProfile: suspend (MedicalProfile) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val scope = rememberCoroutineScope()
@@ -150,7 +145,7 @@ private fun ProfileScreen(
         Button(
             onClick = {
                 scope.launch {
-                    dao.saveProfile(
+                    saveProfile(
                         MedicalProfile(
                             fullName = name.trim(),
                             dateOfBirth = dob.trim(),
@@ -170,9 +165,8 @@ private fun ProfileScreen(
 @Composable
 private fun AllergyScreen(
     records: List<AllergyRecord>,
-    onAdd: (AllergyRecord) -> Unit,
-    onDelete: (Long) -> Unit,
-    dao: com.mkassis37.sehati.data.MedicalDao,
+    addAllergy: suspend (AllergyRecord) -> Unit,
+    deleteAllergy: suspend (Long) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val scope = rememberCoroutineScope()
@@ -204,7 +198,7 @@ private fun AllergyScreen(
                             Text("الأعراض: ${record.reaction}")
                             Text("الشدة: ${record.severity}")
                             if (record.notes.isNotBlank()) Text(record.notes)
-                            TextButton(onClick = { scope.launch { dao.deleteAllergy(record.id) } }) {
+                            TextButton(onClick = { scope.launch { deleteAllergy(record.id) } }) {
                                 Text("حذف السجل")
                             }
                         }
@@ -218,7 +212,7 @@ private fun AllergyScreen(
         AllergyDialog(
             onDismiss = { showDialog = false },
             onSave = { record ->
-                scope.launch { dao.addAllergy(record) }
+                scope.launch { addAllergy(record) }
                 showDialog = false
             }
         )

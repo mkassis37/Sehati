@@ -4,7 +4,6 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
-import net.zetetic.database.sqlcipher.SQLiteDatabase
 import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
 
 @Database(
@@ -24,7 +23,7 @@ abstract class SehatiDatabase : RoomDatabase() {
             }
 
         private fun buildDatabase(context: Context): SehatiDatabase {
-            SQLiteDatabase.loadLibs(context)
+            System.loadLibrary("sqlcipher")
             val passphrase = SecurePassphraseStore(context).getOrCreate()
             val factory = SupportOpenHelperFactory(passphrase)
             return Room.databaseBuilder(

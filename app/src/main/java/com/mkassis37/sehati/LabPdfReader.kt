@@ -96,7 +96,7 @@ fun LabPdfReader(onExtractedText: (String) -> Unit, onCandidateSelected: (LabRep
                         val pages = renderer.pageCount
                         var firstBitmap: Bitmap? = null
                         val text = StringBuilder()
-                        val hasTextLayer = selectableText.trim().length > 40
+                        val hasTextLayer = selectableText.trim().length > 40 && LabReportParser.parse(selectableText).isNotEmpty()
                         if (hasTextLayer) {
                             text.append(selectableText)
                         } else {

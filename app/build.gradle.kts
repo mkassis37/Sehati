@@ -77,7 +77,7 @@ dependencies {
     ksp("androidx.room:room-compiler:2.6.1")
 
     implementation("net.zetetic:sqlcipher-android:4.9.0")
-    implementation("androidx.sqlite:sqlite-ktx:2.4.0")
+    implementation("androidx.sqlite:sqlite:2.4.0")
 
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")

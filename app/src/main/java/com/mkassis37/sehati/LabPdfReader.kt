@@ -22,6 +22,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -33,27 +34,31 @@ import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 
 /**
- * Selects a laboratory PDF, renders its first page for visual verification,
- * and performs on-device OCR. OCR output is only a review aid; it is never saved automatically.
+ * Local PDF viewer and OCR reader. Every page is rendered and processed on-device.
+ * OCR text is presented for human verification and is never written to the medical record automatically.
  */
 @Composable
 fun LabPdfReader(onExtractedText: (String) -> Unit) {
     val context = LocalContext.current
     var selectedUri by remember { mutableStateOf<Uri?>(null) }
     var pageBitmap by remember { mutableStateOf<Bitmap?>(null) }
-    var pageCount by remember { mutableStateOf(0) }
+    var pageCount by remember { mutableIntStateOf(0) }
+    var pageIndex by remember { mutableIntStateOf(0) }
     var extractedText by remember { mutableStateOf("") }
-    var status by remember { mutableStateOf("لم يتم اختيار تقرير PDF بعد.") }
+    var status by remember { mutableStateOf("اختاري تقرير PDF من الهاتف.") }
     var busy by remember { mutableStateOf(false) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             selectedUri = uri
-            extractedText = ""
+            pageIndex = 0
+            pageCount = 0
             pageBitmap = null
-            status = "جارٍ فتح التقرير..."
+            extractedText = ""
+            status = "تم اختيار التقرير. جارٍ فحص صفحاته..."
         }
     }
 
@@ -61,64 +66,88 @@ fun LabPdfReader(onExtractedText: (String) -> Unit) {
         val uri = selectedUri ?: return@LaunchedEffect
         busy = true
         try {
-            val bitmapAndCount = withContext(Dispatchers.IO) {
-                val descriptor: ParcelFileDescriptor = context.contentResolver.openFileDescriptor(uri, "r")
-                    ?: error("تعذر فتح ملف PDF")
+            val result = withContext(Dispatchers.IO) {
+                val descriptor = context.contentResolver.openFileDescriptor(uri, "r")
+                    ?: error("لم يتمكن أندرويد من فتح الملف. جرّبي حفظ PDF على الجهاز أولًا.")
                 descriptor.use { parcel ->
                     PdfRenderer(parcel).use { renderer ->
                         require(renderer.pageCount > 0) { "ملف PDF لا يحتوي صفحات." }
-                        val page = renderer.openPage(0)
-                        try {
-                            val width = (page.width * 2).coerceAtMost(1800)
-                            val height = (page.height * 2).coerceAtMost(2400)
-                            val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-                            page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                            bitmap to renderer.pageCount
-                        } finally { page.close() }
+                        val pages = renderer.pageCount
+                        val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+                        val text = StringBuilder()
+                        var firstBitmap: Bitmap? = null
+                        for (index in 0 until pages) {
+                            renderer.openPage(index).use { page ->
+                                val scale = minOf(2.0, 1800.0 / page.width, 2400.0 / page.height)
+                                val bitmap = Bitmap.createBitmap(
+                                    (page.width * scale).toInt().coerceAtLeast(1),
+                                    (page.height * scale).toInt().coerceAtLeast(1),
+                                    Bitmap.Config.ARGB_8888
+                                )
+                                page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                                if (index == 0) firstBitmap = bitmap
+                                val recognized = recognizer.process(InputImage.fromBitmap(bitmap, 0)).await()
+                                text.append("\n\n--- الصفحة ${index + 1} ---\n")
+                                    .append(recognized.text)
+                                if (index != 0) bitmap.recycle()
+                            }
+                        }
+                        recognizer.close()
+                        Triple(firstBitmap, pages, text.toString().trim())
                     }
                 }
             }
-            pageBitmap = bitmapAndCount.first
-            pageCount = bitmapAndCount.second
-            val image = InputImage.fromBitmap(bitmapAndCount.first, 0)
-            TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
-                .process(image)
-                .addOnSuccessListener { result ->
-                    extractedText = result.text
-                    status = if (result.text.isBlank())
-                        "تم عرض الصفحة، لكن لم يُستخرج نص واضح. راجع التقرير بصريًا وأدخل القيم يدويًا."
-                    else "تم استخراج نص من الصفحة الأولى. راجعه مقابل صورة التقرير."
-                    onExtractedText(result.text)
-                    busy = false
-                }
-                .addOnFailureListener {
-                    status = "تعذّر استخراج النص آليًا. يمكنك معاينة PDF وإدخال النتائج يدويًا."
-                    busy = false
-                }
+            pageBitmap = result.first
+            pageCount = result.second
+            extractedText = result.third
+            onExtractedText(result.third)
+            status = if (result.third.isBlank())
+                "تم فتح PDF، لكن لم يظهر نص قابل للقراءة. تحققي من وضوح الصفحات أو أدخلي النتائج يدويًا."
+            else "تمت معاينة الصفحة الأولى وقراءة النص من $pageCount صفحة."
         } catch (error: Exception) {
-            status = "تعذّر فتح PDF: ${error.message ?: "ملف غير صالح"}"
+            status = "تعذرت قراءة هذا الملف: ${error.message ?: "صيغة غير مدعومة"}. جرّبي تنزيله إلى الهاتف ثم اختياره مجددًا."
+        } finally {
             busy = false
         }
     }
 
     Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.fillMaxWidth().heightIn(max = 680.dp).verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("إضافة تقرير مختبر PDF", style = MaterialTheme.typography.titleMedium)
-            Text("اختر التقرير الأصلي لمعاينة الصفحة الأولى واستخراج النص محليًا على الجهاز. لا تُحفظ أي نتيجة تلقائيًا.",
-                style = MaterialTheme.typography.bodySmall)
-            Button(onClick = { picker.launch(arrayOf("application/pdf")) }) { Text("اختيار ملف PDF") }
+        Column(
+            Modifier.fillMaxWidth().heightIn(max = 720.dp).verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text("قراءة تقرير المختبر PDF", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "تتم المعالجة على الجهاز دون إرسال التقرير إلى خادم خارجي. تتم قراءة كل الصفحات، وتبقى النتائج بحاجة إلى مراجعتك قبل إضافتها للملف الطبي.",
+                style = MaterialTheme.typography.bodySmall
+            )
+            Button(onClick = { picker.launch(arrayOf("application/pdf")) }) { Text("اختيار تقرير PDF") }
             Text(status, style = MaterialTheme.typography.bodySmall)
             if (busy) CircularProgressIndicator()
             pageBitmap?.let { bitmap ->
-                Text("معاينة التقرير — الصفحة 1 من $pageCount", style = MaterialTheme.typography.titleSmall)
-                Image(bitmap.asImageBitmap(), contentDescription = "معاينة الصفحة الأولى من تقرير المختبر PDF", modifier = Modifier.fillMaxWidth())
+                Text("معاينة الصفحة 1 من $pageCount", style = MaterialTheme.typography.titleSmall)
+                Image(
+                    bitmap.asImageBitmap(),
+                    contentDescription = "صورة الصفحة الأولى من تقرير المختبر",
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(enabled = pageIndex > 0, onClick = { pageIndex-- }) { Text("الصفحة السابقة") }
+                    Button(enabled = pageIndex < pageCount - 1, onClick = { pageIndex++ }) { Text("الصفحة التالية") }
+                }
+                if (pageIndex > 0) {
+                    Text("معاينة جميع الصفحات ستُستكمل في عارض الصفحات؛ النص المستخرج أعلاه يشمل الصفحات كاملة.",
+                        style = MaterialTheme.typography.bodySmall)
+                }
             }
             if (extractedText.isNotBlank()) {
-                Text("النص المستخرج للمراجعة", style = MaterialTheme.typography.titleSmall)
+                Text("النص المستخرج من جميع الصفحات", style = MaterialTheme.typography.titleSmall)
                 Text(extractedText, style = MaterialTheme.typography.bodyMedium)
-                Text("تنبيه: قد يخطئ OCR في قراءة الأرقام أو الوحدات. اعتمد القيم بعد مطابقتها بصريًا مع التقرير.",
-                    color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                Text(
+                    "تنبيه: قد يخطئ OCR في قراءة الأرقام والفواصل والوحدات، كما أن محرك القراءة الحالي يتعرف أساسًا على النص اللاتيني. طابقي كل قيمة مع صورة التقرير قبل حفظها.",
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall
+                )
             }
         }
     }

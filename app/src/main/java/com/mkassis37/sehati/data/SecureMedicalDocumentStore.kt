@@ -26,23 +26,35 @@ class SecureMedicalDocumentStore(private val context: Context) {
         val target = File(directory, "$memberId/$id.shtd")
         target.parentFile?.mkdirs()
         var plainSize = 0L
-        input.use { source ->
-            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-            cipher.init(Cipher.ENCRYPT_MODE, getKey())
-            FileOutputStream(target).use { file ->
-                file.write(MAGIC)
-                file.write(cipher.iv)
-                CipherOutputStream(file, cipher).use { encrypted ->
-                    val buffer = ByteArray(16 * 1024)
-                    while (true) {
-                        val count = source.read(buffer)
-                        if (count < 0) break
-                        plainSize += count
-                        require(plainSize <= MAX_DOCUMENT_BYTES) { "حجم PDF أكبر من الحد المسموح (25 MB)." }
-                        encrypted.write(buffer, 0, count)
+        try {
+            input.use { source ->
+                val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+                cipher.init(Cipher.ENCRYPT_MODE, getKey())
+                FileOutputStream(target).use { file ->
+                    file.write(MAGIC)
+                    file.write(cipher.iv)
+                    CipherOutputStream(file, cipher).use { encrypted ->
+                        val header = ByteArray(5)
+                        val headerCount = source.read(header)
+                        require(headerCount == 5 && String(header, Charsets.US_ASCII) == "%PDF-") {
+                            "الملف المحدد ليس PDF صالحًا."
+                        }
+                        plainSize += headerCount
+                        encrypted.write(header, 0, headerCount)
+                        val buffer = ByteArray(16 * 1024)
+                        while (true) {
+                            val count = source.read(buffer)
+                            if (count < 0) break
+                            plainSize += count
+                            require(plainSize <= MAX_DOCUMENT_BYTES) { "حجم PDF أكبر من الحد المسموح (25 MB)." }
+                            encrypted.write(buffer, 0, count)
+                        }
                     }
                 }
             }
+        } catch (error: Exception) {
+            target.delete()
+            throw error
         }
         return MedicalDocument(memberId = memberId, displayName = displayName.take(180),
             relativePath = target.relativeTo(directory).path, sizeBytes = plainSize)
@@ -52,7 +64,7 @@ class SecureMedicalDocumentStore(private val context: Context) {
         decryptFile(resolve(document.relativePath)).use { it.readBytes() }
 
     fun restore(document: MedicalDocument, plaintext: ByteArray): MedicalDocument {
-        require(plaintext.size <= MAX_DOCUMENT_BYTES)
+        require(plaintext.size <= MAX_DOCUMENT_BYTES && plaintext.size >= 5 && String(plaintext.copyOfRange(0, 5), Charsets.US_ASCII) == "%PDF-")
         val target = resolve(document.relativePath)
         target.parentFile?.mkdirs()
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")

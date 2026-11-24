@@ -586,9 +586,14 @@ private fun LabResultsScreen(member: FamilyMember, records: List<LabResult>, doc
     var showAdd by rememberSaveable(member.id) { mutableStateOf(false) }
     var reviewCandidate by remember(member.id) { mutableStateOf<LabReportCandidate?>(null) }
     var selectedTest by rememberSaveable(member.id) { mutableStateOf("") }
+    var selectedUnit by rememberSaveable(member.id) { mutableStateOf("") }
     var years by rememberSaveable(member.id) { mutableIntStateOf(0) }
     val tests = records.map { it.testName }.distinct().sorted()
-    val filtered = records.filter { selectedTest.isBlank() || it.testName == selectedTest }.filter { row -> years == 0 || runCatching { LocalDate.parse(row.performedAt).isAfter(LocalDate.now().minusYears(years.toLong()).minusDays(1)) }.getOrDefault(false) }
+    val units = records.filter { it.testName == selectedTest }.map { it.unit }.distinct().sorted()
+    val latestUnit = records.filter { it.testName == selectedTest }.maxByOrNull { it.performedAt }?.unit.orEmpty()
+    val activeUnit = selectedUnit.ifBlank { latestUnit }
+    val filtered = records.filter { selectedTest.isBlank() || (it.testName == selectedTest && it.unit == activeUnit) }
+        .filter { row -> years == 0 || runCatching { LocalDate.parse(row.performedAt).isAfter(LocalDate.now().minusYears(years.toLong()).minusDays(1)) }.getOrDefault(false) }
     val chronological = filtered.sortedBy { it.performedAt }
     val latest = chronological.lastOrNull()
     val previous = chronological.dropLast(1).lastOrNull()
@@ -623,8 +628,15 @@ private fun LabResultsScreen(member: FamilyMember, records: List<LabResult>, doc
         if (tests.isNotEmpty()) {
             Text("الفحص")
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                FilterChip(selected = selectedTest.isBlank(), onClick = { selectedTest = "" }, label = { Text("الكل") })
-                tests.forEach { name -> FilterChip(selected = selectedTest == name, onClick = { selectedTest = name }, label = { Text(name) }) }
+                FilterChip(selected = selectedTest.isBlank(), onClick = { selectedTest = ""; selectedUnit = "" }, label = { Text("الكل") })
+                tests.forEach { name -> FilterChip(selected = selectedTest == name, onClick = { selectedTest = name; selectedUnit = "" }, label = { Text(name) }) }
+            }
+            if (selectedTest.isNotBlank() && units.size > 1) {
+                Text("الوحدة")
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    units.forEach { unit -> FilterChip(selected = activeUnit == unit, onClick = { selectedUnit = unit }, label = { Text(unit.ifBlank { "بدون وحدة" }) }) }
+                }
+                Text("يتم فصل المقارنة حسب الوحدة حتى لا نقارن قيماً غير متجانسة.", style = MaterialTheme.typography.bodySmall)
             }
             Text("الفترة الزمنية")
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {

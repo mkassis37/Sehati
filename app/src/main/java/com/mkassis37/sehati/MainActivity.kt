@@ -4,6 +4,9 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -20,6 +23,8 @@ import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.WarningAmber
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -56,10 +61,30 @@ private enum class Screen { MEMBERS, DETAILS, FORM, ALLERGIES, SETTINGS, MEDICAT
 @Composable
 private fun SehatiApp(db: SehatiDatabase) {
     val dao = db.medicalDao()
+    var appInForeground by remember { mutableStateOf(true) }
+    DisposableEffect(Unit) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_START -> appInForeground = true
+                Lifecycle.Event.ON_STOP -> appInForeground = false
+                else -> Unit
+            }
+        }
+        ProcessLifecycleOwner.get().lifecycle.addObserver(observer)
+        onDispose { ProcessLifecycleOwner.get().lifecycle.removeObserver(observer) }
+    }
     val members by dao.observeMembers().collectAsState(initial = emptyList())
     var screen by rememberSaveable { mutableStateOf(Screen.MEMBERS) }
     var selectedId by rememberSaveable { mutableStateOf<Long?>(null) }
     var editingId by rememberSaveable { mutableStateOf<Long?>(null) }
+    LaunchedEffect(appInForeground) {
+        if (!appInForeground) {
+            // Hide an open medical record when the app leaves the foreground.
+            screen = Screen.MEMBERS
+            selectedId = null
+            editingId = null
+        }
+    }
     val selected = members.firstOrNull { it.id == selectedId }
     val allergyFlow = remember(selectedId) {
         selectedId?.let { dao.observeAllergies(it) } ?: flowOf(emptyList())

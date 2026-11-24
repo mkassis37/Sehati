@@ -16,13 +16,14 @@ import javax.crypto.spec.PBEKeySpec
 import javax.crypto.spec.SecretKeySpec
 
 /** Versioned, authenticated backup format. No cloud upload is performed by this class. */
-class EncryptedBackup(private val database: SehatiDatabase) {
+class EncryptedBackup(private val database: SehatiDatabase, private val documentStore: SecureMedicalDocumentStore) {
     suspend fun write(resolver: ContentResolver, uri: Uri, password: CharArray) {
         require(password.size >= 10) { "Backup password must be at least 10 characters." }
         val dao = database.medicalDao()
         val members = dao.getAllMembers()
         val allergies = dao.getAllAllergies()
         val labResults = dao.getAllLabResults()
+        val documents = dao.getAllDocuments()
         val payload = JSONObject()
             .put("format", "sehati-backup")
             .put("version", 1)
@@ -46,6 +47,17 @@ class EncryptedBackup(private val database: SehatiDatabase) {
                     .put("referenceHigh", r.referenceHigh ?: JSONObject.NULL)
                     .put("performedAt", r.performedAt).put("laboratory", r.laboratory)
                     .put("source", r.source).put("notes", r.notes).put("createdAt", r.createdAt)) }
+            })
+            .put("documents", JSONArray().apply {
+                documents.forEach { doc ->
+                    val plain = documentStore.readPlaintextBytes(doc)
+                    try {
+                        put(JSONObject().put("id", doc.id).put("memberId", doc.memberId)
+                            .put("displayName", doc.displayName).put("mimeType", doc.mimeType)
+                            .put("sizeBytes", doc.sizeBytes).put("addedAt", doc.addedAt)
+                            .put("content", Base64.encodeToString(plain, Base64.NO_WRAP)))
+                    } finally { plain.fill(0) }
+                }
             }).toString().toByteArray(Charsets.UTF_8)
 
         val salt = ByteArray(16).also(SecureRandom()::nextBytes)

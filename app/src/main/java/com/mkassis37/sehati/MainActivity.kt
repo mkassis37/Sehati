@@ -366,14 +366,18 @@ private fun SehatiApp(db: SehatiDatabase) {
                 updateStatus = updateStatus,
                 updateBusy = updateBusy,
                 onCheckUpdates = {
-                    scope.launch {
-                        updateBusy = true
-                        updateStatus = "جارٍ فحص الإصدارات..."
-                        try {
-                            availableRelease = releaseUpdater.checkForUpdate(BuildConfig.VERSION_CODE)
-                            updateStatus = if (availableRelease == null) "أنت تستخدم أحدث إصدار." else "يتوفر تحديث ${availableRelease?.versionName}."
-                        } catch (_: Exception) { updateStatus = "تعذر فحص التحديثات. حاول مجددًا." }
-                        finally { updateBusy = false }
+                    if (BuildConfig.DEBUG) {
+                        updateStatus = "فحص التحديثات متاح في النسخة المثبتة من Release فقط."
+                    } else {
+                        scope.launch {
+                            updateBusy = true
+                            updateStatus = "جارٍ فحص الإصدارات..."
+                            try {
+                                availableRelease = releaseUpdater.checkForUpdate(BuildConfig.VERSION_CODE)
+                                updateStatus = if (availableRelease == null) "أنت تستخدم أحدث إصدار." else "يتوفر تحديث ${availableRelease?.versionName}."
+                            } catch (_: Exception) { updateStatus = "تعذر فحص التحديثات. حاول مجددًا." }
+                            finally { updateBusy = false }
+                        }
                     }
                 },
                 modifier = Modifier.padding(padding))

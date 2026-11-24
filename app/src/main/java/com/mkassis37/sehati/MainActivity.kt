@@ -49,6 +49,7 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import com.mkassis37.sehati.data.AllergyRecord
 import com.mkassis37.sehati.data.FamilyMember
+import com.mkassis37.sehati.data.LabResult
 import com.mkassis37.sehati.data.SehatiDatabase
 import com.mkassis37.sehati.ui.theme.SehatiTheme
 import java.time.Instant
@@ -400,6 +401,7 @@ private fun SehatiApp(db: SehatiDatabase) {
                 Text("عدد الأفراد: ${preview.memberNames.size}")
                 preview.memberNames.forEach { Text("• $it") }
                 Text("عدد سجلات الحساسية: ${preview.allergyCount}")
+                Text("عدد نتائج الفحوصات: ${preview.labResultCount}")
                 Text("استعادة النسخة ستستبدل البيانات الحالية بالكامل.")
             } },
             confirmButton = { TextButton(onClick = {
@@ -558,11 +560,13 @@ private fun LabResultsScreen(member: FamilyMember, records: List<LabResult>, add
             if (chronological.size >= 2) {
                 Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("التغير عبر الزمن", style = MaterialTheme.typography.titleMedium)
+                    val chartLineColor = MaterialTheme.colorScheme.primary
+                    val chartPointColor = MaterialTheme.colorScheme.tertiary
                     Canvas(Modifier.fillMaxWidth().height(150.dp)) {
                         val values = chronological.map { it.value }; val min = values.minOrNull() ?: 0.0; val max = values.maxOrNull() ?: 1.0; val range = (max - min).takeIf { it > 0.0 } ?: 1.0
                         val points = values.mapIndexed { index, value -> androidx.compose.ui.geometry.Offset(if (values.size == 1) size.width / 2 else size.width * index / (values.size - 1), size.height - ((value - min) / range).toFloat() * (size.height - 16.dp.toPx()) - 8.dp.toPx()) }
-                        points.zipWithNext().forEach { pair -> drawLine(MaterialTheme.colorScheme.primary, pair.first, pair.second, strokeWidth = 4f) }
-                        points.forEach { drawCircle(MaterialTheme.colorScheme.tertiary, 5f, it) }
+                        points.zipWithNext().forEach { pair -> drawLine(chartLineColor, pair.first, pair.second, strokeWidth = 4f) }
+                        points.forEach { drawCircle(chartPointColor, 5f, it) }
                     }
                     Text(chronological.first().performedAt.toDisplayDate() + " ← " + chronological.last().performedAt.toDisplayDate(), style = MaterialTheme.typography.labelSmall)
                 } }

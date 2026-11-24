@@ -3,6 +3,7 @@ package com.mkassis37.sehati
 import android.graphics.Bitmap
 import android.graphics.pdf.PdfRenderer
 import com.googlecode.tesseract.android.TessBaseAPI
+import com.googlecode.tesseract.android.PageSegMode
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.text.PDFTextStripper
@@ -248,7 +249,7 @@ private fun createArabicTesseract(context: android.content.Context): TessBaseAPI
             api.recycle()
             throw IllegalStateException("تعذر تهيئة نموذج اللغة العربية")
         }
-        api.setPageSegMode(3)
+        api.setPageSegMode(PageSegMode.PSM_AUTO)
     }
 }
 

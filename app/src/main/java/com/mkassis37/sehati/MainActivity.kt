@@ -943,6 +943,8 @@ private fun FutureScreen(title: String, description: String, modifier: Modifier 
 private fun LockScreen(store: AppLockStore, onUnlocked: () -> Unit, onBiometric: () -> Unit) {
     var pin by remember { mutableStateOf("") }
     var error by remember { mutableStateOf("") }
+    var remainingLock by remember { mutableLongStateOf(store.remainingLockMillis()) }
+    LaunchedEffect(Unit) { while (true) { remainingLock = store.remainingLockMillis(); delay(1_000) } }
     Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
         Text("صحتي", style = MaterialTheme.typography.headlineLarge)
         Text("التطبيق مقفل لحماية الملفات الطبية", style = MaterialTheme.typography.bodyMedium)
@@ -950,9 +952,9 @@ private fun LockScreen(store: AppLockStore, onUnlocked: () -> Unit, onBiometric:
         OutlinedTextField(value = pin, onValueChange = { if (it.length <= 6 && it.all(Char::isDigit)) pin = it; error = "" },
             label = { Text("رمز PIN من 6 أرقام") }, singleLine = true, visualTransformation = PasswordVisualTransformation(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
-        if (store.isTemporarilyLocked()) Text("محاولات كثيرة. حاول بعد " + (store.remainingLockMillis()/1000) + " ثانية.", color = MaterialTheme.colorScheme.error)
+        if (remainingLock > 0L) Text("محاولات كثيرة. حاول بعد " + (remainingLock/1000) + " ثانية.", color = MaterialTheme.colorScheme.error)
         if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
-        Button(enabled = pin.length == 6 && !store.isTemporarilyLocked(), onClick = {
+        Button(enabled = pin.length == 6 && remainingLock <= 0L, onClick = {
             if (store.verifyPin(pin.toCharArray())) { pin = ""; onUnlocked() }
             else { pin = ""; error = "الرمز غير صحيح." }
         }, modifier = Modifier.fillMaxWidth()) { Text("فتح التطبيق") }

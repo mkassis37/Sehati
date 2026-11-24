@@ -54,6 +54,7 @@ import com.mkassis37.sehati.data.AllergyRecord
 import com.mkassis37.sehati.data.FamilyMember
 import com.mkassis37.sehati.data.LabResult
 import com.mkassis37.sehati.data.MedicalDocument
+import com.mkassis37.sehati.data.MedicationRecord
 import com.mkassis37.sehati.data.SecureMedicalDocumentStore
 import com.mkassis37.sehati.data.SehatiDatabase
 import com.mkassis37.sehati.ui.theme.SehatiTheme
@@ -187,6 +188,8 @@ private fun SehatiApp(db: SehatiDatabase) {
     val labResults by labFlow.collectAsState(initial = emptyList())
     val documentFlow = remember(selectedId) { selectedId?.let { dao.observeDocuments(it) } ?: flowOf(emptyList()) }
     val medicalDocuments by documentFlow.collectAsState(initial = emptyList())
+    val medicationFlow = remember(selectedId) { selectedId?.let { dao.observeMedications(it) } ?: flowOf(emptyList()) }
+    val medications by medicationFlow.collectAsState(initial = emptyList())
 
     val title = when (screen) {
         Screen.MEMBERS -> "أفراد العائلة"
@@ -208,7 +211,7 @@ private fun SehatiApp(db: SehatiDatabase) {
         screen = when (screen) {
             Screen.FORM -> if (editingId == null) Screen.MEMBERS else Screen.DETAILS
             Screen.DETAILS -> Screen.MEMBERS
-            Screen.ALLERGIES, Screen.LAB_RESULTS -> Screen.DETAILS
+            Screen.ALLERGIES, Screen.LAB_RESULTS, Screen.MEDICATIONS -> Screen.DETAILS
             Screen.SETTINGS, Screen.MEDICATIONS, Screen.APPOINTMENTS, Screen.DOCUMENTS,
             Screen.REPORTS, Screen.REMINDERS -> Screen.MEMBERS
             Screen.MEMBERS -> Screen.MEMBERS
@@ -281,7 +284,8 @@ private fun SehatiApp(db: SehatiDatabase) {
             Screen.DETAILS -> if (selected != null) {
                 MemberDetailsScreen(selected, { editingId = selected.id; screen = Screen.FORM },
                     { screen = Screen.ALLERGIES }, allergies.size,
-                    { screen = Screen.LAB_RESULTS }, labResults.size, Modifier.padding(padding))
+                    { screen = Screen.LAB_RESULTS }, labResults.size,
+                    { screen = Screen.MEDICATIONS }, medications.size, Modifier.padding(padding))
             } else {
                 MembersScreen(members, { editingId = null; screen = Screen.FORM },
                     { selectedId = it; screen = Screen.DETAILS }, Modifier.padding(padding))
@@ -349,6 +353,18 @@ private fun SehatiApp(db: SehatiDatabase) {
                     deleteAllergy = { dao.deleteAllergy(it, selected.id) },
                     modifier = Modifier.padding(padding))
             }
+            Screen.MEDICATIONS -> if (selected != null) {
+                MedicationScreen(
+                    member = selected,
+                    records = medications,
+                    addMedication = { dao.addMedication(it); Unit },
+                    updateMedication = { dao.updateMedication(it) },
+                    deleteMedication = { dao.deleteMedication(it.id, selected.id) },
+                    modifier = Modifier.padding(padding)
+                )
+            } else {
+                FutureScreen("الأدوية والعلاجات", "افتح الملف الطبي لأحد أفراد العائلة أولًا لإدارة أدويته وعلاجاته.", Modifier.padding(padding))
+            }
             Screen.SETTINGS -> SettingsHub(
                 refreshToken = settingsRefresh,
                 lockEnabled = lockStore.isEnabled(),
@@ -386,7 +402,6 @@ private fun SehatiApp(db: SehatiDatabase) {
                     }
                 },
                 modifier = Modifier.padding(padding))
-            Screen.MEDICATIONS -> FutureScreen("الأدوية والعلاجات", "سيُضاف هنا سجل الأدوية والجرعات لكل فرد.", Modifier.padding(padding))
             Screen.APPOINTMENTS -> FutureScreen("المواعيد الطبية", "سيُضاف هنا سجل المواعيد والزيارات الطبية.", Modifier.padding(padding))
             Screen.DOCUMENTS -> FutureScreen("الملفات الطبية", "سيُضاف هنا تنظيم الوثائق والصور الطبية.", Modifier.padding(padding))
             Screen.REPORTS -> FutureScreen("التقارير الصحية", "سيُضاف هنا إنشاء ملخصات وتقارير صحية.", Modifier.padding(padding))
@@ -543,6 +558,8 @@ private fun MemberDetailsScreen(
     allergyCount: Int,
     onLabResults: () -> Unit,
     labCount: Int,
+    onMedications: () -> Unit,
+    medicationCount: Int,
     modifier: Modifier = Modifier
 ) {
     Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(18.dp),
@@ -569,6 +586,15 @@ private fun MemberDetailsScreen(
                     }
                 }
                 Text("$allergyCount")
+            }
+        }
+        Card(Modifier.fillMaxWidth().clickable(onClick = onMedications)) {
+            Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("الأدوية والعلاجات", style = MaterialTheme.typography.titleMedium)
+                    Text("الجرعات والفترات العلاجية المسجلة لهذا الفرد", style = MaterialTheme.typography.bodySmall)
+                }
+                Text(medicationCount.toString())
             }
         }
         Card(Modifier.fillMaxWidth().clickable(onClick = onLabResults)) {

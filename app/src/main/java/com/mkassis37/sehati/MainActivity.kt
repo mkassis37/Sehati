@@ -285,6 +285,7 @@ private fun SehatiApp(db: SehatiDatabase) {
                 onReports = { screen = Screen.REPORTS },
                 onReminders = { screen = Screen.REMINDERS },
                 updateStatus = updateStatus,
+                updateBusy = updateBusy,
                 onCheckUpdates = {
                     scope.launch {
                         updateBusy = true
@@ -660,7 +661,7 @@ private fun SettingsHub(
     onTimeout: (Int) -> Unit, onExport: () -> Unit, onImport: () -> Unit,
     onMedications: () -> Unit, onAppointments: () -> Unit, onDocuments: () -> Unit,
     onReports: () -> Unit, onReminders: () -> Unit,
-    updateStatus: String, onCheckUpdates: () -> Unit, modifier: Modifier = Modifier
+    updateStatus: String, updateBusy: Boolean, onCheckUpdates: () -> Unit, modifier: Modifier = Modifier
 ) {
     val refresh = refreshToken
     Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {

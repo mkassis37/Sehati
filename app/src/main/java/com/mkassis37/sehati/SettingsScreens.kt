@@ -113,6 +113,8 @@ internal fun SettingsSectionScreen(
     onResetAppearance: () -> Unit,
     lockEnabled: Boolean,
     biometricEnabled: Boolean,
+    biometricAvailable: Boolean,
+    onLockNow: () -> Unit,
     timeoutMinutes: Int,
     hasPin: Boolean,
     onSetPin: () -> Unit,
@@ -147,7 +149,7 @@ internal fun SettingsSectionScreen(
             )
             SettingsSection.LANGUAGE -> LanguageRegionSection()
             SettingsSection.SECURITY -> SecuritySection(
-                lockEnabled, biometricEnabled, timeoutMinutes, hasPin,
+                lockEnabled, biometricEnabled, biometricAvailable, onLockNow, timeoutMinutes, hasPin,
                 onSetPin, onLockEnabled, onBiometric, onTimeout
             )
             SettingsSection.BACKUP -> BackupSection(
@@ -186,6 +188,8 @@ private fun LanguageRegionSection() {
 private fun SecuritySection(
     lockEnabled: Boolean,
     biometricEnabled: Boolean,
+    biometricAvailable: Boolean,
+    onLockNow: () -> Unit,
     timeoutMinutes: Int,
     hasPin: Boolean,
     onSetPin: () -> Unit,
@@ -211,9 +215,12 @@ private fun SecuritySection(
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text("البصمة أو قفل الجهاز", style = MaterialTheme.typography.titleSmall)
-                Text("عند دعمها على الجهاز", style = MaterialTheme.typography.bodySmall)
+                Text(
+                    if (biometricAvailable) "متاحة على هذا الجهاز" else "المصادقة غير متاحة على الجهاز حاليًا",
+                    style = MaterialTheme.typography.bodySmall
+                )
             }
-            Switch(checked = biometricEnabled, onCheckedChange = onBiometric)
+            Switch(checked = biometricEnabled && biometricAvailable, enabled = biometricAvailable, onCheckedChange = onBiometric)
         }
         Text("إعادة القفل بعد مغادرة التطبيق: $timeoutMinutes دقيقة")
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -222,6 +229,7 @@ private fun SecuritySection(
             }
         }
     }
+    if (lockEnabled) OutlinedButton(onClick = onLockNow) { Text("قفل التطبيق الآن") }
     InfoCard("حالة التشفير") {
         InfoRow("قاعدة البيانات", "SQLCipher مشفر")
         InfoRow("مفتاح قاعدة البيانات", "محمي بواسطة Android Keystore")
@@ -275,7 +283,7 @@ private fun UpdatesSection(status: String, busy: Boolean, onCheck: () -> Unit) {
         InfoRow("اسم التطبيق", "صحتي")
         InfoRow("الإصدار", "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
         InfoRow("القناة", if (BuildConfig.DEBUG) "تجريبية (Debug)" else "رسمية (Release)")
-        InfoRow("Commit", "غير مضمّن في إعداد هذا البناء")
+        InfoRow("Commit", BuildConfig.SOURCE_COMMIT.ifBlank { "غير متاح لهذا البناء" })
         Text(status, style = MaterialTheme.typography.bodySmall)
         OutlinedButton(enabled = !busy, onClick = onCheck) { Text(if (busy) "جارٍ الفحص…" else "فحص التحديثات") }
         Text("يتحقق المثبت من SHA-256 قبل فتح ملف التحديث. فحص الإصدارات متاح في بناء Release.", style = MaterialTheme.typography.bodySmall)

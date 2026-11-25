@@ -123,6 +123,13 @@ private fun SehatiApp(
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val activity = context as? FragmentActivity
+    val authenticators = if (Build.VERSION.SDK_INT >= 30) {
+        BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL
+    } else {
+        BiometricManager.Authenticators.BIOMETRIC_STRONG
+    }
+    val biometricAvailable = activity != null &&
+        BiometricManager.from(context).canAuthenticate(authenticators) == BiometricManager.BIOMETRIC_SUCCESS
     val lockStore = remember { AppLockStore(context.applicationContext) }
     val documentStore = remember { SecureMedicalDocumentStore(context.applicationContext) }
     val backup = remember { EncryptedBackup(db, documentStore) }
@@ -272,16 +279,17 @@ private fun SehatiApp(
             onUnlocked = { locked = false },
             onBiometric = {
                 val host = activity
-                if (host != null && lockStore.isBiometricEnabled() &&
-                    BiometricManager.from(host).canAuthenticate((if (Build.VERSION.SDK_INT >= 30) BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL else BiometricManager.Authenticators.BIOMETRIC_STRONG)) == BiometricManager.BIOMETRIC_SUCCESS) {
+                if (host != null && biometricAvailable && lockStore.isBiometricEnabled()) {
                     val prompt = BiometricPrompt(host, ContextCompat.getMainExecutor(host),
                         object : BiometricPrompt.AuthenticationCallback() {
                             override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) { locked = false }
                         })
-                    prompt.authenticate(BiometricPrompt.PromptInfo.Builder()
-                        .setTitle("فتح صحتي").setSubtitle("تحقق من هويتك للمتابعة")
-                        .setAllowedAuthenticators(if (Build.VERSION.SDK_INT >= 30) BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL else BiometricManager.Authenticators.BIOMETRIC_STRONG)
-                        .build())
+                    val promptInfo = BiometricPrompt.PromptInfo.Builder()
+                        .setTitle("فتح صحتي")
+                        .setSubtitle("تحقق من هويتك للمتابعة")
+                        .setAllowedAuthenticators(authenticators)
+                    if (Build.VERSION.SDK_INT < 30) promptInfo.setNegativeButtonText("استخدام PIN")
+                    prompt.authenticate(promptInfo.build())
                 }
             }
         )
@@ -500,6 +508,13 @@ private fun SehatiApp(
                     onResetAppearance = onResetAppearance,
                     lockEnabled = lockStore.isEnabled(),
                     biometricEnabled = lockStore.isBiometricEnabled(),
+                    biometricAvailable = biometricAvailable,
+                    onLockNow = {
+                        backupPreview = null
+                        backupPassword = ""
+                        showBackupPassword = false
+                        locked = true
+                    },
                     timeoutMinutes = lockStore.timeoutMinutes(),
                     hasPin = lockStore.hasPin(),
                     onSetPin = { showPinSetup = true },
@@ -610,7 +625,7 @@ private fun SehatiApp(
                             }.getOrNull()
                             backupStatusStore.recordSuccess(savedAt, savedSize)
                             lastBackupAt = savedAt
-                            if (savedSize != null) lastBackupSizeBytes = savedSize
+                            lastBackupSizeBytes = savedSize
                         } else {
                             backupPreview = backup.preview(context.contentResolver, uri, pass)
                             backupMessage = ""

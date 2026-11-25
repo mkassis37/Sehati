@@ -5,6 +5,14 @@ plugins {
     id("com.google.devtools.ksp")
 }
 
+val sourceCommit = providers.environmentVariable("GITHUB_SHA")
+    .orElse(providers.exec {
+        workingDir(rootProject.projectDir)
+        commandLine("git", "rev-parse", "HEAD")
+        isIgnoreExitValue = true
+    }.standardOutput.asText)
+    .map { it.trim().takeIf { sha -> sha.matches(Regex("[0-9a-f]{40}")) }.orEmpty() }
+
 android {
     namespace = "com.mkassis37.sehati"
     compileSdk = 35
@@ -15,6 +23,7 @@ android {
         targetSdk = 35
         versionCode = 3
         versionName = "0.3.0"
+        buildConfigField("String", "SOURCE_COMMIT", "\"${sourceCommit.get()}\"")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 

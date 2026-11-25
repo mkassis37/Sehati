@@ -6,6 +6,14 @@ import org.junit.Test
 
 class LabReportParserTest {
     @Test
+    fun ageUsesCompletedYearsAndRejectsFutureOrInvalidBirthdays() {
+        assertEquals(31, "1995-11-25".ageOnDate(java.time.LocalDate.parse("2026-11-25")))
+        assertEquals(30, "1995-11-26".ageOnDate(java.time.LocalDate.parse("2026-11-25")))
+        assertEquals(null, "2027-01-01".ageOnDate(java.time.LocalDate.parse("2026-11-25")))
+        assertEquals(null, "not-a-date".ageOnDate(java.time.LocalDate.parse("2026-11-25")))
+    }
+
+    @Test
     fun parsesVerticalPdfTableWithFlagAndReferenceRange() {
         val rows = LabReportParser.parse(
             "Specimen Date : Oct 20, 2026@12:24:13\nTest Name\nResult\nRef. Range\nUnit\n" +

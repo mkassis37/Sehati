@@ -60,6 +60,7 @@ import com.mkassis37.sehati.data.SehatiDatabase
 import com.mkassis37.sehati.ui.theme.SehatiTheme
 import java.time.Instant
 import java.time.LocalDate
+import java.time.Period
 import java.time.ZoneOffset
 import java.util.Locale
 import kotlinx.coroutines.flow.flowOf
@@ -631,6 +632,7 @@ private fun MembersScreen(
                                 Text(member.fullName, style = MaterialTheme.typography.titleMedium)
                                 val subtitle = listOfNotNull(
                                     member.dateOfBirth.takeIf { it.isNotBlank() }?.let { "الميلاد: ${it.toDisplayDate()}" },
+                                    member.dateOfBirth.ageOnDate()?.let { "العمر: $it سنة" },
                                     member.bloodGroup.takeIf { it.isNotBlank() }?.let { "فصيلة الدم: $it" }
                                 ).joinToString(" • ")
                                 Text(subtitle.ifBlank { "اضغط لعرض الملف الطبي" }, style = MaterialTheme.typography.bodySmall)
@@ -666,6 +668,7 @@ private fun MemberDetailsScreen(
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(member.fullName, style = MaterialTheme.typography.headlineSmall)
                 DetailLine("تاريخ الميلاد", member.dateOfBirth.toDisplayDate().ifBlank { "غير مسجل" })
+                member.dateOfBirth.ageOnDate()?.let { DetailLine("العمر", "$it سنة") }
                 DetailLine("الجنس", member.sex.ifBlank { "غير مسجل" })
                 DetailLine("فصيلة الدم", member.bloodGroup.ifBlank { "غير مسجلة" })
                 DetailLine("رقم التواصل", member.phone.ifBlank { "غير مسجل" })
@@ -836,10 +839,29 @@ private fun LabResultsScreen(member: FamilyMember, records: List<LabResult>, doc
 @Composable
 private fun AddLabResultDialog(memberId: Long, onDismiss: () -> Unit, initialCandidate: LabReportCandidate? = null, onSave: (LabResult) -> Unit) {
     var name by rememberSaveable(initialCandidate?.testName) { mutableStateOf(initialCandidate?.testName.orEmpty()) }; var result by rememberSaveable(initialCandidate?.value) { mutableStateOf(initialCandidate?.value?.toString().orEmpty()) }; var unit by rememberSaveable(initialCandidate?.unit) { mutableStateOf(initialCandidate?.unit.orEmpty()) }; var low by rememberSaveable(initialCandidate?.referenceLow) { mutableStateOf(initialCandidate?.referenceLow?.toString().orEmpty()) }; var high by rememberSaveable(initialCandidate?.referenceHigh) { mutableStateOf(initialCandidate?.referenceHigh?.toString().orEmpty()) }; var date by rememberSaveable(initialCandidate?.performedAt) { mutableStateOf(initialCandidate?.performedAt ?: LocalDate.now().toString()) }; var lab by rememberSaveable(initialCandidate?.testName) { mutableStateOf("") }; var notes by rememberSaveable(initialCandidate?.sourceLine) { mutableStateOf(initialCandidate?.let { "اقتراح مستخرج من PDF. راجع النتيجة والوحدة والمجال والتاريخ مقابل التقرير الأصلي." + if (it.flag.isNotBlank()) " علامة المختبر: " + it.flag else "" }.orEmpty()) }; var error by rememberSaveable { mutableStateOf("") }
+    var unitMenuExpanded by rememberSaveable { mutableStateOf(false) }
+    var customUnit by rememberSaveable(initialCandidate?.unit) { mutableStateOf(initialCandidate?.unit?.let { it.isNotBlank() && it !in LAB_RESULT_UNITS } == true) }
     AlertDialog(onDismissRequest = onDismiss, title = { Text("إضافة نتيجة فحص") }, text = { Column(Modifier.fillMaxWidth().heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         OutlinedTextField(name, { name = it }, label = { Text("اسم الفحص") }, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(result, { result = it }, label = { Text("النتيجة الرقمية") }, modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
-        OutlinedTextField(unit, { unit = it }, label = { Text("الوحدة") }, modifier = Modifier.fillMaxWidth())
+        ExposedDropdownMenuBox(expanded = unitMenuExpanded, onExpandedChange = { unitMenuExpanded = it }) {
+            OutlinedTextField(value = if (customUnit) "وحدة مخصصة" else unit, onValueChange = {}, readOnly = true,
+                label = { Text("وحدة النتيجة (اختياري)") }, placeholder = { Text("اختاري الوحدة") },
+                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = unitMenuExpanded) },
+                modifier = Modifier.fillMaxWidth().menuAnchor(), singleLine = true)
+            ExposedDropdownMenu(expanded = unitMenuExpanded, onDismissRequest = { unitMenuExpanded = false }) {
+                (LAB_RESULT_UNITS + "أخرى / كتابة وحدة مخصصة").forEach { choice ->
+                    DropdownMenuItem(text = { Text(choice) }, onClick = {
+                        val wasCustom = customUnit
+                        customUnit = choice.startsWith("أخرى")
+                        if (customUnit && !wasCustom) unit = ""
+                        if (!customUnit) unit = if (choice == "بدون وحدة") "" else choice
+                        unitMenuExpanded = false
+                    })
+                }
+            }
+        }
+        if (customUnit) OutlinedTextField(value = unit, onValueChange = { unit = it }, label = { Text("اكتبي الوحدة كما في التقرير") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
         OutlinedTextField(low, { low = it }, label = { Text("الحد الأدنى المرجعي (اختياري)") }, modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
         OutlinedTextField(high, { high = it }, label = { Text("الحد الأعلى المرجعي (اختياري)") }, modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
         DatePickerField("تاريخ الفحص", date, { date = it }, Modifier.fillMaxWidth())
@@ -848,6 +870,12 @@ private fun AddLabResultDialog(memberId: Long, onDismiss: () -> Unit, initialCan
         if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
     } }, confirmButton = { TextButton(onClick = { val number = result.toDoubleOrNull(); val lower = low.takeIf { it.isNotBlank() }?.toDoubleOrNull(); val upper = high.takeIf { it.isNotBlank() }?.toDoubleOrNull(); if (name.isBlank() || number == null || (low.isNotBlank() && lower == null) || (high.isNotBlank() && upper == null) || (lower != null && upper != null && lower > upper)) error = "تحقق من اسم الفحص والنتيجة والمجال المرجعي." else onSave(LabResult(memberId = memberId, testName = name.trim(), value = number, unit = unit.trim(), referenceLow = lower, referenceHigh = upper, performedAt = date, laboratory = lab.trim(), source = if (initialCandidate != null) "pdf_review" else "manual", notes = notes.trim())) }) { Text("حفظ النتيجة") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("إلغاء") } })
 }
+
+private val LAB_RESULT_UNITS = listOf(
+    "بدون وحدة", "mg/dL", "mmol/L", "µmol/L", "ng/mL", "pg/mL", "g/dL", "g/L", "mg/L",
+    "mEq/L", "mmol/mol", "%", "U/L", "IU/L", "mIU/L", "µIU/mL", "ng/dL", "µg/dL", "µg/L",
+    "fL", "pg", "10³/µL", "10⁶/µL", "cells/µL", "mm/h", "mL/min/1.73m²", "copies/mL", "ثانية", "دقيقة"
+)
 @Composable
 private fun DetailLine(label: String, value: String) {
     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -884,15 +912,20 @@ private fun MemberFormScreen(
         OutlinedTextField(name, { name = it; error = "" }, label = { Text("الاسم الكامل") },
             modifier = Modifier.fillMaxWidth(), singleLine = true)
         DatePickerField("تاريخ الميلاد", dob, { dob = it }, Modifier.fillMaxWidth())
-        Box(Modifier.fillMaxWidth()) {
-            OutlinedTextField(sex, {}, readOnly = true, label = { Text("الجنس (اختياري)") },
-                placeholder = { Text("اختياري") }, modifier = Modifier.fillMaxWidth().clickable { sexMenuExpanded = true }, singleLine = true)
-            DropdownMenu(expanded = sexMenuExpanded, onDismissRequest = { sexMenuExpanded = false }) {
-                listOf("ذكر", "أنثى", "أفضل عدم التحديد").forEach { option -> DropdownMenuItem(text = { Text(option) }, onClick = { sex = option; sexMenuExpanded = false }) }
+        dob.ageOnDate()?.let { age -> Text("العمر: $age سنة", style = MaterialTheme.typography.bodyMedium) }
+        ExposedDropdownMenuBox(expanded = sexMenuExpanded, onExpandedChange = { sexMenuExpanded = it }) {
+            OutlinedTextField(value = sex, onValueChange = {}, readOnly = true,
+                label = { Text("الجنس (اختياري)") }, placeholder = { Text("اختاري ذكر أو أنثى") },
+                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = sexMenuExpanded) },
+                modifier = Modifier.fillMaxWidth().menuAnchor(), singleLine = true)
+            ExposedDropdownMenu(expanded = sexMenuExpanded, onDismissRequest = { sexMenuExpanded = false }) {
+                listOf("ذكر", "أنثى").forEach { option ->
+                    DropdownMenuItem(text = { Text(option) }, onClick = { sex = option; sexMenuExpanded = false })
+                }
             }
         }
         OutlinedTextField(phone, { phone = it }, label = { Text("رقم التواصل (اختياري)") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-        Box(Modifier.fillMaxWidth()) {
+        ExposedDropdownMenuBox(expanded = bloodMenuExpanded, onExpandedChange = { bloodMenuExpanded = it }) {
             OutlinedTextField(
                 value = blood,
                 onValueChange = {},
@@ -900,10 +933,10 @@ private fun MemberFormScreen(
                 label = { Text("فصيلة الدم") },
                 placeholder = { Text("اختاري فصيلة الدم") },
                 trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = bloodMenuExpanded) },
-                modifier = Modifier.fillMaxWidth().clickable { bloodMenuExpanded = true },
+                modifier = Modifier.fillMaxWidth().menuAnchor(),
                 singleLine = true
             )
-            DropdownMenu(expanded = bloodMenuExpanded, onDismissRequest = { bloodMenuExpanded = false }) {
+            ExposedDropdownMenu(expanded = bloodMenuExpanded, onDismissRequest = { bloodMenuExpanded = false }) {
                 (listOf("غير محددة") + listOf("A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-")).forEach { group ->
                     DropdownMenuItem(
                         text = { Text(group) },
@@ -1069,6 +1102,11 @@ internal fun String.toDisplayDate(): String {
         "%02d/%02d/%04d".format(d.dayOfMonth, d.monthValue, d.year)
     }.getOrDefault(this)
 }
+
+internal fun String.ageOnDate(today: LocalDate = LocalDate.now()): Int? = runCatching {
+    val birthday = LocalDate.parse(this)
+    Period.between(birthday, today).years.takeIf { birthday <= today && it >= 0 }
+}.getOrNull()
 
 
 @Composable

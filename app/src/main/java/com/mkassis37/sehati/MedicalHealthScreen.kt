@@ -21,6 +21,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
@@ -364,6 +366,7 @@ private fun editorFields(request: EditorState, conditions: List<ChronicCondition
 }
 
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
 private fun MedicalRecordDialog(kind: String, title: String, labels: List<String>, initial: List<String>, onDismiss: () -> Unit, onSave: suspend (List<String>) -> Unit) {
     val values = remember(kind, initial) { initial.toMutableStateList() }
     val dateIndices = when (kind) { "condition" -> setOf(1); "procedure" -> setOf(1); "history" -> setOf(2); "measurement" -> setOf(0); else -> emptySet() }
@@ -373,7 +376,12 @@ private fun MedicalRecordDialog(kind: String, title: String, labels: List<String
     val scope = rememberCoroutineScope()
     val choices: Map<Int, List<String>> = when (kind) {
         "condition" -> mapOf(3 to listOf("نشط", "متوقف", "تحت المتابعة"))
-        "family" -> mapOf(0 to listOf("الأب", "الأم", "الأخ", "الأخت", "الجد", "الجدة", "الابن", "الابنة", "قريب آخر"))
+        "family" -> mapOf(0 to listOf(
+            "الأب", "الأم", "الأخ", "الأخت", "الأخ غير الشقيق", "الأخت غير الشقيقة",
+            "الجد من جهة الأب", "الجدة من جهة الأب", "الجد من جهة الأم", "الجدة من جهة الأم",
+            "العم", "العمة", "الخال", "الخالة", "ابن العم", "ابنة العم", "ابن الخال", "ابنة الخال",
+            "الابن", "الابنة", "الحفيد", "الحفيدة", "قريب آخر"
+        ))
         "history" -> mapOf(0 to listOf("مرض سابق", "إصابة مهمة", "دخول مستشفى", "إجراء طبي سابق"))
         else -> emptyMap()
     }
@@ -381,11 +389,14 @@ private fun MedicalRecordDialog(kind: String, title: String, labels: List<String
         text = { Column(Modifier.fillMaxWidth().heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             labels.forEachIndexed { index, label ->
                 if (dateIndices.contains(index)) DatePickerField(label, values[index], { values[index] = it }, Modifier.fillMaxWidth())
-                else if (choices[index] != null) Box(Modifier.fillMaxWidth()) {
-                    OutlinedTextField(value = values[index], onValueChange = {}, readOnly = true, label = { Text(label) },
-                        modifier = Modifier.fillMaxWidth().clickable { expandedIndex = index }, singleLine = true)
-                    DropdownMenu(expanded = expandedIndex == index, onDismissRequest = { expandedIndex = -1 }) {
-                        choices.getValue(index).forEach { option -> DropdownMenuItem(text = { Text(option) }, onClick = { values[index] = option; expandedIndex = -1 }) }
+                else if (choices[index] != null) {
+                    ExposedDropdownMenuBox(expanded = expandedIndex == index, onExpandedChange = { expandedIndex = if (it) index else -1 }) {
+                        OutlinedTextField(value = values[index], onValueChange = {}, readOnly = true, label = { Text(label) },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedIndex == index) },
+                            modifier = Modifier.fillMaxWidth().menuAnchor(), singleLine = true)
+                        ExposedDropdownMenu(expanded = expandedIndex == index, onDismissRequest = { expandedIndex = -1 }) {
+                            choices.getValue(index).forEach { option -> DropdownMenuItem(text = { Text(option) }, onClick = { values[index] = option; expandedIndex = -1 }) }
+                        }
                     }
                 } else OutlinedTextField(value = values[index], onValueChange = { values[index] = it }, label = { Text(label) }, modifier = Modifier.fillMaxWidth(), singleLine = label != "ملاحظات")
             }

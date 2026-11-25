@@ -33,12 +33,8 @@ jobs:
         with:
           gradle-version: "8.9"
 
-      - name: Prepare offline Arabic OCR model
+      - name: Verify bundled offline Arabic OCR model
         run: |
-          mkdir -p app/src/main/assets/tessdata
-          curl --fail --location --retry 3 --silent --show-error \
-            https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/main/ara.traineddata \
-            --output app/src/main/assets/tessdata/ara.traineddata
           ACTUAL_BLOB_SHA=$(git hash-object app/src/main/assets/tessdata/ara.traineddata)
           test "$ACTUAL_BLOB_SHA" = "c8d129c67821c1592cac46836686b057ecc203dc" || \
             (echo "Arabic OCR model checksum mismatch" && exit 1)

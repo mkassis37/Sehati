@@ -224,7 +224,7 @@ fun LabPdfReader(onExtractedText: (String) -> Unit, onCandidateSelected: (LabRep
                 Text("النص المستخرج من جميع الصفحات", style = MaterialTheme.typography.titleSmall)
                 Text(extractedText, style = MaterialTheme.typography.bodyMedium)
                 Text(
-                    "تنبيه: قد يخطئ OCR في قراءة الأرقام والفواصل والوحدات، كما أن محرك القراءة الحالي يتعرف أساسًا على النص اللاتيني. طابقي كل قيمة مع صورة التقرير قبل حفظها.",
+                    "تنبيه: قد يخطئ OCR في قراءة العربية والإنجليزية والأرقام والفواصل والوحدات. طابقي كل قيمة مع صورة التقرير قبل حفظها.",
                     color = MaterialTheme.colorScheme.error,
                     style = MaterialTheme.typography.bodySmall
                 )

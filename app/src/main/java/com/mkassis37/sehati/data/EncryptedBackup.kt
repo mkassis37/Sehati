@@ -37,7 +37,8 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
             .put("allergies", JSONArray().apply {
                 allergies.forEach { a -> put(JSONObject()
                     .put("id", a.id).put("memberId", a.memberId).put("category", a.category)
-                    .put("substance", a.substance).put("reaction", a.reaction).put("severity", a.severity)
+                    .put("substance", a.substance).put("commercialName", a.commercialName)
+                    .put("activeIngredient", a.activeIngredient).put("reaction", a.reaction).put("severity", a.severity)
                     .put("notes", a.notes).put("createdAt", a.createdAt)) }
             })
             .put("labResults", JSONArray().apply {
@@ -109,6 +110,7 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
             val o = allergies.getJSONObject(i)
             AllergyRecord(id = o.getLong("id"), memberId = o.getLong("memberId"),
                 category = o.getString("category"), substance = o.getString("substance"),
+                commercialName = o.optString("commercialName"), activeIngredient = o.optString("activeIngredient"),
                 reaction = o.optString("reaction"), severity = o.optString("severity"),
                 notes = o.optString("notes"), createdAt = o.optLong("createdAt"))
         }

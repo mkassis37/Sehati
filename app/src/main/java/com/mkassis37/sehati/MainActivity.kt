@@ -19,6 +19,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import android.net.Uri
 import com.mkassis37.sehati.security.AppLockStore
 import com.mkassis37.sehati.data.EncryptedBackup
+import com.mkassis37.sehati.data.AppearanceSettingsStore
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.lifecycle.Lifecycle
@@ -58,6 +59,9 @@ import com.mkassis37.sehati.data.MedicationRecord
 import com.mkassis37.sehati.data.SecureMedicalDocumentStore
 import com.mkassis37.sehati.data.SehatiDatabase
 import com.mkassis37.sehati.ui.theme.SehatiTheme
+import com.mkassis37.sehati.ui.theme.AppearanceSettings
+import com.mkassis37.sehati.ui.theme.SehatiPalette
+import com.mkassis37.sehati.ui.theme.ThemeMode
 import java.time.Instant
 import java.time.LocalDate
 import java.time.Period
@@ -75,8 +79,11 @@ class MainActivity : FragmentActivity() {
         val db = SehatiDatabase.getInstance(applicationContext)
         window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN or WindowManager.LayoutParams.FLAG_SECURE)
         setContent {
+            val appearanceStore = remember { AppearanceSettingsStore(applicationContext) }
+            val appearance by appearanceStore.settings.collectAsState(initial = AppearanceSettings())
+            val appearanceScope = rememberCoroutineScope()
             var showSplash by remember { mutableStateOf(true) }
-            SehatiTheme {
+            SehatiTheme(appearance = appearance) {
                 CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
                     if (showSplash) {
                         SehatiSplashScreen()
@@ -86,7 +93,13 @@ class MainActivity : FragmentActivity() {
                             window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
                         }
                     } else {
-                        SehatiApp(db)
+                        SehatiApp(
+                            db = db,
+                            appearance = appearance,
+                            onPaletteSelected = { palette -> appearanceScope.launch { appearanceStore.updatePalette(palette) } },
+                            onThemeModeSelected = { mode -> appearanceScope.launch { appearanceStore.updateMode(mode) } },
+                            onResetAppearance = { appearanceScope.launch { appearanceStore.reset() } }
+                        )
                     }
                 }
             }
@@ -98,7 +111,13 @@ private enum class Screen { MEMBERS, DETAILS, FORM, HEALTH_RECORDS, ALLERGIES, L
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SehatiApp(db: SehatiDatabase) {
+private fun SehatiApp(
+    db: SehatiDatabase,
+    appearance: AppearanceSettings,
+    onPaletteSelected: (SehatiPalette) -> Unit,
+    onThemeModeSelected: (ThemeMode) -> Unit,
+    onResetAppearance: () -> Unit
+) {
     val dao = db.medicalDao()
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -473,6 +492,10 @@ private fun SehatiApp(db: SehatiDatabase) {
                 onDocuments = { screen = Screen.DOCUMENTS },
                 onReports = { screen = Screen.REPORTS },
                 onReminders = { screen = Screen.REMINDERS },
+                appearance = appearance,
+                onPaletteSelected = onPaletteSelected,
+                onThemeModeSelected = onThemeModeSelected,
+                onResetAppearance = onResetAppearance,
                 updateStatus = updateStatus,
                 updateBusy = updateBusy,
                 onCheckUpdates = {
@@ -1195,6 +1218,10 @@ private fun SettingsHub(
     onTimeout: (Int) -> Unit, onExport: () -> Unit, onImport: () -> Unit,
     onMedications: () -> Unit, onAppointments: () -> Unit, onDocuments: () -> Unit,
     onReports: () -> Unit, onReminders: () -> Unit,
+    appearance: AppearanceSettings,
+    onPaletteSelected: (SehatiPalette) -> Unit,
+    onThemeModeSelected: (ThemeMode) -> Unit,
+    onResetAppearance: () -> Unit,
     updateStatus: String, updateBusy: Boolean, onCheckUpdates: () -> Unit, modifier: Modifier = Modifier
 ) {
     val refresh = refreshToken
@@ -1248,6 +1275,12 @@ private fun SettingsHub(
             Text("صحتي - الإصدار ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
             Text("فكرة وإعداد ميناس، بمساعدة ChatGPT", style = MaterialTheme.typography.bodySmall)
         } }
+        AppearanceSettingsSection(
+            settings = appearance,
+            onPaletteSelected = onPaletteSelected,
+            onModeSelected = onThemeModeSelected,
+            onReset = onResetAppearance
+        )
     }
 }
 

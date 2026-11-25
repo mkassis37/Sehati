@@ -1,0 +1,58 @@
+name: Android CI
+
+on:
+  push:
+    branches: [main, "feature/**"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: android-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and test Android app
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: Verify bundled offline Arabic OCR model
+        run: |
+          ACTUAL_BLOB_SHA=$(git hash-object app/src/main/assets/tessdata/ara.traineddata)
+          test "$ACTUAL_BLOB_SHA" = "c8d129c67821c1592cac46836686b057ecc203dc" || \
+            (echo "Arabic OCR model checksum mismatch" && exit 1)
+
+      - name: Verify Android debug build
+        run: gradle --no-daemon assembleDebug
+
+      - name: Run unit tests
+        run: gradle --no-daemon testDebugUnitTest
+
+      - name: Run Android lint
+        run: gradle --no-daemon lintDebug
+
+      - name: Upload debug APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sehati-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 14

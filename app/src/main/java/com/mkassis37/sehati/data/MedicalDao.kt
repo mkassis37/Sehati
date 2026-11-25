@@ -15,6 +15,9 @@ interface MedicalDao {
     @Query("SELECT * FROM family_members WHERE id = :memberId LIMIT 1")
     fun observeMember(memberId: Long): Flow<FamilyMember?>
 
+    @Query("SELECT EXISTS(SELECT 1 FROM family_members WHERE id = :memberId)")
+    suspend fun memberExists(memberId: Long): Boolean
+
     @Query("SELECT * FROM family_members ORDER BY id")
     suspend fun getAllMembers(): List<FamilyMember>
 
@@ -219,6 +222,18 @@ interface MedicalDao {
     @Query("DELETE FROM medication_records")
     suspend fun clearMedications()
 
+    @Query("SELECT EXISTS(SELECT 1 FROM lab_results WHERE id = :id AND memberId = :memberId)")
+    suspend fun ownsLabResult(id: Long, memberId: Long): Boolean
+
+    @Query("SELECT EXISTS(SELECT 1 FROM medical_procedures WHERE id = :id AND memberId = :memberId)")
+    suspend fun ownsProcedure(id: Long, memberId: Long): Boolean
+
+    @Query("SELECT * FROM medical_documents WHERE id = :id AND memberId = :memberId")
+    suspend fun findDocument(id: Long, memberId: Long): MedicalDocument?
+
+    @Query("UPDATE medical_documents SET relatedLabResultId = NULL WHERE relatedLabResultId = :id AND memberId = :memberId")
+    suspend fun unlinkLabDocuments(id: Long, memberId: Long)
+
     @Query("SELECT * FROM medical_documents WHERE memberId = :memberId ORDER BY addedAt DESC")
     fun observeDocuments(memberId: Long): Flow<List<MedicalDocument>>
 
@@ -243,8 +258,8 @@ interface MedicalDao {
     @Query("DELETE FROM medical_documents WHERE memberId = :memberId")
     suspend fun deleteDocumentsForMember(memberId: Long)
 
-    @Query("UPDATE medical_documents SET relatedProcedureId = NULL WHERE relatedProcedureId = :procedureId")
-    suspend fun unlinkDocumentsFromProcedure(procedureId: Long)
+    @Query("UPDATE medical_documents SET relatedProcedureId = NULL WHERE relatedProcedureId = :procedureId AND memberId = :memberId")
+    suspend fun unlinkDocumentsFromProcedure(procedureId: Long, memberId: Long)
 
     @Query("DELETE FROM medical_documents")
     suspend fun clearDocuments()

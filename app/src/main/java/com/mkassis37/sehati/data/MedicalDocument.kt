@@ -1,5 +1,6 @@
 package com.mkassis37.sehati.data
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
@@ -18,5 +19,8 @@ data class MedicalDocument(
     val sizeBytes: Long,
     val relatedProcedureId: Long? = null,
     val addedAt: Long = System.currentTimeMillis(),
-    val relatedAppointmentId: Long? = null
+    val relatedAppointmentId: Long? = null,
+    val relatedLabResultId: Long? = null,
+    @ColumnInfo(defaultValue = "'OTHER'") val category: String = "OTHER",
+    @ColumnInfo(defaultValue = "''") val documentDate: String = ""
 )

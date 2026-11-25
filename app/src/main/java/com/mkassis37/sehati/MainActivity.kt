@@ -262,6 +262,13 @@ private fun SehatiApp(
         }
     }
 
+    val documentLibrary = rememberDocumentLibrary(db, documentStore) { memberId ->
+        if (selectedId == null || selectedId == memberId) {
+            selectedId = memberId
+            screen = Screen.DOCUMENTS
+        }
+    }
+
     val title = when (screen) {
         Screen.MEMBERS -> "أفراد العائلة"
         Screen.DETAILS -> selected?.fullName ?: "الملف الطبي"
@@ -293,7 +300,7 @@ private fun SehatiApp(
                 Screen.SETTINGS
             } else Screen.MEMBERS
             Screen.APPOINTMENTS -> if (selectedId != null) Screen.DETAILS else Screen.MEMBERS
-            Screen.DOCUMENTS,
+            Screen.DOCUMENTS -> if (selectedId != null) Screen.DETAILS else Screen.MEMBERS
             Screen.REPORTS, Screen.REMINDERS -> Screen.MEMBERS
             Screen.MEMBERS -> Screen.MEMBERS
         }
@@ -372,6 +379,7 @@ private fun SehatiApp(
                     { screen = Screen.MEDICATIONS }, medications.size,
                     onAppointments = { screen = Screen.APPOINTMENTS },
                     appointmentCount = appointments.size,
+                    onDocuments = { screen = Screen.DOCUMENTS },
                     onDelete = {
                         scope.launch {
                             try {
@@ -470,7 +478,7 @@ private fun SehatiApp(
                 LabResultsScreen(
                     selected, labResults, medicalDocuments,
                     addResult = { dao.addLabResult(it) },
-                    deleteResult = { dao.deleteLabResult(it, selected.id) },
+                    deleteResult = { db.deleteLabResultAndUnlinkAttachments(it, selected.id) },
                     saveDocument = { uri ->
                         val name = context.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)
                             ?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
@@ -600,7 +608,17 @@ private fun SehatiApp(
                 onDelete = { db.deleteAppointment(it.id, selected.id) },
                 modifier = Modifier.padding(padding)
             )
-            Screen.DOCUMENTS -> FutureScreen("الملفات الطبية", "سيُضاف هنا تنظيم الوثائق والصور الطبية.", Modifier.padding(padding))
+            Screen.DOCUMENTS -> if (selected != null) DocumentLibraryScreen(
+                member = selected,
+                documents = medicalDocuments,
+                links = buildList {
+                    appointments.forEach { add(DocumentLink("appointment", it.id, "موعد · ${it.doctor} · ${it.date.toDisplayDate()}")) }
+                    labResults.forEach { add(DocumentLink("lab", it.id, "فحص · ${it.testName} · ${it.performedAt.toDisplayDate()}")) }
+                    procedures.forEach { add(DocumentLink("procedure", it.id, "إجراء · ${it.name} · ${it.performedOn.toDisplayDate()}")) }
+                },
+                actions = documentLibrary,
+                modifier = Modifier.padding(padding)
+            )
             Screen.REPORTS -> FutureScreen("التقارير الصحية", "سيُضاف هنا إنشاء ملخصات وتقارير صحية.", Modifier.padding(padding))
             Screen.REMINDERS -> Column(Modifier.padding(padding).padding(16.dp).verticalScroll(rememberScrollState())) { ReminderSettings(reminders) }
         }
@@ -779,6 +797,7 @@ private fun MemberDetailsScreen(
     medicationCount: Int,
     onAppointments: () -> Unit,
     appointmentCount: Int,
+    onDocuments: () -> Unit,
     onDelete: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -809,6 +828,7 @@ private fun MemberDetailsScreen(
         OutlinedButton(onClick = onAppointments, modifier = Modifier.fillMaxWidth()) {
             Text("المواعيد والزيارات ($appointmentCount)")
         }
+        OutlinedButton(onClick = onDocuments, modifier = Modifier.fillMaxWidth()) { Text("مكتبة الملفات الطبية") }
         OutlinedButton(onClick = onEmergency, modifier = Modifier.fillMaxWidth()) { Text("بطاقة الطوارئ") }
         Card(Modifier.fillMaxWidth().clickable(onClick = onAllergies)) {
             Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween,

@@ -9,7 +9,7 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
 
-@Database(entities = [FamilyMember::class, AllergyRecord::class, LabResult::class, MedicalDocument::class, MedicationRecord::class, ChronicCondition::class, MedicalProcedure::class, MedicalHistoryEvent::class, FamilyDiseaseHistory::class, BodyMeasurement::class, MedicalAppointment::class, DoseLog::class], version = 10, exportSchema = true)
+@Database(entities = [FamilyMember::class, AllergyRecord::class, LabResult::class, MedicalDocument::class, MedicationRecord::class, ChronicCondition::class, MedicalProcedure::class, MedicalHistoryEvent::class, FamilyDiseaseHistory::class, BodyMeasurement::class, MedicalAppointment::class, DoseLog::class], version = 11, exportSchema = true)
 abstract class SehatiDatabase : RoomDatabase() {
     abstract fun medicalDao(): MedicalDao
 
@@ -31,7 +31,7 @@ abstract class SehatiDatabase : RoomDatabase() {
     }
 
     suspend fun deleteProcedureAndUnlinkAttachments(procedureId: Long, memberId: Long) = withTransaction {
-        medicalDao().unlinkDocumentsFromProcedure(procedureId)
+        medicalDao().unlinkDocumentsFromProcedure(procedureId, memberId)
         medicalDao().deleteProcedure(procedureId, memberId)
     }
 
@@ -53,10 +53,29 @@ abstract class SehatiDatabase : RoomDatabase() {
         deleted
     }
 
-    suspend fun addAppointmentDocument(document: MedicalDocument, appointmentId: Long): Long = withTransaction {
+    suspend fun addAppointmentDocument(document: MedicalDocument, appointmentId: Long): Long =
+        addLinkedDocument(document.copy(relatedAppointmentId = appointmentId))
+
+    suspend fun addLinkedDocument(document: MedicalDocument): Long = withTransaction {
         val dao = medicalDao()
-        check(dao.ownsAppointment(appointmentId, document.memberId))
-        dao.addDocument(document.copy(relatedAppointmentId = appointmentId))
+        check(dao.memberExists(document.memberId))
+        document.relatedAppointmentId?.let { check(dao.ownsAppointment(it, document.memberId)) }
+        document.relatedProcedureId?.let { check(dao.ownsProcedure(it, document.memberId)) }
+        document.relatedLabResultId?.let { check(dao.ownsLabResult(it, document.memberId)) }
+        dao.addDocument(document)
+    }
+
+    suspend fun removeMemberDocument(id: Long, memberId: Long): MedicalDocument? = withTransaction {
+        val dao = medicalDao()
+        val document = dao.findDocument(id, memberId) ?: return@withTransaction null
+        dao.deleteDocument(id, memberId)
+        document
+    }
+
+    suspend fun deleteLabResultAndUnlinkAttachments(id: Long, memberId: Long) = withTransaction {
+        val dao = medicalDao()
+        dao.unlinkLabDocuments(id, memberId)
+        dao.deleteLabResult(id, memberId)
     }
 
     suspend fun recordDose(log: DoseLog, memberId: Long): Boolean = withTransaction {
@@ -214,7 +233,7 @@ abstract class SehatiDatabase : RoomDatabase() {
             val factory = SupportOpenHelperFactory(passphrase)
             return Room.databaseBuilder(context, SehatiDatabase::class.java, "sehati.db")
                 .openHelperFactory(factory)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MedicalDatabaseMigrations.LAB_RESULTS_7_8, MedicalDatabaseMigrations.APPOINTMENTS_8_9, MedicalDatabaseMigrations.DOSES_9_10)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MedicalDatabaseMigrations.LAB_RESULTS_7_8, MedicalDatabaseMigrations.APPOINTMENTS_8_9, MedicalDatabaseMigrations.DOSES_9_10, MedicalDatabaseMigrations.DOCUMENTS_10_11)
                 .build()
         }
     }

@@ -50,6 +50,7 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
         val payload = JSONObject()
             .put("format", "sehati-backup")
             .put("version", when {
+                documents.any { it.category != "OTHER" || it.documentDate.isNotBlank() || it.relatedLabResultId != null } -> 6
                 rows.doses.isNotEmpty() || medications.any { it.completed } -> 5
                 rows.appointments.isNotEmpty() -> 4
                 labResults.any { it.qualitativeValue != null } -> 3
@@ -137,6 +138,8 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
                             .put("sizeBytes", doc.sizeBytes).put("relatedProcedureId", doc.relatedProcedureId ?: JSONObject.NULL)
                             .put("addedAt", doc.addedAt)
                             .put("relatedAppointmentId", doc.relatedAppointmentId ?: JSONObject.NULL)
+                            .put("relatedLabResultId", doc.relatedLabResultId ?: JSONObject.NULL)
+                            .put("category", doc.category).put("documentDate", doc.documentDate)
                             .put("content", Base64.encodeToString(plain, Base64.NO_WRAP)))
                     } finally { plain.fill(0) }
                 }
@@ -155,7 +158,7 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
 
     suspend fun preview(resolver: ContentResolver, uri: Uri, password: CharArray): BackupPreview {
         val root = decrypt(resolver.openInputStream(uri)!!, password)
-        require(root.optString("format") == "sehati-backup" && root.optInt("version") in 1..5) {
+        require(root.optString("format") == "sehati-backup" && root.optInt("version") in 1..6) {
             "Unsupported backup file."
         }
         val names = buildList {
@@ -287,7 +290,9 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
                 sizeBytes = o.optLong("sizeBytes"),
                 relatedProcedureId = if (o.isNull("relatedProcedureId")) null else o.optLong("relatedProcedureId"),
                 addedAt = o.optLong("addedAt"),
-                relatedAppointmentId = if (o.isNull("relatedAppointmentId")) null else o.getLong("relatedAppointmentId"))
+                relatedAppointmentId = if (o.isNull("relatedAppointmentId")) null else o.getLong("relatedAppointmentId"),
+                relatedLabResultId = if (o.isNull("relatedLabResultId")) null else o.getLong("relatedLabResultId"),
+                category = o.optString("category", "OTHER"), documentDate = o.optString("documentDate"))
         }
         require(labRows.all { row ->
             val number = row.value
@@ -307,6 +312,7 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
             doseRows.all { row -> medicationRows.any { it.id == row.medicationId && it.memberId == row.memberId } } &&
             appointmentRows.all { row -> memberRows.any { it.id == row.memberId } } &&
             documentRows.all { row -> row.relatedAppointmentId == null || appointmentRows.any { it.id == row.relatedAppointmentId && it.memberId == row.memberId } } &&
+            documentRows.all { row -> row.relatedLabResultId == null || labRows.any { it.id == row.relatedLabResultId && it.memberId == row.memberId } } &&
             documentRows.all { row -> row.relatedProcedureId == null || procedureRows.any { it.id == row.relatedProcedureId && it.memberId == row.memberId } }) {
             "Backup contains records without a matching family member."
         }

@@ -63,4 +63,12 @@ internal object MedicalDatabaseMigrations {
             db.execSQL("CREATE INDEX index_dose_logs_memberId_date ON dose_logs(memberId, date)")
         }
     }
+
+    val DOCUMENTS_10_11 = object : Migration(10, 11) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE medical_documents ADD COLUMN relatedLabResultId INTEGER")
+            db.execSQL("ALTER TABLE medical_documents ADD COLUMN category TEXT NOT NULL DEFAULT 'OTHER'")
+            db.execSQL("ALTER TABLE medical_documents ADD COLUMN documentDate TEXT NOT NULL DEFAULT ''")
+        }
+    }
 }

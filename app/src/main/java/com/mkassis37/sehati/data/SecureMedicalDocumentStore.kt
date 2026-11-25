@@ -106,7 +106,8 @@ class SecureMedicalDocumentStore(private val context: Context) {
 
     fun clearTemporaryPdfs() {
         context.cacheDir.listFiles()?.filter {
-            it.isFile && it.name.startsWith("sehati-") && it.extension.lowercase() in setOf("pdf", "jpg", "png", "webp")
+            val staleCapture = !it.name.startsWith("sehati-camera-") || System.currentTimeMillis() - it.lastModified() > 3_600_000
+            it.isFile && staleCapture && it.name.startsWith("sehati-") && it.extension.lowercase() in setOf("pdf", "jpg", "png", "webp")
         }?.forEach { it.delete() }
     }
 

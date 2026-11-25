@@ -840,9 +840,24 @@ private fun LabResultsScreen(member: FamilyMember, records: List<LabResult>, doc
 private fun AddLabResultDialog(memberId: Long, onDismiss: () -> Unit, initialCandidate: LabReportCandidate? = null, onSave: (LabResult) -> Unit) {
     var name by rememberSaveable(initialCandidate?.testName) { mutableStateOf(initialCandidate?.testName.orEmpty()) }; var result by rememberSaveable(initialCandidate?.value) { mutableStateOf(initialCandidate?.value?.toString().orEmpty()) }; var unit by rememberSaveable(initialCandidate?.unit) { mutableStateOf(initialCandidate?.unit.orEmpty()) }; var low by rememberSaveable(initialCandidate?.referenceLow) { mutableStateOf(initialCandidate?.referenceLow?.toString().orEmpty()) }; var high by rememberSaveable(initialCandidate?.referenceHigh) { mutableStateOf(initialCandidate?.referenceHigh?.toString().orEmpty()) }; var date by rememberSaveable(initialCandidate?.performedAt) { mutableStateOf(initialCandidate?.performedAt ?: LocalDate.now().toString()) }; var lab by rememberSaveable(initialCandidate?.testName) { mutableStateOf("") }; var notes by rememberSaveable(initialCandidate?.sourceLine) { mutableStateOf(initialCandidate?.let { "اقتراح مستخرج من PDF. راجع النتيجة والوحدة والمجال والتاريخ مقابل التقرير الأصلي." + if (it.flag.isNotBlank()) " علامة المختبر: " + it.flag else "" }.orEmpty()) }; var error by rememberSaveable { mutableStateOf("") }
     var unitMenuExpanded by rememberSaveable { mutableStateOf(false) }
+    var testNameMenuExpanded by rememberSaveable { mutableStateOf(false) }
     var customUnit by rememberSaveable(initialCandidate?.unit) { mutableStateOf(initialCandidate?.unit?.let { it.isNotBlank() && it !in LAB_RESULT_UNITS } == true) }
     AlertDialog(onDismissRequest = onDismiss, title = { Text("إضافة نتيجة فحص") }, text = { Column(Modifier.fillMaxWidth().heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlinedTextField(name, { name = it }, label = { Text("اسم الفحص") }, modifier = Modifier.fillMaxWidth())
+        ExposedDropdownMenuBox(expanded = testNameMenuExpanded, onExpandedChange = { testNameMenuExpanded = it }) {
+            OutlinedTextField(value = name, onValueChange = { name = it; testNameMenuExpanded = true },
+                label = { Text("اسم الفحص") }, placeholder = { Text("اكتبي الاسم أو اختاري فحصًا شائعًا") },
+                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = testNameMenuExpanded) },
+                modifier = Modifier.fillMaxWidth().menuAnchor(), singleLine = true)
+            val matchingTests = LAB_TEST_NAME_SUGGESTIONS.filter { it.contains(name.trim(), ignoreCase = true) }
+            ExposedDropdownMenu(expanded = testNameMenuExpanded, onDismissRequest = { testNameMenuExpanded = false }) {
+                (if (name.isBlank()) LAB_TEST_NAME_SUGGESTIONS else matchingTests).forEach { option ->
+                    DropdownMenuItem(text = { Text(option) }, onClick = { name = option; testNameMenuExpanded = false })
+                }
+                if (name.isNotBlank() && matchingTests.none { it.equals(name.trim(), ignoreCase = true) }) {
+                    DropdownMenuItem(text = { Text("استخدام الاسم المكتوب: ${name.trim()}") }, onClick = { testNameMenuExpanded = false })
+                }
+            }
+        }
         OutlinedTextField(result, { result = it }, label = { Text("النتيجة الرقمية") }, modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
         ExposedDropdownMenuBox(expanded = unitMenuExpanded, onExpandedChange = { unitMenuExpanded = it }) {
             OutlinedTextField(value = if (customUnit) "وحدة مخصصة" else unit, onValueChange = {}, readOnly = true,
@@ -875,6 +890,38 @@ private val LAB_RESULT_UNITS = listOf(
     "بدون وحدة", "mg/dL", "mmol/L", "µmol/L", "ng/mL", "pg/mL", "g/dL", "g/L", "mg/L",
     "mEq/L", "mmol/mol", "%", "U/L", "IU/L", "mIU/L", "µIU/mL", "ng/dL", "µg/dL", "µg/L",
     "fL", "pg", "10³/µL", "10⁶/µL", "cells/µL", "mm/h", "mL/min/1.73m²", "copies/mL", "ثانية", "دقيقة"
+)
+private val LAB_TEST_NAME_SUGGESTIONS = listOf(
+    "تعداد الدم الكامل (CBC)", "الهيموغلوبين (Hemoglobin)", "الهيماتوكريت (Hematocrit)",
+    "كريات الدم البيضاء (WBC)", "كريات الدم الحمراء (RBC)", "الصفائح الدموية (Platelets)",
+    "العدلات (Neutrophils)", "الخلايا اللمفاوية (Lymphocytes)", "الخلايا الحمضية (Eosinophils)",
+    "سكر صائم (Fasting glucose)", "سكر عشوائي (Random glucose)", "سكر بعد الطعام (Post-meal glucose)",
+    "الهيموغلوبين السكري (HbA1c)", "الكرياتينين (Creatinine)", "اليوريا (Urea)", "نيتروجين اليوريا (BUN)",
+    "معدل الترشيح الكبيبي (eGFR)", "حمض اليوريك (Uric acid)", "إنزيم ALT", "إنزيم AST", "الفوسفاتاز القلوي (ALP)",
+    "جاما جلوتاميل ترانسفيراز (GGT)", "البيليروبين الكلي (Total bilirubin)", "البيليروبين المباشر (Direct bilirubin)",
+    "الألبومين (Albumin)", "الكوليسترول الكلي (Total cholesterol)", "الكوليسترول الضار (LDL)",
+    "الكوليسترول النافع (HDL)", "الدهون الثلاثية (Triglycerides)", "الصوديوم (Sodium)", "البوتاسيوم (Potassium)",
+    "الكلوريد (Chloride)", "الكالسيوم (Calcium)", "المغنيسيوم (Magnesium)", "الفوسفات (Phosphate)",
+    "هرمون الغدة الدرقية المحفز (TSH)", "الثيروكسين الحر (Free T4)", "ثلاثي يودوثيرونين الحر (Free T3)",
+    "فيتامين د (Vitamin D)", "فيتامين ب12 (Vitamin B12)", "حمض الفوليك (Folate)", "الفيريتين (Ferritin)",
+    "الحديد (Iron)", "البروتين المتفاعل C (CRP)", "سرعة ترسيب الدم (ESR)", "تحليل البول الكامل (Urinalysis)",
+    "مزرعة البول (Urine culture)", "مزرعة الدم (Blood culture)", "اختبار الحمل (hCG)", "زمن البروثرومبين (PT/INR)",
+    "زمن الثرومبوبلاستين الجزئي (aPTT)", "الأميليز (Amylase)", "الليباز (Lipase)", "مستضد البروستاتا (PSA)",
+    "الخلايا الوحيدة (Monocytes)", "الخلايا القاعدية (Basophils)", "الشبكيات (Reticulocytes)", "لطاخة الدم (Blood smear)",
+    "الغازات في الدم (Blood gas)", "البيكربونات (Bicarbonate)", "ثاني أكسيد الكربون (CO2)", "الأسمولالية (Osmolality)",
+    "اللاكتات (Lactate)", "بروتين كلي (Total protein)", "غلوبولين (Globulin)", "نسبة ألبومين/غلوبولين (A/G ratio)",
+    "نازعة هيدروجين اللاكتات (LDH)", "كرياتين كيناز (CK)", "تروبونين (Troponin)", "الببتيد الدماغي المدر للصوديوم (BNP)",
+    "الأمونيا (Ammonia)", "النحاس (Copper)", "الزنك (Zinc)", "فيتامين أ (Vitamin A)", "فيتامين هـ (Vitamin E)",
+    "مستوى حمض الفالبرويك (Valproate level)", "مستوى الليثيوم (Lithium level)", "مستوى الديجوكسين (Digoxin level)",
+    "مستضد التهاب الكبد B (HBsAg)", "أجسام مضادة لالتهاب الكبد C (Anti-HCV)", "فحص HIV", "فحص كوفيد-19 (COVID-19)",
+    "فحص الإنفلونزا (Influenza)", "فحص جرثومة المعدة (H. pylori)", "أجسام مضادة للسيلياك (tTG-IgA)",
+    "الأجسام المضادة للنواة (ANA)", "العامل الروماتويدي (Rheumatoid factor)", "أجسام مضادة CCP",
+    "هرمون جار الدرقية (PTH)", "الكالسيتونين (Calcitonin)", "هرمون النمو (Growth hormone)", "البرولاكتين (Prolactin)",
+    "التستوستيرون (Testosterone)", "الإستروجين (Estradiol)", "البروجسترون (Progesterone)",
+    "الهرمون اللوتيني (LH)", "الهرمون المنبه للجريب (FSH)", "تحليل البراز (Stool analysis)", "الدم الخفي في البراز (FOBT)",
+    "زرع البلغم (Sputum culture)", "مزرعة الحلق (Throat culture)", "مزرعة الجروح (Wound culture)",
+    "الكثافة النوعية للبول (Urine specific gravity)", "الزلال في البول (Urine albumin)",
+    "نسبة الألبومين/الكرياتينين في البول (UACR)", "تحليل آخر"
 )
 @Composable
 private fun DetailLine(label: String, value: String) {
@@ -1015,14 +1062,19 @@ private fun AllergyScreen(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AllergyDialog(memberId: Long, onDismiss: () -> Unit, onSave: (AllergyRecord) -> Unit) {
     var category by rememberSaveable { mutableStateOf("دواء") }
+    var categoryMenuExpanded by rememberSaveable { mutableStateOf(false) }
+    var customCategory by rememberSaveable { mutableStateOf("") }
     var substance by rememberSaveable { mutableStateOf("") }
     var commercialName by rememberSaveable { mutableStateOf("") }
     var activeIngredient by rememberSaveable { mutableStateOf("") }
     var reaction by rememberSaveable { mutableStateOf("") }
     var severity by rememberSaveable { mutableStateOf("متوسطة") }
+    var severityMenuExpanded by rememberSaveable { mutableStateOf(false) }
+    var customSeverity by rememberSaveable { mutableStateOf("") }
     var notes by rememberSaveable { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1030,8 +1082,21 @@ private fun AllergyDialog(memberId: Long, onDismiss: () -> Unit, onSave: (Allerg
         text = {
             Column(Modifier.fillMaxWidth().height(420.dp).verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(category, { category = it }, label = { Text("التصنيف (دواء، طعام، بيئة)") },
-                    modifier = Modifier.fillMaxWidth(), singleLine = true)
+                ExposedDropdownMenuBox(expanded = categoryMenuExpanded, onExpandedChange = { categoryMenuExpanded = it }) {
+                    OutlinedTextField(value = category, onValueChange = {}, readOnly = true,
+                        label = { Text("تصنيف الحساسية") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = categoryMenuExpanded) },
+                        modifier = Modifier.fillMaxWidth().menuAnchor(), singleLine = true)
+                    ExposedDropdownMenu(expanded = categoryMenuExpanded, onDismissRequest = { categoryMenuExpanded = false }) {
+                        listOf("دواء", "طعام", "حساسية أخرى", "مسبب آخر", "مادة بيئية", "لسعة أو لدغة حشرة", "أخرى (كتابة التصنيف)").forEach { option ->
+                            DropdownMenuItem(text = { Text(option) }, onClick = {
+                                category = if (option.startsWith("أخرى")) "أخرى" else option
+                                categoryMenuExpanded = false
+                            })
+                        }
+                    }
+                }
+                if (category == "أخرى") OutlinedTextField(customCategory, { customCategory = it }, label = { Text("اكتبي التصنيف") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
                 OutlinedTextField(substance, { substance = it }, label = { Text("المادة المسببة / اسم الحساسية") },
                     modifier = Modifier.fillMaxWidth(), singleLine = true)
                 if (category.contains("دواء")) {
@@ -1045,8 +1110,21 @@ private fun AllergyDialog(memberId: Long, onDismiss: () -> Unit, onSave: (Allerg
                 }
                 OutlinedTextField(reaction, { reaction = it }, label = { Text("الأعراض أو رد الفعل") },
                     modifier = Modifier.fillMaxWidth(), minLines = 2)
-                OutlinedTextField(severity, { severity = it }, label = { Text("الشدة") },
-                    modifier = Modifier.fillMaxWidth(), singleLine = true)
+                ExposedDropdownMenuBox(expanded = severityMenuExpanded, onExpandedChange = { severityMenuExpanded = it }) {
+                    OutlinedTextField(value = severity, onValueChange = {}, readOnly = true,
+                        label = { Text("شدة التفاعل") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = severityMenuExpanded) },
+                        modifier = Modifier.fillMaxWidth().menuAnchor(), singleLine = true)
+                    ExposedDropdownMenu(expanded = severityMenuExpanded, onDismissRequest = { severityMenuExpanded = false }) {
+                        listOf("خفيفة", "متوسطة", "شديدة", "مهددة للحياة", "غير معروفة", "أخرى (كتابة الشدة)").forEach { option ->
+                            DropdownMenuItem(text = { Text(option) }, onClick = {
+                                severity = if (option.startsWith("أخرى")) "أخرى" else option
+                                severityMenuExpanded = false
+                            })
+                        }
+                    }
+                }
+                if (severity == "أخرى") OutlinedTextField(customSeverity, { customSeverity = it }, label = { Text("اكتبي تصنيف الشدة") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
                 OutlinedTextField(notes, { notes = it }, label = { Text("ملاحظات إضافية") },
                     modifier = Modifier.fillMaxWidth(), minLines = 2)
             }
@@ -1054,9 +1132,9 @@ private fun AllergyDialog(memberId: Long, onDismiss: () -> Unit, onSave: (Allerg
         confirmButton = {
             Button(enabled = substance.isNotBlank() || commercialName.isNotBlank() || activeIngredient.isNotBlank(), onClick = {
                 onSave(AllergyRecord(memberId = memberId,
-                    category = category.trim().ifBlank { "غير محدد" }, substance = substance.trim(),
+                    category = if (category == "أخرى") customCategory.trim().ifBlank { "أخرى" } else category.trim().ifBlank { "غير محدد" }, substance = substance.trim(),
                     commercialName = commercialName.trim(), activeIngredient = activeIngredient.trim(),
-                    reaction = reaction.trim(), severity = severity.trim(), notes = notes.trim()))
+                    reaction = reaction.trim(), severity = if (severity == "أخرى") customSeverity.trim().ifBlank { "أخرى" } else severity.trim(), notes = notes.trim()))
             }) { Text("حفظ") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("إلغاء") } }

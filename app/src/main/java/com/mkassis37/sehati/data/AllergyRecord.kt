@@ -11,6 +11,8 @@ data class AllergyRecord(
     @ColumnInfo(defaultValue = "1") val memberId: Long = 1,
     val category: String,
     val substance: String,
+    val commercialName: String = "",
+    val activeIngredient: String = "",
     val reaction: String,
     val severity: String,
     val notes: String = "",

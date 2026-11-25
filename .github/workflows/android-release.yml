@@ -73,7 +73,7 @@ jobs:
         run: |
           APK="app/build/outputs/apk/release/app-release.apk"
           test -s "$APK"
-          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK"
 
       - name: Prepare build artifacts
         run: |
@@ -82,12 +82,12 @@ jobs:
           cp app/build/outputs/apk/release/app-release.apk "release-assets/Sehati-${SAFE_REF_NAME}.apk"
           cp app/build/outputs/bundle/release/app-release.aab "release-assets/Sehati-${SAFE_REF_NAME}.aab"
           sha256sum release-assets/* > release-assets/SHA256SUMS.txt
-          VERSION_CODE=$(grep -E 'versionCode[[:space:]]*=' app/build.gradle.kts | head -1 | sed -E 's/.*=[[:space:]]*([0-9]+).*/\\1/')
-          VERSION_NAME=$(grep -E 'versionName[[:space:]]*=' app/build.gradle.kts | head -1 | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\\1/')
+          VERSION_CODE=$(grep -E 'versionCode[[:space:]]*=' app/build.gradle.kts | head -1 | sed -E 's/.*=[[:space:]]*([0-9]+).*/\1/')
+          VERSION_NAME=$(grep -E 'versionName[[:space:]]*=' app/build.gradle.kts | head -1 | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/')
           APK_NAME="Sehati-${SAFE_REF_NAME}.apk"
           APK_SHA256=$(sha256sum "release-assets/$APK_NAME" | awk '{print $1}')
           APK_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/$APK_NAME"
-          printf '{\\n  "versionCode": %s,\\n  "versionName": "%s",\\n  "apkUrl": "%s",\\n  "sha256": "%s"\\n}\\n' "$VERSION_CODE" "$VERSION_NAME" "$APK_URL" "$APK_SHA256" > release-assets/update.json
+          printf '{\n  "versionCode": %s,\n  "versionName": "%s",\n  "apkUrl": "%s",\n  "sha256": "%s"\n}\n' "$VERSION_CODE" "$VERSION_NAME" "$APK_URL" "$APK_SHA256" > release-assets/update.json
 
       - name: Upload signed test build
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}

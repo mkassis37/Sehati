@@ -20,6 +20,9 @@ import android.net.Uri
 import com.mkassis37.sehati.security.AppLockStore
 import com.mkassis37.sehati.reminders.MedicalReminders
 import com.mkassis37.sehati.reminders.ReminderSettings
+import com.mkassis37.sehati.reports.MedicalReportScreen
+import com.mkassis37.sehati.reports.rememberMedicalReportActions
+import com.mkassis37.sehati.reports.reportRecords
 import kotlinx.coroutines.CancellationException
 import com.mkassis37.sehati.data.EncryptedBackup
 import com.mkassis37.sehati.data.BackupStatusStore
@@ -269,6 +272,8 @@ private fun SehatiApp(
         }
     }
 
+    val reportActions = rememberMedicalReportActions()
+
     val title = when (screen) {
         Screen.MEMBERS -> "أفراد العائلة"
         Screen.DETAILS -> selected?.fullName ?: "الملف الطبي"
@@ -301,7 +306,8 @@ private fun SehatiApp(
             } else Screen.MEMBERS
             Screen.APPOINTMENTS -> if (selectedId != null) Screen.DETAILS else Screen.MEMBERS
             Screen.DOCUMENTS -> if (selectedId != null) Screen.DETAILS else Screen.MEMBERS
-            Screen.REPORTS, Screen.REMINDERS -> Screen.MEMBERS
+            Screen.REPORTS -> if (selectedId != null) Screen.DETAILS else Screen.MEMBERS
+            Screen.REMINDERS -> Screen.MEMBERS
             Screen.MEMBERS -> Screen.MEMBERS
         }
     }
@@ -380,6 +386,7 @@ private fun SehatiApp(
                     onAppointments = { screen = Screen.APPOINTMENTS },
                     appointmentCount = appointments.size,
                     onDocuments = { screen = Screen.DOCUMENTS },
+                    onReports = { screen = Screen.REPORTS },
                     onDelete = {
                         scope.launch {
                             try {
@@ -619,7 +626,15 @@ private fun SehatiApp(
                 actions = documentLibrary,
                 modifier = Modifier.padding(padding)
             )
-            Screen.REPORTS -> FutureScreen("التقارير الصحية", "سيُضاف هنا إنشاء ملخصات وتقارير صحية.", Modifier.padding(padding))
+            Screen.REPORTS -> if (selected != null) key(selected.id) {
+                MedicalReportScreen(
+                    person = selected.fullName,
+                    records = reportRecords(selected, allergies, labResults, medications, appointments,
+                        medicalDocuments, conditions, procedures, historyEvents, familyHistory, measurements),
+                    actions = reportActions,
+                    modifier = Modifier.padding(padding)
+                )
+            }
             Screen.REMINDERS -> Column(Modifier.padding(padding).padding(16.dp).verticalScroll(rememberScrollState())) { ReminderSettings(reminders) }
         }
     }
@@ -798,6 +813,7 @@ private fun MemberDetailsScreen(
     onAppointments: () -> Unit,
     appointmentCount: Int,
     onDocuments: () -> Unit,
+    onReports: () -> Unit,
     onDelete: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -829,6 +845,7 @@ private fun MemberDetailsScreen(
             Text("المواعيد والزيارات ($appointmentCount)")
         }
         OutlinedButton(onClick = onDocuments, modifier = Modifier.fillMaxWidth()) { Text("مكتبة الملفات الطبية") }
+        OutlinedButton(onClick = onReports, modifier = Modifier.fillMaxWidth()) { Text("التقارير الطبية PDF") }
         OutlinedButton(onClick = onEmergency, modifier = Modifier.fillMaxWidth()) { Text("بطاقة الطوارئ") }
         Card(Modifier.fillMaxWidth().clickable(onClick = onAllergies)) {
             Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween,

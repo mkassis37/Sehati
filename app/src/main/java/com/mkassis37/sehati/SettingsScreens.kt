@@ -309,7 +309,7 @@ private fun DiagnosticsSection(lastBackupAt: Long?) {
         InfoRow("آخر نسخة يدوية", lastBackupAt?.let(::formatTimestamp) ?: "لا توجد نسخة مسجلة")
         InfoRow("Google Drive", "غير متصل وغير مهيأ")
         InfoRow("التنبيهات والزيارات", "تتوفر إعدادات التنبيهات وسجل المواعيد")
-        InfoRow("التقارير الطبية PDF", "غير مكتملة")
+        InfoRow("التقارير الطبية PDF", "متاحة من ملف الفرد")
         Text("لا تعرض شاشة التشخيص أي أسماء أو قيم طبية.", style = MaterialTheme.typography.bodySmall)
     }
 }

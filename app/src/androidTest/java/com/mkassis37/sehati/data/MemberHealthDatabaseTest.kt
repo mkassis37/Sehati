@@ -113,4 +113,41 @@ class MemberHealthDatabaseTest {
         }
         migrated.close()
     }
+    @Test
+    fun migrationFromVersionSevenPreservesNumericResultsAndAllowsTextResults() {
+        val databaseName = "sehati-v7-to-v8-test"
+        migrationHelper.createDatabase(databaseName, 7).use { legacy ->
+            legacy.execSQL(
+                """INSERT INTO lab_results
+                   (id, memberId, testName, value, unit, referenceLow, referenceHigh, performedAt,
+                    laboratory, source, notes, createdAt)
+                   VALUES (15, 41, 'Synthetic numeric', 2.5, 'g/L', 1, 4, '2024-01-01',
+                           'Synthetic lab', 'manual', 'fixture', 1234)"""
+            )
+        }
+        migrationHelper.runMigrationsAndValidate(
+            databaseName, 8, true, MedicalDatabaseMigrations.LAB_RESULTS_7_8
+        ).use { migrated ->
+            migrated.query("SELECT memberId, value, unit, referenceLow, referenceHigh, qualitativeValue FROM lab_results WHERE id = 15").use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals(41L, cursor.getLong(0))
+                assertEquals(2.5, cursor.getDouble(1), 0.0)
+                assertEquals("g/L", cursor.getString(2))
+                assertEquals(1.0, cursor.getDouble(3), 0.0)
+                assertEquals(4.0, cursor.getDouble(4), 0.0)
+                assertTrue(cursor.isNull(5))
+            }
+            migrated.execSQL(
+                """INSERT INTO lab_results
+                   (memberId, testName, qualitativeValue, unit, performedAt, laboratory, source, notes, createdAt)
+                   VALUES (42, 'Synthetic qualitative', 'Trace', '', '2024-01-02', '', 'manual', '', 1235)"""
+            )
+            migrated.query("SELECT value, qualitativeValue FROM lab_results WHERE memberId = 42").use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertTrue(cursor.isNull(0))
+                assertEquals("Trace", cursor.getString(1))
+            }
+        }
+    }
+
 }

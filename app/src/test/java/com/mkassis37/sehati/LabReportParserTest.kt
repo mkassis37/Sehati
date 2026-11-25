@@ -21,7 +21,7 @@ class LabReportParserTest {
         )
         assertEquals(1, rows.size)
         assertEquals("Hemoglobin", rows[0].testName)
-        assertEquals(11.5, rows[0].value, 0.0001)
+        assertEquals(11.5, rows[0].value!!, 0.0001)
         assertEquals("g/dL", rows[0].unit)
         assertEquals(13.2, rows[0].referenceLow!!, 0.0001)
         assertEquals(16.6, rows[0].referenceHigh!!, 0.0001)
@@ -33,7 +33,7 @@ class LabReportParserTest {
     fun parsesOneSidedReferenceLimit() {
         val rows = LabReportParser.parse("ALT\n26.3\nRef: <=41\nU/L")
         assertEquals(1, rows.size)
-        assertEquals(26.3, rows[0].value, 0.0001)
+        assertEquals(26.3, rows[0].value!!, 0.0001)
         assertEquals(null, rows[0].referenceLow)
         assertEquals(41.0, rows[0].referenceHigh!!, 0.0001)
     }
@@ -43,7 +43,7 @@ class LabReportParserTest {
         val rows = LabReportParser.parse("فيتامين د\n22,3\n20 - 50\nng/mL")
         assertEquals(1, rows.size)
         assertEquals("فيتامين د", rows[0].testName)
-        assertEquals(22.3, rows[0].value, 0.0001)
+        assertEquals(22.3, rows[0].value!!, 0.0001)
     }
 
     @Test
@@ -51,4 +51,13 @@ class LabReportParserTest {
         val rows = LabReportParser.parse("Pus Cells\n2-3\n0-5/HPF\n")
         assertTrue(rows.isEmpty())
     }
+    @Test
+    fun parsesQualitativeTableCellsAndRetainsArabicDigitsInNumericResults() {
+        val rows = LabReportParser.parse("Urine appearance\tHazy\tClear\nKetones\tNegative\tNegative\nفيتامين د\n٢٢٫٣\n٢٠ - ٥٠\nng/mL")
+        assertEquals("Hazy", rows.first { it.testName == "Urine appearance" }.qualitativeValue)
+        assertEquals(null, rows.first { it.testName == "Ketones" }.value)
+        assertEquals("Negative", rows.first { it.testName == "Ketones" }.qualitativeValue)
+        assertEquals(22.3, rows.first { it.testName == "فيتامين د" }.value!!, 0.0001)
+    }
+
 }

@@ -2,21 +2,24 @@ package com.mkassis37.sehati
 
 /**
  * Conservative parser for the common vertical table layout used by laboratory PDFs.
- * A candidate is emitted only when a test name, numeric result, reference line and unit
- * can be associated in a recognizable sequence. Every candidate requires user review.
+ * Recognizes numeric rows and known qualitative cells in structured tables.
+ * Every candidate requires user review.
  */
 data class LabReportCandidate(
     val testName: String,
-    val value: Double,
+    val value: Double?,
     val unit: String,
     val referenceLow: Double?,
     val referenceHigh: Double?,
     val flag: String,
     val performedAt: String?,
-    val sourceLine: String
+    val sourceLine: String,
+    val qualitativeValue: String? = null
 )
 
 object LabReportParser {
+    private val qualitativeValues = setOf("positive", "negative", "nil", "hazy", "trace",
+        "إيجابي", "سلبي", "عكر", "آثار")
     private val isoDate = Regex("""\b(\d{4}-\d{2}-\d{2})\b""")
     private val monthDate = Regex("""\b([A-Za-z]{3,9})\s+(\d{1,2}),\s*(\d{4})\b""")
     private val numericResult = Regex("""^([+-]?(?:\d+(?:[.,]\d*)?|[.,]\d+))\s*([LH*])?$""")
@@ -31,7 +34,11 @@ object LabReportParser {
     )
 
     fun parse(text: String): List<LabReportCandidate> {
-        val lines = text.lineSequence().map { it.replace('\u00a0', ' ').trim() }
+        val lines = text.lineSequence().map { line ->
+            line.replace('\u00a0', ' ').replace('٫', '.').map { character ->
+                character.digitToIntOrNull()?.digitToChar() ?: character
+            }.joinToString("").trim()
+        }
             .filter { it.isNotBlank() }.toList()
         val found = linkedMapOf<String, LabReportCandidate>()
         val reportDate = extractReportDate(lines)
@@ -55,15 +62,20 @@ object LabReportParser {
 
         fun add(nameRaw: String, resultRaw: String, referenceRaw: String?, unitRaw: String, source: String) {
             val name = nameRaw.trim().trim(':', '-', '•')
-            val result = numericResult.matchEntire(resultRaw.trim()) ?: return
-            val value = numeric(result.groupValues[1]) ?: return
-            val ref = reference(referenceRaw)
+            val resultText = resultRaw.trim()
+            val result = numericResult.matchEntire(resultText)
+            val value = result?.groupValues?.get(1)?.let(::numeric)
+            val qualitative = resultText.takeIf { it.lowercase() in qualitativeValues }
+            if (value == null && qualitative == null) return
+            val ref = if (qualitative == null) reference(referenceRaw) else null
             val unit = unitRaw.trim()
             if (name.length !in 2..70 || name.none { it.isLetter() } ||
                 unit.length > 24) return
             val candidate = LabReportCandidate(name, value, unit, ref?.first, ref?.second,
-                result.groupValues[2], reportDate, source)
-            found[name.lowercase()] = candidate
+                result?.groupValues?.get(2).orEmpty(), reportDate, source, qualitative)
+            val key = listOf(name.lowercase(), value, qualitative?.lowercase(), unit,
+                ref?.first, ref?.second, candidate.flag).joinToString("\u0000")
+            found.putIfAbsent(key, candidate)
         }
 
         // Typical PDF text layer: each cell appears on its own line.
@@ -112,13 +124,14 @@ object LabReportParser {
         lines.forEach { line ->
             val cells = line.split('\t').map(String::trim).filter(String::isNotEmpty)
             if (cells.size < 2) return@forEach
-            val resultIndex = cells.indexOfFirst { numericResult.matches(it) }
+            val resultIndex = cells.indexOfFirst { numericResult.matches(it) || it.lowercase() in qualitativeValues }
             if (resultIndex <= 0) return@forEach
             val name = cells.take(resultIndex).joinToString(" ")
             val result = cells[resultIndex]
             val tail = cells.drop(resultIndex + 1)
             val referenceCell = tail.firstOrNull { reference(it) != null }
-            val unit = tail.firstOrNull { it != referenceCell && it.length <= 24 }.orEmpty()
+            val unit = if (result.lowercase() in qualitativeValues) "" else
+                tail.firstOrNull { it != referenceCell && it.length <= 24 }.orEmpty()
             add(name, result, referenceCell, unit, line)
         }
         return found.values.toList()

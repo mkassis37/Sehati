@@ -47,7 +47,7 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
         val measurements = rows.measurements
         val payload = JSONObject()
             .put("format", "sehati-backup")
-            .put("version", 2)
+            .put("version", if (labResults.any { it.qualitativeValue != null }) 3 else 2)
             .put("createdAt", System.currentTimeMillis())
             .put("members", JSONArray().apply {
                 members.forEach { m -> put(JSONObject()
@@ -71,7 +71,8 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
             .put("labResults", JSONArray().apply {
                 labResults.forEach { r -> put(JSONObject()
                     .put("id", r.id).put("memberId", r.memberId).put("testName", r.testName)
-                    .put("value", r.value).put("unit", r.unit)
+                    .put("value", r.value ?: JSONObject.NULL).put("unit", r.unit)
+                    .put("qualitativeValue", r.qualitativeValue ?: JSONObject.NULL)
                     .put("referenceLow", r.referenceLow ?: JSONObject.NULL)
                     .put("referenceHigh", r.referenceHigh ?: JSONObject.NULL)
                     .put("performedAt", r.performedAt).put("laboratory", r.laboratory)
@@ -131,7 +132,7 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
 
     suspend fun preview(resolver: ContentResolver, uri: Uri, password: CharArray): BackupPreview {
         val root = decrypt(resolver.openInputStream(uri)!!, password)
-        require(root.optString("format") == "sehati-backup" && root.optInt("version") in 1..2) {
+        require(root.optString("format") == "sehati-backup" && root.optInt("version") in 1..3) {
             "Unsupported backup file."
         }
         val names = buildList {
@@ -169,7 +170,9 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
         val labRows = (0 until labResults.length()).map { i ->
             val o = labResults.getJSONObject(i)
             LabResult(id = o.getLong("id"), memberId = o.getLong("memberId"),
-                testName = o.getString("testName"), value = o.getDouble("value"),
+                testName = o.getString("testName"),
+                value = if (o.isNull("value")) null else o.getDouble("value"),
+                qualitativeValue = if (o.isNull("qualitativeValue")) null else o.getString("qualitativeValue"),
                 unit = o.optString("unit"),
                 referenceLow = if (o.isNull("referenceLow")) null else o.getDouble("referenceLow"),
                 referenceHigh = if (o.isNull("referenceHigh")) null else o.getDouble("referenceHigh"),
@@ -235,6 +238,12 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
                 relatedProcedureId = if (o.isNull("relatedProcedureId")) null else o.optLong("relatedProcedureId"),
                 addedAt = o.optLong("addedAt"))
         }
+        require(labRows.all { row ->
+            val number = row.value
+            val text = row.qualitativeValue
+            (number != null && number.isFinite() && text == null) ||
+                (number == null && !text.isNullOrBlank())
+        }) { "Backup contains an invalid laboratory result." }
         require(allergyRows.all { row -> memberRows.any { it.id == row.memberId } } &&
             labRows.all { row -> memberRows.any { it.id == row.memberId } } &&
             medicationRows.all { row -> memberRows.any { it.id == row.memberId } } &&

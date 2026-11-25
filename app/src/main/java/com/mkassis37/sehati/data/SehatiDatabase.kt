@@ -9,7 +9,7 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
 
-@Database(entities = [FamilyMember::class, AllergyRecord::class, LabResult::class, MedicalDocument::class, MedicationRecord::class, ChronicCondition::class, MedicalProcedure::class, MedicalHistoryEvent::class, FamilyDiseaseHistory::class, BodyMeasurement::class], version = 7, exportSchema = true)
+@Database(entities = [FamilyMember::class, AllergyRecord::class, LabResult::class, MedicalDocument::class, MedicationRecord::class, ChronicCondition::class, MedicalProcedure::class, MedicalHistoryEvent::class, FamilyDiseaseHistory::class, BodyMeasurement::class], version = 8, exportSchema = true)
 abstract class SehatiDatabase : RoomDatabase() {
     abstract fun medicalDao(): MedicalDao
 
@@ -173,7 +173,7 @@ abstract class SehatiDatabase : RoomDatabase() {
             val factory = SupportOpenHelperFactory(passphrase)
             return Room.databaseBuilder(context, SehatiDatabase::class.java, "sehati.db")
                 .openHelperFactory(factory)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MedicalDatabaseMigrations.LAB_RESULTS_7_8)
                 .build()
         }
     }

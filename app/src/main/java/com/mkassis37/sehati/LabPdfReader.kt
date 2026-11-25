@@ -40,6 +40,9 @@ import androidx.compose.ui.unit.dp
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import com.google.android.gms.tasks.Task
@@ -85,65 +88,81 @@ fun LabPdfReader(onExtractedText: (String) -> Unit, onCandidateSelected: (LabRep
         busy = true
         try {
             val result = withContext(Dispatchers.IO) {
-                PDFBoxResourceLoader.init(context.applicationContext)
-                val selectableText = context.contentResolver.openInputStream(uri)?.use { input ->
-                    runCatching { PDDocument.load(input).use { PDFTextStripper().getText(it) } }.getOrDefault("")
-                }.orEmpty()
                 val descriptor = context.contentResolver.openFileDescriptor(uri, "r")
                     ?: error("لم يتمكن أندرويد من فتح الملف. جرّبي حفظ PDF على الجهاز أولًا.")
                 descriptor.use { parcel ->
+                    require(parcel.statSize in 1..MAX_LAB_PDF_BYTES) {
+                        "اختر ملف PDF محليًا لا يتجاوز 25 ميغابايت."
+                    }
                     PdfRenderer(parcel).use { renderer ->
-                        require(renderer.pageCount > 0) { "ملف PDF لا يحتوي صفحات." }
                         val pages = renderer.pageCount
-                        var firstBitmap: Bitmap? = null
-                        val text = StringBuilder()
-                        val hasTextLayer = selectableText.trim().length > 40 && LabReportParser.parse(selectableText).isNotEmpty()
-                        if (hasTextLayer) {
-                            text.append(selectableText)
-                        } else {
-                            if (selectableText.isNotBlank()) text.append(selectableText).append("\n\n")
-                            val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
-                            val tess = runCatching { createArabicTesseract(context) }.getOrNull()
-                            try {
-                                for (index in 0 until pages) {
-                                    renderer.openPage(index).use { page ->
-                                        val scale = minOf(2.0, 1800.0 / page.width, 2400.0 / page.height)
-                                        val bitmap = Bitmap.createBitmap(
-                                            (page.width * scale).toInt().coerceAtLeast(1),
-                                            (page.height * scale).toInt().coerceAtLeast(1),
-                                            Bitmap.Config.ARGB_8888
-                                        )
-                                        page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                                        if (index == 0) firstBitmap = bitmap
-                                        val arabic = runCatching {
-                                            tess?.setImage(bitmap)
-                                            tess?.getUTF8Text().orEmpty()
-                                        }.getOrDefault("")
-                                        val latin = runCatching {
-                                            recognizer.process(InputImage.fromBitmap(bitmap, 0)).awaitResult().text
-                                        }.getOrDefault("")
-                                        text.append("\n\n--- الصفحة ${index + 1} ---\n")
-                                            .append(arabic).append("\n").append(latin)
-                                        if (index != 0) bitmap.recycle()
+                        require(pages in 1..MAX_LAB_PDF_PAGES) { "يدعم الاستيراد من صفحة واحدة إلى 40 صفحة." }
+                        PDFBoxResourceLoader.init(context.applicationContext)
+                        val pageTexts = context.contentResolver.openInputStream(uri)?.use { input ->
+                            runCatching {
+                                PDDocument.load(input).use { document ->
+                                    val stripper = PDFTextStripper()
+                                    List(pages) { index ->
+                                        ensureActive()
+                                        stripper.startPage = index + 1
+                                        stripper.endPage = index + 1
+                                        stripper.getText(document).take(MAX_LAB_PAGE_TEXT)
                                     }
                                 }
-                            } finally {
-                                tess?.recycle()
-                                recognizer.close()
+                            }.getOrElse {
+                                if (it is CancellationException) throw it
+                                emptyList()
                             }
+                        }.orEmpty()
+                        val text = StringBuilder()
+                        val recognizer = lazy { TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS) }
+                        val tess = lazy { runCatching { createArabicTesseract(context) }.getOrNull() }
+                        try {
+                            for (index in 0 until pages) {
+                                ensureActive()
+                                val pageText = pageTexts.getOrElse(index) { "" }
+                                text.append("\n\n--- الصفحة ${index + 1} ---\n").append(pageText)
+                                if (LabReportParser.parse(pageText).isNotEmpty()) continue
+                                renderer.openPage(index).use { page ->
+                                    val bitmap = page.renderLabPage()
+                                    try {
+                                        val arabic = runCatching {
+                                            tess.value?.setImage(bitmap)
+                                            tess.value?.getUTF8Text().orEmpty()
+                                        }.getOrDefault("")
+                                        val latin = runCatching {
+                                            // ML Kit may continue reading the bitmap after the caller is cancelled.
+                                            withContext(NonCancellable) {
+                                                recognizer.value.process(InputImage.fromBitmap(bitmap, 0)).awaitResult().text
+                                            }
+                                        }.getOrElse {
+                                            if (it is CancellationException) throw it
+                                            ""
+                                        }
+                                        text.append("\n").append(arabic.take(MAX_LAB_PAGE_TEXT))
+                                            .append("\n").append(latin.take(MAX_LAB_PAGE_TEXT))
+                                    } finally {
+                                        bitmap.recycle()
+                                    }
+                                }
+                            }
+                        } finally {
+                            if (tess.isInitialized()) tess.value?.recycle()
+                            if (recognizer.isInitialized()) recognizer.value.close()
                         }
-                        Triple(firstBitmap, pages, text.toString().trim())
+                        pages to text.toString().trim()
                     }
                 }
             }
-            pageBitmap = result.first
-            pageCount = result.second
-            extractedText = result.third
-            candidates = LabReportParser.parse(result.third)
-            onExtractedText(result.third)
-            status = if (result.third.isBlank())
+            pageCount = result.first
+            extractedText = result.second
+            candidates = LabReportParser.parse(extractedText)
+            onExtractedText(extractedText)
+            status = if (extractedText.isBlank())
                 "تم فتح PDF، لكن لم يظهر نص قابل للقراءة. تحققي من وضوح الصفحات أو أدخلي النتائج يدويًا."
             else "تمت معاينة الصفحة الأولى وقراءة النص من $pageCount صفحة."
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (error: Exception) {
             status = "تعذرت قراءة هذا الملف: ${error.message ?: "صيغة غير مدعومة"}. جرّبي تنزيله إلى الهاتف ثم اختياره مجددًا."
         } finally {
@@ -160,10 +179,7 @@ fun LabPdfReader(onExtractedText: (String) -> Unit, onCandidateSelected: (LabRep
                 descriptor.use { parcel ->
                     PdfRenderer(parcel).use { renderer ->
                         renderer.openPage(pageIndex).use { page ->
-                            val scale = minOf(2.0, 1800.0 / page.width, 2400.0 / page.height)
-                            Bitmap.createBitmap((page.width * scale).toInt().coerceAtLeast(1), (page.height * scale).toInt().coerceAtLeast(1), Bitmap.Config.ARGB_8888).also {
-                                page.render(it, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                            }
+                            page.renderLabPage()
                         }
                     }
                 }
@@ -212,7 +228,7 @@ fun LabPdfReader(onExtractedText: (String) -> Unit, onCandidateSelected: (LabRep
                     Card(Modifier.fillMaxWidth()) {
                         Column(Modifier.fillMaxWidth().padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Text(candidate.testName, style = MaterialTheme.typography.titleSmall)
-                            Text(candidate.value.toString() + " " + candidate.unit)
+                            Text(listOfNotNull(candidate.qualitativeValue ?: candidate.value?.toString(), candidate.unit.takeIf { it.isNotBlank() }).joinToString(" "))
                             Text("المرجع المقروء: " + (candidate.referenceLow?.toString() ?: "—") + " إلى " + (candidate.referenceHigh?.toString() ?: "—"), style = MaterialTheme.typography.bodySmall)
                             Text("النص الأصلي: " + candidate.sourceLine, style = MaterialTheme.typography.bodySmall)
                             Button(onClick = { onCandidateSelected(candidate) }) { Text("مراجعة وإدخال هذه النتيجة") }
@@ -257,3 +273,24 @@ private suspend fun <T> Task<T>.awaitResult(): T = suspendCancellableCoroutine {
     addOnFailureListener { error -> if (continuation.isActive) continuation.resumeWithException(error) }
     addOnCanceledListener { continuation.cancel() }
 }
+
+private fun PdfRenderer.Page.renderLabPage(): Bitmap {
+    val scale = minOf(2.0, 1800.0 / width, 2400.0 / height)
+    val bitmap = Bitmap.createBitmap(
+        (width * scale).toInt().coerceAtLeast(1),
+        (height * scale).toInt().coerceAtLeast(1),
+        Bitmap.Config.ARGB_8888
+    )
+    try {
+        bitmap.eraseColor(android.graphics.Color.WHITE)
+        render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+        return bitmap
+    } catch (error: Exception) {
+        bitmap.recycle()
+        throw error
+    }
+}
+
+private const val MAX_LAB_PAGE_TEXT = 24_000
+private const val MAX_LAB_PDF_BYTES = 25L * 1024 * 1024
+private const val MAX_LAB_PDF_PAGES = 40

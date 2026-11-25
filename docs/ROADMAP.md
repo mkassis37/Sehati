@@ -17,7 +17,7 @@
 
 ## Next milestones
 
-- [ ] Add edit support for allergy records while enforcing member ownership.
+- [x] Add edit support for allergy records while enforcing member ownership in the database query; instrumented isolation test added (needs device execution).
 - [ ] Support qualitative lab results such as Nil and Hazy alongside numeric values.
 - [ ] Add medication dose logs, reminders, and treatment end notifications.
 - [ ] Implement medical visits/appointments and PDF reports.

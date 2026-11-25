@@ -115,6 +115,16 @@ interface MedicalDao {
     @Insert
     suspend fun addAllergy(record: AllergyRecord)
 
+    @Query("""UPDATE allergy_records SET category = :category, substance = :substance,
+        commercialName = :commercialName, activeIngredient = :activeIngredient,
+        reaction = :reaction, severity = :severity, notes = :notes
+        WHERE id = :recordId AND memberId = :memberId""")
+    suspend fun updateAllergy(
+        recordId: Long, memberId: Long, category: String, substance: String,
+        commercialName: String, activeIngredient: String, reaction: String,
+        severity: String, notes: String
+    )
+
     @Query("DELETE FROM allergy_records WHERE id = :recordId AND memberId = :memberId")
     suspend fun deleteAllergy(recordId: Long, memberId: Long)
 

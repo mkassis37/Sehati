@@ -805,7 +805,12 @@ private fun AllergyScreen(
                 items(records, key = { it.id }) { record ->
                     Card(Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text(record.substance, style = MaterialTheme.typography.titleMedium)
+                            Text(record.commercialName.ifBlank { record.substance }, style = MaterialTheme.typography.titleMedium)
+                            if (record.category.equals("دواء", ignoreCase = true)) {
+                                if (record.commercialName.isNotBlank()) Text("الاسم التجاري: ${record.commercialName}")
+                                if (record.activeIngredient.isNotBlank()) Text("المركب العلمي: ${record.activeIngredient}")
+                                if (record.substance.isNotBlank()) Text("المادة المسجلة: ${record.substance}")
+                            }
                             Text("النوع: ${record.category}")
                             Text("الأعراض: ${record.reaction}")
                             Text("الشدة: ${record.severity}")
@@ -829,6 +834,8 @@ private fun AllergyScreen(
 private fun AllergyDialog(memberId: Long, onDismiss: () -> Unit, onSave: (AllergyRecord) -> Unit) {
     var category by rememberSaveable { mutableStateOf("دواء") }
     var substance by rememberSaveable { mutableStateOf("") }
+    var commercialName by rememberSaveable { mutableStateOf("") }
+    var activeIngredient by rememberSaveable { mutableStateOf("") }
     var reaction by rememberSaveable { mutableStateOf("") }
     var severity by rememberSaveable { mutableStateOf("متوسطة") }
     var notes by rememberSaveable { mutableStateOf("") }
@@ -840,8 +847,17 @@ private fun AllergyDialog(memberId: Long, onDismiss: () -> Unit, onSave: (Allerg
                 verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(category, { category = it }, label = { Text("التصنيف (دواء، طعام، بيئة)") },
                     modifier = Modifier.fillMaxWidth(), singleLine = true)
-                OutlinedTextField(substance, { substance = it }, label = { Text("المادة المسببة") },
+                OutlinedTextField(substance, { substance = it }, label = { Text("المادة المسببة / اسم الحساسية") },
                     modifier = Modifier.fillMaxWidth(), singleLine = true)
+                if (category.contains("دواء")) {
+                    OutlinedTextField(commercialName, { commercialName = it },
+                        label = { Text("الاسم التجاري للدواء") },
+                        modifier = Modifier.fillMaxWidth(), singleLine = true)
+                    OutlinedTextField(activeIngredient, { activeIngredient = it },
+                        label = { Text("اسم المركب العلمي (المادة الفعالة)") },
+                        modifier = Modifier.fillMaxWidth(), singleLine = true)
+                    Text("يمكن أن تختلف الأسماء التجارية بينما يبقى المركب العلمي نفسه.", style = MaterialTheme.typography.bodySmall)
+                }
                 OutlinedTextField(reaction, { reaction = it }, label = { Text("الأعراض أو رد الفعل") },
                     modifier = Modifier.fillMaxWidth(), minLines = 2)
                 OutlinedTextField(severity, { severity = it }, label = { Text("الشدة") },
@@ -851,9 +867,10 @@ private fun AllergyDialog(memberId: Long, onDismiss: () -> Unit, onSave: (Allerg
             }
         },
         confirmButton = {
-            Button(enabled = substance.isNotBlank(), onClick = {
+            Button(enabled = substance.isNotBlank() || commercialName.isNotBlank() || activeIngredient.isNotBlank(), onClick = {
                 onSave(AllergyRecord(memberId = memberId,
                     category = category.trim().ifBlank { "غير محدد" }, substance = substance.trim(),
+                    commercialName = commercialName.trim(), activeIngredient = activeIngredient.trim(),
                     reaction = reaction.trim(), severity = severity.trim(), notes = notes.trim()))
             }) { Text("حفظ") }
         },

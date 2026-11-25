@@ -13,7 +13,7 @@ data class LabResult(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val memberId: Long,
     val testName: String,
-    val value: Double,
+    val value: Double?,
     val unit: String = "",
     val referenceLow: Double? = null,
     val referenceHigh: Double? = null,
@@ -22,5 +22,10 @@ data class LabResult(
     val laboratory: String = "",
     val source: String = "manual",
     val notes: String = "",
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    val qualitativeValue: String? = null
 )
+
+internal val LabResult.displayValue: String
+    get() = listOfNotNull(qualitativeValue ?: value?.toString(), unit.takeIf { it.isNotBlank() })
+        .joinToString(" ")

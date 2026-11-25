@@ -7,6 +7,7 @@ import android.security.keystore.KeyProperties
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.io.OutputStream
 import java.security.KeyStore
 import java.util.UUID
 import javax.crypto.Cipher
@@ -61,8 +62,8 @@ class SecureMedicalDocumentStore(private val context: Context) {
             relativePath = target.relativeTo(directory).path, sizeBytes = plainSize)
     }
 
-    suspend fun readPlaintextBytes(document: MedicalDocument): ByteArray = withContext(Dispatchers.IO) {
-        decryptFile(resolve(document.relativePath)).use { it.readBytes() }
+    internal fun copyPlaintextTo(document: MedicalDocument, output: OutputStream) {
+        decryptFile(resolve(document.relativePath)).use { it.copyTo(output) }
     }
 
     suspend fun restore(document: MedicalDocument, plaintext: ByteArray): MedicalDocument = withContext(Dispatchers.IO) {
@@ -106,7 +107,8 @@ class SecureMedicalDocumentStore(private val context: Context) {
 
     fun clearTemporaryPdfs() {
         context.cacheDir.listFiles()?.filter {
-            it.isFile && it.name.startsWith("sehati-") && it.extension.lowercase() in setOf("pdf", "jpg", "png", "webp")
+            val staleCapture = !it.name.startsWith("sehati-camera-") || System.currentTimeMillis() - it.lastModified() > 3_600_000
+            it.isFile && staleCapture && it.name.startsWith("sehati-") && it.extension.lowercase() in setOf("pdf", "jpg", "png", "webp")
         }?.forEach { it.delete() }
     }
 

@@ -50,6 +50,7 @@ import com.mkassis37.sehati.data.ChronicCondition
 import com.mkassis37.sehati.data.FamilyDiseaseHistory
 import com.mkassis37.sehati.data.FamilyMember
 import com.mkassis37.sehati.data.MedicalDocument
+import com.mkassis37.sehati.data.displayValue
 import com.mkassis37.sehati.data.MedicalHistoryEvent
 import com.mkassis37.sehati.data.MedicalProcedure
 import com.mkassis37.sehati.data.MedicationRecord
@@ -345,7 +346,7 @@ private fun buildTimeline(conditions: List<ChronicCondition>, procedures: List<M
     allergies.forEach { add(MedicalTimelineItem(Instant.ofEpochMilli(it.createdAt).atZone(ZoneId.systemDefault()).toLocalDate().toString(), "حساسية: ${it.substance.ifBlank { it.commercialName }}", it.severity, 9)) }
     medications.forEach { add(MedicalTimelineItem(it.startDate, "دواء: ${it.name}", if (it.isActive) "نشط" else "متوقف", 10)) }
     medications.filter { !it.isActive && it.endDate.isNotBlank() }.forEach { add(MedicalTimelineItem(it.endDate, "إيقاف دواء: ${it.name}", it.endDate, 10)) }
-    labResults.forEach { add(MedicalTimelineItem(it.performedAt, "فحص: ${it.testName}", "${it.value} ${it.unit}", 8)) }
+    labResults.forEach { add(MedicalTimelineItem(it.performedAt, "فحص: ${it.testName}", it.displayValue, 8)) }
     documents.forEach { add(MedicalTimelineItem(Instant.ofEpochMilli(it.addedAt).atZone(ZoneId.systemDefault()).toLocalDate().toString(), "مرفق: ${it.displayName}", "الوثائق والتحاليل", 8)) }
     measurements.forEach { add(MedicalTimelineItem(it.measuredOn, "قياس جسدي", listOfNotNull(it.heightCm?.let { h -> "$h سم" }, it.weightKg?.let { w -> "$w كغ" }).joinToString(" • "), 5)) }
 }.sortedByDescending { it.date }

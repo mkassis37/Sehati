@@ -1,0 +1,136 @@
+package com.mkassis37.sehati
+
+import android.content.Intent
+import android.net.Uri
+import android.provider.OpenableColumns
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.FileProvider
+import com.mkassis37.sehati.data.MedicalDocument
+import com.mkassis37.sehati.data.SecureMedicalDocumentStore
+import com.mkassis37.sehati.data.SehatiDatabase
+import java.io.File
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+internal data class PendingDocument(val memberId: Long, val uri: Uri)
+
+internal data class DocumentLibraryActions(
+    val pending: PendingDocument?,
+    val pick: (Long) -> Unit,
+    val capture: (Long) -> Unit,
+    val cancel: () -> Unit,
+    val save: suspend (DocumentCategory, String, DocumentLink?) -> Unit,
+    val open: (MedicalDocument) -> Unit,
+    val delete: suspend (MedicalDocument) -> Unit
+)
+
+@Composable
+internal fun rememberDocumentLibrary(
+    database: SehatiDatabase,
+    store: SecureMedicalDocumentStore,
+    returnToLibrary: (Long) -> Unit
+): DocumentLibraryActions {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var owner by rememberSaveable { mutableStateOf<Long?>(null) }
+    var uri by rememberSaveable { mutableStateOf<Uri?>(null) }
+    var cameraPath by rememberSaveable { mutableStateOf<String?>(null) }
+    fun clear() {
+        cameraPath?.let { File(context.cacheDir, it).delete() }
+        cameraPath = null
+        owner = null
+        uri = null
+    }
+    fun complete(picked: Uri?) {
+        val memberId = owner ?: return
+        if (picked == null) clear() else uri = picked
+        returnToLibrary(memberId)
+    }
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument(), ::complete)
+    val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { success ->
+        val file = cameraPath?.let { File(context.cacheDir, it) }
+        complete(if (success && file != null) FileProvider.getUriForFile(context, context.packageName + ".fileprovider", file) else null)
+    }
+    val pending = owner?.let { memberId -> uri?.let { PendingDocument(memberId, it) } }
+    return DocumentLibraryActions(
+        pending = pending,
+        pick = { memberId ->
+            if (owner == null) {
+                owner = memberId
+                try {
+                    picker.launch(arrayOf("application/pdf", "image/jpeg", "image/png", "image/webp"))
+                } catch (_: Exception) {
+                    clear()
+                    Toast.makeText(context, "تعذر فتح منتقي الملفات.", Toast.LENGTH_SHORT).show()
+                }
+            }
+        },
+        capture = { memberId ->
+            if (owner == null) {
+                try {
+                    val photo = File.createTempFile("sehati-camera-", ".jpg", context.cacheDir)
+                    cameraPath = photo.name
+                    owner = memberId
+                    camera.launch(FileProvider.getUriForFile(context, context.packageName + ".fileprovider", photo))
+                } catch (_: Exception) {
+                    clear()
+                    Toast.makeText(context, "تعذر تشغيل الكاميرا.", Toast.LENGTH_SHORT).show()
+                }
+            }
+        },
+        cancel = ::clear,
+        save = { type, date, link ->
+            checkNotNull(pending)
+            withContext(Dispatchers.IO + NonCancellable) {
+                val name = if (cameraPath != null) "صورة طبية - $date.jpg" else
+                    context.contentResolver.query(pending.uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+                        ?.use { if (it.moveToFirst()) it.getString(0) else null } ?: "مرفق طبي"
+                val document = store.save(pending.uri, pending.memberId, name)
+                try {
+                    database.addLinkedDocument(document.copy(
+                        category = type.name,
+                        documentDate = date,
+                        relatedAppointmentId = link?.takeIf { it.kind == "appointment" }?.id,
+                        relatedLabResultId = link?.takeIf { it.kind == "lab" }?.id,
+                        relatedProcedureId = link?.takeIf { it.kind == "procedure" }?.id
+                    ))
+                } catch (error: Exception) {
+                    store.delete(document)
+                    throw error
+                }
+            }
+            clear()
+        },
+        open = { document ->
+            scope.launch {
+                try {
+                    val file = store.createTemporaryFile(document)
+                    val content = FileProvider.getUriForFile(context, context.packageName + ".fileprovider", file)
+                    context.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(content, document.mimeType)
+                        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    store.clearTemporaryDocument(document.id)
+                    Toast.makeText(context, "تعذر معاينة الملف.", Toast.LENGTH_SHORT).show()
+                }
+            }
+        },
+        delete = { document ->
+            withContext(Dispatchers.IO + NonCancellable) {
+                database.removeMemberDocument(document.id, document.memberId)?.let {
+                    store.clearTemporaryDocument(it.id)
+                    store.delete(it)
+                }
+            }
+        }
+    )
+}

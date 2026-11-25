@@ -18,14 +18,24 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.text.KeyboardOptions
 import android.net.Uri
 import com.mkassis37.sehati.security.AppLockStore
+import com.mkassis37.sehati.reminders.MedicalReminders
+import com.mkassis37.sehati.reminders.ReminderSettings
+import com.mkassis37.sehati.reports.MedicalReportScreen
+import com.mkassis37.sehati.reports.rememberMedicalReportActions
+import com.mkassis37.sehati.reports.reportRecords
+import kotlinx.coroutines.CancellationException
 import com.mkassis37.sehati.data.EncryptedBackup
+import com.mkassis37.sehati.data.BackupSizeLimitException
+import com.mkassis37.sehati.data.BackupStatusStore
+import com.mkassis37.sehati.drive.rememberDriveAuthorization
+import com.mkassis37.sehati.drive.scheduleDriveBackup
 import com.mkassis37.sehati.data.AppearanceSettingsStore
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.room.invalidationTrackerFlow
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ProcessLifecycleOwner
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -39,6 +49,7 @@ import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.WarningAmber
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -53,7 +64,6 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import com.mkassis37.sehati.data.AllergyRecord
 import com.mkassis37.sehati.data.FamilyMember
-import com.mkassis37.sehati.data.LabResult
 import com.mkassis37.sehati.data.MedicalDocument
 import com.mkassis37.sehati.data.MedicationRecord
 import com.mkassis37.sehati.data.SecureMedicalDocumentStore
@@ -66,7 +76,6 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.Period
 import java.time.ZoneOffset
-import java.util.Locale
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
@@ -76,7 +85,21 @@ import com.mkassis37.sehati.update.SehatiRelease
 class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val db = SehatiDatabase.getInstance(applicationContext)
+        val db = runCatching { SehatiDatabase.getInstance(applicationContext) }.getOrNull()
+        if (db == null) {
+            setContent {
+                SehatiTheme {
+                    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
+                        Column(Modifier.fillMaxSize().padding(24.dp),
+                            verticalArrangement = Arrangement.Center) {
+                            Text("تعذر فتح البيانات المشفرة", style = MaterialTheme.typography.headlineSmall)
+                            Text("افتح قفل الهاتف وأعد تشغيل صحتي. إذا بقي المفتاح غير متاح، استخدم نسخة احتياطية مشفرة لاستعادة سجلاتك على تثبيت منفصل.")
+                        }
+                    }
+                }
+            }
+            return
+        }
         window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN or WindowManager.LayoutParams.FLAG_SECURE)
         setContent {
             val appearanceStore = remember { AppearanceSettingsStore(applicationContext) }
@@ -107,7 +130,7 @@ class MainActivity : FragmentActivity() {
     }
 }
 
-private enum class Screen { MEMBERS, DETAILS, FORM, HEALTH_RECORDS, ALLERGIES, LAB_RESULTS, SETTINGS, MEDICATIONS, APPOINTMENTS, DOCUMENTS, REPORTS, REMINDERS }
+private enum class Screen { MEMBERS, DETAILS, FORM, HEALTH_RECORDS, ALLERGIES, LAB_RESULTS, SETTINGS, SEARCH, MEDICATIONS, APPOINTMENTS, DOCUMENTS, REPORTS, REMINDERS }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -121,10 +144,30 @@ private fun SehatiApp(
     val dao = db.medicalDao()
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    val reminders = remember(context, db) { MedicalReminders(context, db) }
+    LaunchedEffect(reminders) {
+        db.invalidationTrackerFlow("medication_records", "medical_appointments", "dose_logs").collect {
+            try {
+                reminders.updateAlarms()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // The notification settings provide a retry and status.
+            }
+        }
+    }
     val activity = context as? FragmentActivity
+    val authenticators = if (Build.VERSION.SDK_INT >= 30) {
+        BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL
+    } else {
+        BiometricManager.Authenticators.BIOMETRIC_STRONG
+    }
+    val biometricAvailable = activity != null &&
+        BiometricManager.from(context).canAuthenticate(authenticators) == BiometricManager.BIOMETRIC_SUCCESS
     val lockStore = remember { AppLockStore(context.applicationContext) }
     val documentStore = remember { SecureMedicalDocumentStore(context.applicationContext) }
     val backup = remember { EncryptedBackup(db, documentStore) }
+    val backupStatusStore = remember { BackupStatusStore(context.applicationContext) }
     val releaseUpdater = remember { ReleaseUpdater(context.applicationContext) }
     var availableRelease by remember { mutableStateOf<SehatiRelease?>(null) }
     var updateStatus by remember { mutableStateOf("لم يتم فحص التحديثات بعد.") }
@@ -134,6 +177,11 @@ private fun SehatiApp(
     var lastBackgroundAt by remember { mutableLongStateOf(0L) }
     var lastInteractionAt by remember { mutableLongStateOf(System.currentTimeMillis()) }
     var settingsRefresh by remember { mutableIntStateOf(0) }
+    var screen by rememberSaveable { mutableStateOf(Screen.MEMBERS) }
+    var settingsSection by rememberSaveable { mutableStateOf<SettingsSection?>(null) }
+    var medicationOpenedFromSettings by rememberSaveable { mutableStateOf(false) }
+    var lastBackupAt by remember { mutableStateOf(backupStatusStore.lastSuccessAt) }
+    var lastBackupSizeBytes by remember { mutableStateOf(backupStatusStore.lastSizeBytes) }
     var showPinSetup by remember { mutableStateOf(false) }
     var showBackupPassword by remember { mutableStateOf(false) }
     var backupMode by remember { mutableStateOf("export") }
@@ -141,6 +189,13 @@ private fun SehatiApp(
     var backupUri by remember { mutableStateOf<Uri?>(null) }
     var backupPreview by remember { mutableStateOf<EncryptedBackup.BackupPreview?>(null) }
     var backupMessage by remember { mutableStateOf("") }
+    val driveAuthorization = rememberDriveAuthorization(backup) {
+        settingsSection = SettingsSection.DRIVE
+        screen = Screen.SETTINGS
+    }
+    LaunchedEffect(context) {
+        if (BuildConfig.GOOGLE_DRIVE_ENABLED) scheduleDriveBackup(context)
+    }
     val createBackup = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
         if (uri != null) { backupUri = uri; backupMode = "export"; showBackupPassword = true }
     }
@@ -177,7 +232,6 @@ private fun SehatiApp(
         }
     }
     val members by dao.observeMembers().collectAsState(initial = emptyList())
-    var screen by rememberSaveable { mutableStateOf(Screen.MEMBERS) }
     var selectedId by rememberSaveable { mutableStateOf<Long?>(null) }
     var editingId by rememberSaveable { mutableStateOf<Long?>(null) }
     var healthInitialTab by rememberSaveable { mutableIntStateOf(0) }
@@ -205,23 +259,45 @@ private fun SehatiApp(
     val allergyFlow = remember(selectedId) {
         selectedId?.let { dao.observeAllergies(it) } ?: flowOf(emptyList())
     }
-    val allergies by allergyFlow.collectAsState(initial = emptyList())
+    val allergies by key(selectedId) { allergyFlow.collectAsState(initial = emptyList()) }
     val labFlow = remember(selectedId) { selectedId?.let { dao.observeLabResults(it) } ?: flowOf(emptyList()) }
-    val labResults by labFlow.collectAsState(initial = emptyList())
+    val labResults by key(selectedId) { labFlow.collectAsState(initial = emptyList()) }
     val documentFlow = remember(selectedId) { selectedId?.let { dao.observeDocuments(it) } ?: flowOf(emptyList()) }
-    val medicalDocuments by documentFlow.collectAsState(initial = emptyList())
+    val medicalDocuments by key(selectedId) { documentFlow.collectAsState(initial = emptyList()) }
+    val appointmentFlow = remember(selectedId) {
+        selectedId?.let { dao.observeAppointments(it) } ?: flowOf(emptyList())
+    }
+    val appointments by key(selectedId) { appointmentFlow.collectAsState(initial = emptyList()) }
     val medicationFlow = remember(selectedId) { selectedId?.let { dao.observeMedications(it) } ?: flowOf(emptyList()) }
-    val medications by medicationFlow.collectAsState(initial = emptyList())
+    val doseLogFlow = remember(selectedId) { selectedId?.let { dao.observeDoseLogs(it) } ?: flowOf(emptyList()) }
+    val doseLogs by key(selectedId) { doseLogFlow.collectAsState(initial = emptyList()) }
+    val medications by key(selectedId) { medicationFlow.collectAsState(initial = emptyList()) }
     val conditionFlow = remember(selectedId) { selectedId?.let { dao.observeConditions(it) } ?: flowOf(emptyList()) }
-    val conditions by conditionFlow.collectAsState(initial = emptyList())
+    val conditions by key(selectedId) { conditionFlow.collectAsState(initial = emptyList()) }
     val procedureFlow = remember(selectedId) { selectedId?.let { dao.observeProcedures(it) } ?: flowOf(emptyList()) }
-    val procedures by procedureFlow.collectAsState(initial = emptyList())
+    val procedures by key(selectedId) { procedureFlow.collectAsState(initial = emptyList()) }
     val historyFlow = remember(selectedId) { selectedId?.let { dao.observeHistoryEvents(it) } ?: flowOf(emptyList()) }
-    val historyEvents by historyFlow.collectAsState(initial = emptyList())
+    val historyEvents by key(selectedId) { historyFlow.collectAsState(initial = emptyList()) }
     val familyHistoryFlow = remember(selectedId) { selectedId?.let { dao.observeFamilyDiseaseHistory(it) } ?: flowOf(emptyList()) }
-    val familyHistory by familyHistoryFlow.collectAsState(initial = emptyList())
+    val familyHistory by key(selectedId) { familyHistoryFlow.collectAsState(initial = emptyList()) }
     val measurementFlow = remember(selectedId) { selectedId?.let { dao.observeBodyMeasurements(it) } ?: flowOf(emptyList()) }
-    val measurements by measurementFlow.collectAsState(initial = emptyList())
+    val measurements by key(selectedId) { measurementFlow.collectAsState(initial = emptyList()) }
+
+    val appointmentAttachments = rememberAppointmentAttachments(db, documentStore) { memberId ->
+        if (selectedId == null || selectedId == memberId) {
+            selectedId = memberId
+            screen = Screen.APPOINTMENTS
+        }
+    }
+
+    val documentLibrary = rememberDocumentLibrary(db, documentStore) { memberId ->
+        if (selectedId == null || selectedId == memberId) {
+            selectedId = memberId
+            screen = Screen.DOCUMENTS
+        }
+    }
+
+    val reportActions = rememberMedicalReportActions()
 
     val title = when (screen) {
         Screen.MEMBERS -> "أفراد العائلة"
@@ -230,7 +306,8 @@ private fun SehatiApp(
         Screen.HEALTH_RECORDS -> "الملف الصحي"
         Screen.ALLERGIES -> "سجل الحساسيات"
         Screen.LAB_RESULTS -> "الفحوصات المخبرية"
-        Screen.SETTINGS -> "الإعدادات"
+        Screen.SETTINGS -> settingsSection?.title ?: "الإعدادات"
+        Screen.SEARCH -> "البحث الشامل"
         Screen.MEDICATIONS -> "الأدوية والعلاجات"
         Screen.APPOINTMENTS -> "المواعيد الطبية"
         Screen.DOCUMENTS -> "الملفات الطبية"
@@ -244,9 +321,19 @@ private fun SehatiApp(
         screen = when (screen) {
             Screen.FORM -> if (editingId == null) Screen.MEMBERS else Screen.DETAILS
             Screen.DETAILS -> Screen.MEMBERS
-            Screen.ALLERGIES, Screen.LAB_RESULTS, Screen.MEDICATIONS, Screen.HEALTH_RECORDS -> Screen.DETAILS
-            Screen.SETTINGS, Screen.APPOINTMENTS, Screen.DOCUMENTS,
-            Screen.REPORTS, Screen.REMINDERS -> Screen.MEMBERS
+            Screen.ALLERGIES, Screen.LAB_RESULTS, Screen.HEALTH_RECORDS -> Screen.DETAILS
+            Screen.MEDICATIONS -> if (medicationOpenedFromSettings) {
+                medicationOpenedFromSettings = false
+                Screen.SETTINGS
+            } else Screen.DETAILS
+            Screen.SETTINGS -> if (settingsSection != null) {
+                settingsSection = null
+                Screen.SETTINGS
+            } else Screen.MEMBERS
+            Screen.APPOINTMENTS -> if (selectedId != null) Screen.DETAILS else Screen.MEMBERS
+            Screen.DOCUMENTS -> if (selectedId != null) Screen.DETAILS else Screen.MEMBERS
+            Screen.REPORTS -> if (selectedId != null) Screen.DETAILS else Screen.MEMBERS
+            Screen.REMINDERS, Screen.SEARCH -> Screen.MEMBERS
             Screen.MEMBERS -> Screen.MEMBERS
         }
     }
@@ -255,19 +342,24 @@ private fun SehatiApp(
     if (locked && lockStore.isEnabled()) {
         LockScreen(
             store = lockStore,
-            onUnlocked = { locked = false },
+            onUnlocked = { lastInteractionAt = System.currentTimeMillis(); locked = false },
+            biometricAvailable = biometricAvailable && lockStore.isBiometricEnabled(),
             onBiometric = {
                 val host = activity
-                if (host != null && lockStore.isBiometricEnabled() &&
-                    BiometricManager.from(host).canAuthenticate((if (Build.VERSION.SDK_INT >= 30) BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL else BiometricManager.Authenticators.BIOMETRIC_STRONG)) == BiometricManager.BIOMETRIC_SUCCESS) {
+                if (host != null && biometricAvailable && lockStore.isBiometricEnabled()) {
                     val prompt = BiometricPrompt(host, ContextCompat.getMainExecutor(host),
                         object : BiometricPrompt.AuthenticationCallback() {
-                            override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) { locked = false }
+                            override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                                lastInteractionAt = System.currentTimeMillis()
+                                locked = false
+                            }
                         })
-                    prompt.authenticate(BiometricPrompt.PromptInfo.Builder()
-                        .setTitle("فتح صحتي").setSubtitle("تحقق من هويتك للمتابعة")
-                        .setAllowedAuthenticators(if (Build.VERSION.SDK_INT >= 30) BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL else BiometricManager.Authenticators.BIOMETRIC_STRONG)
-                        .build())
+                    val promptInfo = BiometricPrompt.PromptInfo.Builder()
+                        .setTitle("فتح صحتي")
+                        .setSubtitle("تحقق من هويتك للمتابعة")
+                        .setAllowedAuthenticators(authenticators)
+                    if (Build.VERSION.SDK_INT < 30) promptInfo.setNegativeButtonText("استخدام PIN")
+                    prompt.authenticate(promptInfo.build())
                 }
             }
         )
@@ -291,6 +383,9 @@ private fun SehatiApp(
             },
             actions = {
                 if (screen == Screen.MEMBERS) {
+                    IconButton(onClick = { screen = Screen.SEARCH }) {
+                        Icon(Icons.Outlined.Search, contentDescription = "البحث الشامل")
+                    }
                     IconButton(onClick = { screen = Screen.SETTINGS }) {
                         Icon(Icons.Outlined.Settings, contentDescription = "الإعدادات")
                     }
@@ -314,6 +409,32 @@ private fun SehatiApp(
                 screen = Screen.DETAILS
             }, Modifier.padding(padding))
 
+            Screen.SEARCH -> MedicalSearchScreen(
+                members = members,
+                search = dao::searchMedicalRecords,
+                open = { result ->
+                    selectedId = result.memberId
+                    screen = when (result.kind) {
+                        "ALLERGY" -> Screen.ALLERGIES
+                        "LAB" -> Screen.LAB_RESULTS
+                        "MEDICATION" -> Screen.MEDICATIONS
+                        "VISIT" -> Screen.APPOINTMENTS
+                        "DOCUMENT" -> Screen.DOCUMENTS
+                        "PROCEDURE", "HISTORY", "CONDITION", "FAMILY_HISTORY" -> {
+                            healthInitialTab = when (result.kind) {
+                                "CONDITION" -> 1
+                                "PROCEDURE" -> 2
+                                "HISTORY" -> 3
+                                else -> 4
+                            }
+                            Screen.HEALTH_RECORDS
+                        }
+                        else -> Screen.DETAILS
+                    }
+                },
+                modifier = Modifier.padding(padding)
+            )
+
             Screen.DETAILS -> if (selected != null) {
                 MemberDetailsScreen(selected, { editingId = selected.id; screen = Screen.FORM },
                     { healthInitialTab = 0; screen = Screen.HEALTH_RECORDS },
@@ -321,6 +442,10 @@ private fun SehatiApp(
                     { screen = Screen.ALLERGIES }, allergies.size,
                     { screen = Screen.LAB_RESULTS }, labResults.size,
                     { screen = Screen.MEDICATIONS }, medications.size,
+                    onAppointments = { screen = Screen.APPOINTMENTS },
+                    appointmentCount = appointments.size,
+                    onDocuments = { screen = Screen.DOCUMENTS },
+                    onReports = { screen = Screen.REPORTS },
                     onDelete = {
                         scope.launch {
                             try {
@@ -419,7 +544,7 @@ private fun SehatiApp(
                 LabResultsScreen(
                     selected, labResults, medicalDocuments,
                     addResult = { dao.addLabResult(it) },
-                    deleteResult = { dao.deleteLabResult(it, selected.id) },
+                    deleteResult = { db.deleteLabResultAndUnlinkAttachments(it, selected.id) },
                     saveDocument = { uri ->
                         val name = context.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)
                             ?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
@@ -433,7 +558,7 @@ private fun SehatiApp(
                             try {
                                 val file = documentStore.createTemporaryFile(document)
                                 val contentUri = FileProvider.getUriForFile(context, context.packageName + ".fileprovider", file)
-                                context.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(contentUri, "application/pdf")
+                                context.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(contentUri, document.mimeType)
                                     .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
                             } catch (_: Exception) {
                                 android.widget.Toast.makeText(context, "تعذر فتح التقرير. تأكد من وجود تطبيق لعرض PDF.", android.widget.Toast.LENGTH_LONG).show()
@@ -466,59 +591,116 @@ private fun SehatiApp(
                 MedicationScreen(
                     member = selected,
                     records = medications,
+                    doseLogs = doseLogs,
+                    onRecordDose = { db.recordDose(it, selected.id) },
                     addMedication = { dao.addMedication(it); Unit },
                     updateMedication = { dao.updateMedication(it) },
                     deleteMedication = { dao.deleteMedication(it.id, selected.id) },
                     modifier = Modifier.padding(padding)
                 )
             } else {
-                FutureScreen("الأدوية والعلاجات", "افتح الملف الطبي لأحد أفراد العائلة أولًا لإدارة أدويته وعلاجاته.", Modifier.padding(padding))
+                Column(Modifier.padding(padding).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("اختر فردًا لعرض سجل الأدوية والعلاجات.")
+                    Button(onClick = { screen = Screen.MEMBERS }) { Text("اختيار فرد") }
+                }
             }
-            Screen.SETTINGS -> SettingsHub(
-                refreshToken = settingsRefresh,
-                lockEnabled = lockStore.isEnabled(),
-                biometricEnabled = lockStore.isBiometricEnabled(),
-                timeoutMinutes = lockStore.timeoutMinutes(),
-                onSetPin = { showPinSetup = true },
-                onLockEnabled = { enabled ->
-                    if (enabled && !lockStore.hasPin()) showPinSetup = true
-                    else { lockStore.setEnabled(enabled); locked = false; settingsRefresh++ }
-                },
-                onBiometric = { enabled -> lockStore.setBiometricEnabled(enabled); settingsRefresh++ },
-                onTimeout = { lockStore.setTimeoutMinutes(it); settingsRefresh++ },
-                onExport = { createBackup.launch("sehati-backup.shtb") },
-                onImport = { openBackup.launch(arrayOf("*/*")) },
-                onMedications = { screen = Screen.MEDICATIONS },
-                onAppointments = { screen = Screen.APPOINTMENTS },
-                onDocuments = { screen = Screen.DOCUMENTS },
-                onReports = { screen = Screen.REPORTS },
-                onReminders = { screen = Screen.REMINDERS },
-                appearance = appearance,
-                onPaletteSelected = onPaletteSelected,
-                onThemeModeSelected = onThemeModeSelected,
-                onResetAppearance = onResetAppearance,
-                updateStatus = updateStatus,
-                updateBusy = updateBusy,
-                onCheckUpdates = {
-                    if (BuildConfig.DEBUG) {
-                        updateStatus = "فحص التحديثات متاح في النسخة المثبتة من Release فقط."
-                    } else {
-                        scope.launch {
-                            updateBusy = true
-                            updateStatus = "جارٍ فحص الإصدارات..."
-                            try {
-                                availableRelease = releaseUpdater.checkForUpdate(BuildConfig.VERSION_CODE)
-                                updateStatus = if (availableRelease == null) "أنت تستخدم أحدث إصدار." else "يتوفر تحديث ${availableRelease?.versionName}."
-                            } catch (_: Exception) { updateStatus = "تعذر فحص التحديثات. حاول مجددًا." }
-                            finally { updateBusy = false }
+            Screen.SETTINGS -> if (settingsSection == null) {
+                SettingsHomeScreen(onOpen = { settingsSection = it }, modifier = Modifier.padding(padding))
+            } else {
+                SettingsSectionScreen(
+                    section = settingsSection!!,
+                    refreshToken = settingsRefresh,
+                    appearance = appearance,
+                    reminders = reminders,
+                    backup = backup,
+                    driveAuthorization = driveAuthorization,
+                    onDrivePreview = { backupPreview = it },
+                    onPaletteSelected = onPaletteSelected,
+                    onThemeModeSelected = onThemeModeSelected,
+                    onResetAppearance = onResetAppearance,
+                    lockEnabled = lockStore.isEnabled(),
+                    biometricEnabled = lockStore.isBiometricEnabled(),
+                    biometricAvailable = biometricAvailable,
+                    onLockNow = {
+                        backupPreview = null
+                        backupPassword = ""
+                        showBackupPassword = false
+                        locked = true
+                    },
+                    timeoutMinutes = lockStore.timeoutMinutes(),
+                    hasPin = lockStore.hasPin(),
+                    onSetPin = { showPinSetup = true },
+                    onLockEnabled = { enabled ->
+                        if (enabled && !lockStore.hasPin()) showPinSetup = true
+                        else { lockStore.setEnabled(enabled); locked = false; settingsRefresh++ }
+                    },
+                    onBiometric = { enabled -> lockStore.setBiometricEnabled(enabled); settingsRefresh++ },
+                    onTimeout = { lockStore.setTimeoutMinutes(it); settingsRefresh++ },
+                    onExport = { createBackup.launch("sehati-backup.shtb") },
+                    onImport = { openBackup.launch(arrayOf("*/*")) },
+                    backupLastSuccessAt = lastBackupAt,
+                    backupLastSizeBytes = lastBackupSizeBytes,
+                    backupMessage = backupMessage,
+                    updateStatus = updateStatus,
+                    updateBusy = updateBusy,
+                    onCheckUpdates = {
+                        if (BuildConfig.DEBUG) {
+                            updateStatus = "فحص التحديثات متاح في النسخة المثبتة من Release فقط."
+                        } else {
+                            scope.launch {
+                                updateBusy = true
+                                updateStatus = "جارٍ فحص الإصدارات..."
+                                try {
+                                    availableRelease = releaseUpdater.checkForUpdate(BuildConfig.VERSION_CODE)
+                                    updateStatus = if (availableRelease == null) "أنت تستخدم أحدث إصدار." else "يتوفر تحديث ${availableRelease?.versionName}."
+                                } catch (_: Exception) { updateStatus = "تعذر فحص التحديثات. حاول مجددًا." }
+                                finally { updateBusy = false }
+                            }
                         }
-                    }
+                    },
+                    selectedMemberName = selected?.fullName,
+                    onOpenMedications = {
+                        if (selected != null) {
+                            medicationOpenedFromSettings = true
+                            settingsSection = null
+                            screen = Screen.MEDICATIONS
+                        }
+                    },
+                    onSelectMember = { settingsSection = null; screen = Screen.MEMBERS },
+                    modifier = Modifier.padding(padding)
+                )
+            }
+            Screen.APPOINTMENTS -> if (selected != null) AppointmentScreen(
+                member = selected,
+                appointments = appointments,
+                documents = medicalDocuments,
+                onAttach = appointmentAttachments.attach,
+                onOpenDocument = appointmentAttachments.open,
+                onSave = { db.saveAppointment(it, selected.id) },
+                onDelete = { db.deleteAppointment(it.id, selected.id) },
+                modifier = Modifier.padding(padding)
+            )
+            Screen.DOCUMENTS -> if (selected != null) DocumentLibraryScreen(
+                member = selected,
+                documents = medicalDocuments,
+                links = buildList {
+                    appointments.forEach { add(DocumentLink("appointment", it.id, "موعد · ${it.doctor} · ${it.date.toDisplayDate()}")) }
+                    labResults.forEach { add(DocumentLink("lab", it.id, "فحص · ${it.testName} · ${it.performedAt.toDisplayDate()}")) }
+                    procedures.forEach { add(DocumentLink("procedure", it.id, "إجراء · ${it.name} · ${it.performedOn.toDisplayDate()}")) }
                 },
-                modifier = Modifier.padding(padding))
-            Screen.APPOINTMENTS -> FutureScreen("المواعيد الطبية", "سيُضاف هنا سجل المواعيد والزيارات الطبية.", Modifier.padding(padding))
-            Screen.DOCUMENTS -> FutureScreen("الملفات الطبية", "سيُضاف هنا تنظيم الوثائق والصور الطبية.", Modifier.padding(padding))
-            Screen.REPORTS -> FutureScreen("التقارير الصحية", "سيُضاف هنا إنشاء ملخصات وتقارير صحية.", Modifier.padding(padding))
-            Screen.REMINDERS -> FutureScreen("التنبيهات والتذكيرات", "سيُضاف هنا تذكير المواعيد والمتابعات.", Modifier.padding(padding))
+                actions = documentLibrary,
+                modifier = Modifier.padding(padding)
+            )
+            Screen.REPORTS -> if (selected != null) key(selected.id) {
+                MedicalReportScreen(
+                    person = selected.fullName,
+                    records = reportRecords(selected, allergies, labResults, medications, appointments,
+                        medicalDocuments, conditions, procedures, historyEvents, familyHistory, measurements),
+                    actions = reportActions,
+                    modifier = Modifier.padding(padding)
+                )
+            }
+            Screen.REMINDERS -> Column(Modifier.padding(padding).padding(16.dp).verticalScroll(rememberScrollState())) { ReminderSettings(reminders) }
         }
     }
 
@@ -549,11 +731,17 @@ private fun SehatiApp(
     if (showPinSetup) PinSetupDialog(
         onDismiss = { showPinSetup = false },
         onSave = { pin ->
-            lockStore.setPin(pin.toCharArray())
-            lockStore.setEnabled(true)
-            locked = false
-            showPinSetup = false
-            settingsRefresh++
+            val entered = pin.toCharArray()
+            try {
+                lockStore.setPin(entered)
+                locked = false
+                showPinSetup = false
+                settingsRefresh++
+            } catch (_: Exception) {
+                android.widget.Toast.makeText(context, "تعذر حفظ رمز PIN عبر مفتاح الجهاز.", android.widget.Toast.LENGTH_LONG).show()
+            } finally {
+                entered.fill('\u0000')
+            }
         }
     )
 
@@ -574,12 +762,27 @@ private fun SehatiApp(
                         if (backupMode == "export") {
                             backup.write(context.contentResolver, uri, pass)
                             backupMessage = "تم إنشاء النسخة الاحتياطية المشفّرة."
+                            val savedAt = System.currentTimeMillis()
+                            val savedSize = runCatching {
+                                context.contentResolver.openFileDescriptor(uri, "r")?.use { descriptor ->
+                                    descriptor.statSize.takeIf { it >= 0L }
+                                }
+                            }.getOrNull()
+                            backupStatusStore.recordSuccess(savedAt, savedSize)
+                            lastBackupAt = savedAt
+                            lastBackupSizeBytes = savedSize
                         } else {
                             backupPreview = backup.preview(context.contentResolver, uri, pass)
                             backupMessage = ""
                         }
-                    } catch (e: Exception) {
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: BackupSizeLimitException) {
+                        backupMessage = "حجم النسخة يتجاوز الحد المسموح (64 ميبيبايت)."
+                    } catch (_: Exception) {
                         backupMessage = "تعذّرت العملية. تأكد من كلمة المرور وسلامة الملف."
+                    } finally {
+                        pass.fill('\u0000')
                     }
                 }
             }
@@ -596,6 +799,8 @@ private fun SehatiApp(
                 Text("عدد سجلات الحساسية: ${preview.allergyCount}")
                 Text("عدد نتائج الفحوصات: ${preview.labResultCount}")
                 Text("عدد الأدوية والعلاجات: ${preview.medicationCount}")
+                Text("عدد المواعيد والزيارات: ${preview.appointmentCount}")
+                Text("عدد الجرعات المسجلة: ${preview.doseLogCount}")
                 Text("الحالات المزمنة: ${preview.conditionCount}")
                 Text("العمليات والإجراءات: ${preview.procedureCount}")
                 Text("أحداث التاريخ السابق: ${preview.historyEventCount}")
@@ -682,6 +887,10 @@ private fun MemberDetailsScreen(
     labCount: Int,
     onMedications: () -> Unit,
     medicationCount: Int,
+    onAppointments: () -> Unit,
+    appointmentCount: Int,
+    onDocuments: () -> Unit,
+    onReports: () -> Unit,
     onDelete: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -709,6 +918,11 @@ private fun MemberDetailsScreen(
                 Text("الحالات والعمليات والتاريخ السابق والقياسات وبطاقة الطوارئ", style = MaterialTheme.typography.bodySmall)
             }
         }
+        OutlinedButton(onClick = onAppointments, modifier = Modifier.fillMaxWidth()) {
+            Text("المواعيد والزيارات ($appointmentCount)")
+        }
+        OutlinedButton(onClick = onDocuments, modifier = Modifier.fillMaxWidth()) { Text("مكتبة الملفات الطبية") }
+        OutlinedButton(onClick = onReports, modifier = Modifier.fillMaxWidth()) { Text("التقارير الطبية PDF") }
         OutlinedButton(onClick = onEmergency, modifier = Modifier.fillMaxWidth()) { Text("بطاقة الطوارئ") }
         Card(Modifier.fillMaxWidth().clickable(onClick = onAllergies)) {
             Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween,
@@ -757,196 +971,6 @@ private fun MemberDetailsScreen(
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun LabResultsScreen(member: FamilyMember, records: List<LabResult>, documents: List<MedicalDocument>, addResult: suspend (LabResult) -> Long, deleteResult: suspend (Long) -> Unit, saveDocument: suspend (Uri) -> Unit, openDocument: (MedicalDocument) -> Unit, deleteDocument: (MedicalDocument) -> Unit, modifier: Modifier = Modifier) {
-    val scope = rememberCoroutineScope()
-    var showAdd by rememberSaveable(member.id) { mutableStateOf(false) }
-    var reviewCandidate by remember(member.id) { mutableStateOf<LabReportCandidate?>(null) }
-    var selectedTest by rememberSaveable(member.id) { mutableStateOf("") }
-    var selectedUnit by rememberSaveable(member.id) { mutableStateOf("") }
-    var years by rememberSaveable(member.id) { mutableIntStateOf(0) }
-    val tests = records.map { it.testName }.distinct().sorted()
-    val units = records.filter { it.testName == selectedTest }.map { it.unit }.distinct().sorted()
-    val latestUnit = records.filter { it.testName == selectedTest }.maxByOrNull { it.performedAt }?.unit.orEmpty()
-    val activeUnit = selectedUnit.ifBlank { latestUnit }
-    val filtered = records.filter { selectedTest.isBlank() || (it.testName == selectedTest && it.unit == activeUnit) }
-        .filter { row -> years == 0 || runCatching { LocalDate.parse(row.performedAt).isAfter(LocalDate.now().minusYears(years.toLong()).minusDays(1)) }.getOrDefault(false) }
-    val chronological = filtered.sortedBy { it.performedAt }
-    val latest = chronological.lastOrNull()
-    val previous = chronological.dropLast(1).lastOrNull()
-    Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("فحوصات " + member.fullName, style = MaterialTheme.typography.titleLarge)
-        Text("تُحفظ كل نتيجة بتاريخها ومجالها المرجعي، وتبقى متاحة للمقارنة لسنوات.", style = MaterialTheme.typography.bodySmall)
-        Button(onClick = { showAdd = true }, modifier = Modifier.fillMaxWidth()) { Text("إضافة نتيجة فحص") }
-        LabPdfReader(
-            onExtractedText = { /* تتم المعاينة محليًا فقط؛ لا يُحفظ النص الخام */ },
-            onCandidateSelected = { candidate -> reviewCandidate = candidate; showAdd = true },
-            onSavePdf = saveDocument
-        )
-        Text("التقارير المحفوظة في ملف " + member.fullName, style = MaterialTheme.typography.titleMedium)
-        if (documents.isEmpty()) {
-            Text("لم يتم حفظ تقارير PDF لهذا الفرد بعد.", style = MaterialTheme.typography.bodySmall)
-        } else {
-            documents.forEach { document ->
-                Card(Modifier.fillMaxWidth()) {
-                    Row(Modifier.fillMaxWidth().padding(10.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                            Text(document.displayName, style = MaterialTheme.typography.titleSmall)
-                            Text(String.format(Locale.getDefault(), "%.1f KB", document.sizeBytes / 1024.0), style = MaterialTheme.typography.bodySmall)
-                            Text(document.addedAt.toString(), style = MaterialTheme.typography.labelSmall)
-                        }
-                        TextButton(onClick = { openDocument(document) }) { Text("فتح") }
-                        TextButton(onClick = { deleteDocument(document) }) { Text("حذف") }
-                    }
-                }
-            }
-        }
-        Text("أو أدخل النتيجة يدويًا", style = MaterialTheme.typography.titleSmall)
-        if (tests.isNotEmpty()) {
-            Text("الفحص")
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                FilterChip(selected = selectedTest.isBlank(), onClick = { selectedTest = ""; selectedUnit = "" }, label = { Text("الكل") })
-                tests.forEach { name -> FilterChip(selected = selectedTest == name, onClick = { selectedTest = name; selectedUnit = "" }, label = { Text(name) }) }
-            }
-            if (selectedTest.isNotBlank() && units.size > 1) {
-                Text("الوحدة")
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    units.forEach { unit -> FilterChip(selected = activeUnit == unit, onClick = { selectedUnit = unit }, label = { Text(unit.ifBlank { "بدون وحدة" }) }) }
-                }
-                Text("يتم فصل المقارنة حسب الوحدة حتى لا نقارن قيماً غير متجانسة.", style = MaterialTheme.typography.bodySmall)
-            }
-            Text("الفترة الزمنية")
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                listOf(0, 1, 3, 5).forEach { count -> FilterChip(selected = years == count, onClick = { years = count }, label = { Text(if (count == 0) "كل السنوات" else count.toString() + " سنوات") }) }
-            }
-        }
-        if (latest != null && selectedTest.isNotBlank()) {
-            Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                Text("أحدث نتيجة: " + latest.testName, style = MaterialTheme.typography.titleMedium)
-                Text(latest.value.toString() + " " + latest.unit, style = MaterialTheme.typography.headlineSmall)
-                Text("التاريخ: " + latest.performedAt.toDisplayDate())
-                if (previous != null) Text("مقارنة بالسابقة: " + (latest.value - previous.value).toString() + " " + latest.unit + " (" + previous.performedAt.toDisplayDate() + ")") else Text("لا توجد نتيجة أقدم للمقارنة.")
-                val low = latest.referenceLow; val high = latest.referenceHigh
-                if (low != null || high != null) {
-                    val status = when { low != null && latest.value < low -> "أقل من المجال المرجعي المسجل"; high != null && latest.value > high -> "أعلى من المجال المرجعي المسجل"; else -> "ضمن المجال المرجعي المسجل" }
-                    Text(status, color = if (status.startsWith("ضمن")) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
-                    Text("المجال: " + (low?.toString() ?: "—") + " إلى " + (high?.toString() ?: "—") + " " + latest.unit)
-                }
-            } }
-            if (chronological.size >= 2) {
-                Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("التغير عبر الزمن", style = MaterialTheme.typography.titleMedium)
-                    val chartLineColor = MaterialTheme.colorScheme.primary
-                    val chartPointColor = MaterialTheme.colorScheme.tertiary
-                    Canvas(Modifier.fillMaxWidth().height(150.dp)) {
-                        val values = chronological.map { it.value }; val min = values.minOrNull() ?: 0.0; val max = values.maxOrNull() ?: 1.0; val range = (max - min).takeIf { it > 0.0 } ?: 1.0
-                        val points = values.mapIndexed { index, value -> androidx.compose.ui.geometry.Offset(if (values.size == 1) size.width / 2 else size.width * index / (values.size - 1), size.height - ((value - min) / range).toFloat() * (size.height - 16.dp.toPx()) - 8.dp.toPx()) }
-                        points.zipWithNext().forEach { pair -> drawLine(chartLineColor, pair.first, pair.second, strokeWidth = 4f) }
-                        points.forEach { drawCircle(chartPointColor, 5f, it) }
-                    }
-                    Text(chronological.first().performedAt.toDisplayDate() + " ← " + chronological.last().performedAt.toDisplayDate(), style = MaterialTheme.typography.labelSmall)
-                } }
-            }
-        }
-        if (selectedTest.isBlank() && tests.isNotEmpty()) Text("اختاري فحصًا محددًا لعرض المقارنة والرسم البياني؛ لا نقارن فحوصات مختلفة أو بوحدات مختلفة.")
-        Text("سجل النتائج (" + filtered.size + ")", style = MaterialTheme.typography.titleMedium)
-        if (filtered.isEmpty()) Text("لا توجد نتائج ضمن الاختيار الحالي. أضف أول فحص للبدء.")
-        filtered.forEach { row -> Card(Modifier.fillMaxWidth()) { Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) { Text(row.testName, style = MaterialTheme.typography.titleSmall); Text(row.value.toString() + " " + row.unit); Text(row.performedAt.toDisplayDate() + " • " + row.laboratory.ifBlank { "المختبر غير محدد" }, style = MaterialTheme.typography.bodySmall); Text("المرجع: " + (row.referenceLow?.toString() ?: "—") + " إلى " + (row.referenceHigh?.toString() ?: "—"), style = MaterialTheme.typography.bodySmall); if (row.notes.isNotBlank()) Text(row.notes, style = MaterialTheme.typography.bodySmall) }
-            TextButton(onClick = { scope.launch { deleteResult(row.id) } }) { Text("حذف") }
-        } } }
-    }
-    if (showAdd) AddLabResultDialog(member.id, { showAdd = false; reviewCandidate = null }, reviewCandidate) { row -> scope.launch { addResult(row) }; showAdd = false; reviewCandidate = null }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun AddLabResultDialog(memberId: Long, onDismiss: () -> Unit, initialCandidate: LabReportCandidate? = null, onSave: (LabResult) -> Unit) {
-    var name by rememberSaveable(initialCandidate?.testName) { mutableStateOf(initialCandidate?.testName.orEmpty()) }; var result by rememberSaveable(initialCandidate?.value) { mutableStateOf(initialCandidate?.value?.toString().orEmpty()) }; var unit by rememberSaveable(initialCandidate?.unit) { mutableStateOf(initialCandidate?.unit.orEmpty()) }; var low by rememberSaveable(initialCandidate?.referenceLow) { mutableStateOf(initialCandidate?.referenceLow?.toString().orEmpty()) }; var high by rememberSaveable(initialCandidate?.referenceHigh) { mutableStateOf(initialCandidate?.referenceHigh?.toString().orEmpty()) }; var date by rememberSaveable(initialCandidate?.performedAt) { mutableStateOf(initialCandidate?.performedAt ?: LocalDate.now().toString()) }; var lab by rememberSaveable(initialCandidate?.testName) { mutableStateOf("") }; var notes by rememberSaveable(initialCandidate?.sourceLine) { mutableStateOf(initialCandidate?.let { "اقتراح مستخرج من PDF. راجع النتيجة والوحدة والمجال والتاريخ مقابل التقرير الأصلي." + if (it.flag.isNotBlank()) " علامة المختبر: " + it.flag else "" }.orEmpty()) }; var error by rememberSaveable { mutableStateOf("") }
-    var unitMenuExpanded by rememberSaveable { mutableStateOf(false) }
-    var testNameMenuExpanded by rememberSaveable { mutableStateOf(false) }
-    var customUnit by rememberSaveable(initialCandidate?.unit) { mutableStateOf(initialCandidate?.unit?.let { it.isNotBlank() && it !in LAB_RESULT_UNITS } == true) }
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("إضافة نتيجة فحص") }, text = { Column(Modifier.fillMaxWidth().heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        ExposedDropdownMenuBox(expanded = testNameMenuExpanded, onExpandedChange = { testNameMenuExpanded = it }) {
-            OutlinedTextField(value = name, onValueChange = { name = it; testNameMenuExpanded = true },
-                label = { Text("اسم الفحص") }, placeholder = { Text("اكتبي الاسم أو اختاري فحصًا شائعًا") },
-                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = testNameMenuExpanded) },
-                modifier = Modifier.fillMaxWidth().menuAnchor(), singleLine = true)
-            val matchingTests = LAB_TEST_NAME_SUGGESTIONS.filter { it.contains(name.trim(), ignoreCase = true) }
-            ExposedDropdownMenu(expanded = testNameMenuExpanded, onDismissRequest = { testNameMenuExpanded = false }) {
-                (if (name.isBlank()) LAB_TEST_NAME_SUGGESTIONS else matchingTests).forEach { option ->
-                    DropdownMenuItem(text = { Text(option) }, onClick = { name = option; testNameMenuExpanded = false })
-                }
-                if (name.isNotBlank() && matchingTests.none { it.equals(name.trim(), ignoreCase = true) }) {
-                    DropdownMenuItem(text = { Text("استخدام الاسم المكتوب: ${name.trim()}") }, onClick = { testNameMenuExpanded = false })
-                }
-            }
-        }
-        OutlinedTextField(result, { result = it }, label = { Text("النتيجة الرقمية") }, modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
-        ExposedDropdownMenuBox(expanded = unitMenuExpanded, onExpandedChange = { unitMenuExpanded = it }) {
-            OutlinedTextField(value = if (customUnit) "وحدة مخصصة" else unit, onValueChange = {}, readOnly = true,
-                label = { Text("وحدة النتيجة (اختياري)") }, placeholder = { Text("اختاري الوحدة") },
-                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = unitMenuExpanded) },
-                modifier = Modifier.fillMaxWidth().menuAnchor(), singleLine = true)
-            ExposedDropdownMenu(expanded = unitMenuExpanded, onDismissRequest = { unitMenuExpanded = false }) {
-                (LAB_RESULT_UNITS + "أخرى / كتابة وحدة مخصصة").forEach { choice ->
-                    DropdownMenuItem(text = { Text(choice) }, onClick = {
-                        val wasCustom = customUnit
-                        customUnit = choice.startsWith("أخرى")
-                        if (customUnit && !wasCustom) unit = ""
-                        if (!customUnit) unit = if (choice == "بدون وحدة") "" else choice
-                        unitMenuExpanded = false
-                    })
-                }
-            }
-        }
-        if (customUnit) OutlinedTextField(value = unit, onValueChange = { unit = it }, label = { Text("اكتبي الوحدة كما في التقرير") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-        OutlinedTextField(low, { low = it }, label = { Text("الحد الأدنى المرجعي (اختياري)") }, modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
-        OutlinedTextField(high, { high = it }, label = { Text("الحد الأعلى المرجعي (اختياري)") }, modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
-        DatePickerField("تاريخ الفحص", date, { date = it }, Modifier.fillMaxWidth())
-        OutlinedTextField(lab, { lab = it }, label = { Text("اسم المختبر (اختياري)") }, modifier = Modifier.fillMaxWidth())
-        OutlinedTextField(notes, { notes = it }, label = { Text("ملاحظات") }, modifier = Modifier.fillMaxWidth())
-        if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
-    } }, confirmButton = { TextButton(onClick = { val number = result.toDoubleOrNull(); val lower = low.takeIf { it.isNotBlank() }?.toDoubleOrNull(); val upper = high.takeIf { it.isNotBlank() }?.toDoubleOrNull(); if (name.isBlank() || number == null || (low.isNotBlank() && lower == null) || (high.isNotBlank() && upper == null) || (lower != null && upper != null && lower > upper)) error = "تحقق من اسم الفحص والنتيجة والمجال المرجعي." else onSave(LabResult(memberId = memberId, testName = name.trim(), value = number, unit = unit.trim(), referenceLow = lower, referenceHigh = upper, performedAt = date, laboratory = lab.trim(), source = if (initialCandidate != null) "pdf_review" else "manual", notes = notes.trim())) }) { Text("حفظ النتيجة") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("إلغاء") } })
-}
-
-private val LAB_RESULT_UNITS = listOf(
-    "بدون وحدة", "mg/dL", "mmol/L", "µmol/L", "ng/mL", "pg/mL", "g/dL", "g/L", "mg/L",
-    "mEq/L", "mmol/mol", "%", "U/L", "IU/L", "mIU/L", "µIU/mL", "ng/dL", "µg/dL", "µg/L",
-    "fL", "pg", "10³/µL", "10⁶/µL", "cells/µL", "mm/h", "mL/min/1.73m²", "copies/mL", "ثانية", "دقيقة"
-)
-private val LAB_TEST_NAME_SUGGESTIONS = listOf(
-    "تعداد الدم الكامل (CBC)", "الهيموغلوبين (Hemoglobin)", "الهيماتوكريت (Hematocrit)",
-    "كريات الدم البيضاء (WBC)", "كريات الدم الحمراء (RBC)", "الصفائح الدموية (Platelets)",
-    "العدلات (Neutrophils)", "الخلايا اللمفاوية (Lymphocytes)", "الخلايا الحمضية (Eosinophils)",
-    "سكر صائم (Fasting glucose)", "سكر عشوائي (Random glucose)", "سكر بعد الطعام (Post-meal glucose)",
-    "الهيموغلوبين السكري (HbA1c)", "الكرياتينين (Creatinine)", "اليوريا (Urea)", "نيتروجين اليوريا (BUN)",
-    "معدل الترشيح الكبيبي (eGFR)", "حمض اليوريك (Uric acid)", "إنزيم ALT", "إنزيم AST", "الفوسفاتاز القلوي (ALP)",
-    "جاما جلوتاميل ترانسفيراز (GGT)", "البيليروبين الكلي (Total bilirubin)", "البيليروبين المباشر (Direct bilirubin)",
-    "الألبومين (Albumin)", "الكوليسترول الكلي (Total cholesterol)", "الكوليسترول الضار (LDL)",
-    "الكوليسترول النافع (HDL)", "الدهون الثلاثية (Triglycerides)", "الصوديوم (Sodium)", "البوتاسيوم (Potassium)",
-    "الكلوريد (Chloride)", "الكالسيوم (Calcium)", "المغنيسيوم (Magnesium)", "الفوسفات (Phosphate)",
-    "هرمون الغدة الدرقية المحفز (TSH)", "الثيروكسين الحر (Free T4)", "ثلاثي يودوثيرونين الحر (Free T3)",
-    "فيتامين د (Vitamin D)", "فيتامين ب12 (Vitamin B12)", "حمض الفوليك (Folate)", "الفيريتين (Ferritin)",
-    "الحديد (Iron)", "البروتين المتفاعل C (CRP)", "سرعة ترسيب الدم (ESR)", "تحليل البول الكامل (Urinalysis)",
-    "مزرعة البول (Urine culture)", "مزرعة الدم (Blood culture)", "اختبار الحمل (hCG)", "زمن البروثرومبين (PT/INR)",
-    "زمن الثرومبوبلاستين الجزئي (aPTT)", "الأميليز (Amylase)", "الليباز (Lipase)", "مستضد البروستاتا (PSA)",
-    "الخلايا الوحيدة (Monocytes)", "الخلايا القاعدية (Basophils)", "الشبكيات (Reticulocytes)", "لطاخة الدم (Blood smear)",
-    "الغازات في الدم (Blood gas)", "البيكربونات (Bicarbonate)", "ثاني أكسيد الكربون (CO2)", "الأسمولالية (Osmolality)",
-    "اللاكتات (Lactate)", "بروتين كلي (Total protein)", "غلوبولين (Globulin)", "نسبة ألبومين/غلوبولين (A/G ratio)",
-    "نازعة هيدروجين اللاكتات (LDH)", "كرياتين كيناز (CK)", "تروبونين (Troponin)", "الببتيد الدماغي المدر للصوديوم (BNP)",
-    "الأمونيا (Ammonia)", "النحاس (Copper)", "الزنك (Zinc)", "فيتامين أ (Vitamin A)", "فيتامين هـ (Vitamin E)",
-    "مستوى حمض الفالبرويك (Valproate level)", "مستوى الليثيوم (Lithium level)", "مستوى الديجوكسين (Digoxin level)",
-    "مستضد التهاب الكبد B (HBsAg)", "أجسام مضادة لالتهاب الكبد C (Anti-HCV)", "فحص HIV", "فحص كوفيد-19 (COVID-19)",
-    "فحص الإنفلونزا (Influenza)", "فحص جرثومة المعدة (H. pylori)", "أجسام مضادة للسيلياك (tTG-IgA)",
-    "الأجسام المضادة للنواة (ANA)", "العامل الروماتويدي (Rheumatoid factor)", "أجسام مضادة CCP",
-    "هرمون جار الدرقية (PTH)", "الكالسيتونين (Calcitonin)", "هرمون النمو (Growth hormone)", "البرولاكتين (Prolactin)",
-    "التستوستيرون (Testosterone)", "الإستروجين (Estradiol)", "البروجسترون (Progesterone)",
-    "الهرمون اللوتيني (LH)", "الهرمون المنبه للجريب (FSH)", "تحليل البراز (Stool analysis)", "الدم الخفي في البراز (FOBT)",
-    "زرع البلغم (Sputum culture)", "مزرعة الحلق (Throat culture)", "مزرعة الجروح (Wound culture)",
-    "الكثافة النوعية للبول (Urine specific gravity)", "الزلال في البول (Urine albumin)",
-    "نسبة الألبومين/الكرياتينين في البول (UACR)", "تحليل آخر"
-)
 @Composable
 private fun DetailLine(label: String, value: String) {
     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -1220,102 +1244,7 @@ internal fun String.ageOnDate(today: LocalDate = LocalDate.now()): Int? = runCat
 
 
 @Composable
-private fun SettingsHub(
-    refreshToken: Int,
-    lockEnabled: Boolean, biometricEnabled: Boolean, timeoutMinutes: Int,
-    onSetPin: () -> Unit, onLockEnabled: (Boolean) -> Unit, onBiometric: (Boolean) -> Unit,
-    onTimeout: (Int) -> Unit, onExport: () -> Unit, onImport: () -> Unit,
-    onMedications: () -> Unit, onAppointments: () -> Unit, onDocuments: () -> Unit,
-    onReports: () -> Unit, onReminders: () -> Unit,
-    appearance: AppearanceSettings,
-    onPaletteSelected: (SehatiPalette) -> Unit,
-    onThemeModeSelected: (ThemeMode) -> Unit,
-    onResetAppearance: () -> Unit,
-    updateStatus: String, updateBusy: Boolean, onCheckUpdates: () -> Unit, modifier: Modifier = Modifier
-) {
-    val refresh = refreshToken
-    Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("إعدادات صحتي", style = MaterialTheme.typography.headlineSmall)
-        Text("إدارة التطبيق والخدمات الصحية الحالية والمستقبلية.")
-        Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("إدارة التطبيق", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) { Text("قفل التطبيق"); Text("رمز PIN من 6 أرقام", style = MaterialTheme.typography.bodySmall) }
-                Switch(checked = lockEnabled, onCheckedChange = onLockEnabled)
-            }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) { Text("تغيير أو إعداد PIN"); Text("الرمز الاحتياطي لفتح التطبيق", style = MaterialTheme.typography.bodySmall) }
-                TextButton(onClick = onSetPin) { Text("إعداد") }
-            }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) { Text("فتح بالبصمة أو قفل الجهاز"); Text("عند دعم الجهاز", style = MaterialTheme.typography.bodySmall) }
-                Switch(checked = biometricEnabled, onCheckedChange = onBiometric)
-            }
-            Text("القفل بعد مغادرة التطبيق: $timeoutMinutes دقيقة")
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf(1, 5, 10, 30).forEach { minutes ->
-                    FilterChip(selected = timeoutMinutes == minutes, onClick = { onTimeout(minutes) }, label = { Text("$minutes د") })
-                }
-            }
-            Divider()
-            Text("النسخ الاحتياطي المشفّر", style = MaterialTheme.typography.titleSmall)
-            Text("كلمة مرور مستقلة عن PIN، لا تقل عن 10 أحرف. لا يتم رفع أي بيانات تلقائيًا.", style = MaterialTheme.typography.bodySmall)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = onExport) { Text("إنشاء نسخة") }
-                OutlinedButton(onClick = onImport) { Text("استعادة نسخة") }
-            }
-            Divider()
-            Text("تحديث التطبيق", style = MaterialTheme.typography.titleSmall)
-            Text(updateStatus, style = MaterialTheme.typography.bodySmall)
-            OutlinedButton(enabled = !updateBusy, onClick = onCheckUpdates) { Text("فحص التحديثات الآن") }
-            Text("يتم التحقق من بصمة SHA-256 قبل فتح مثبت أندرويد.", style = MaterialTheme.typography.bodySmall)
-            Text("المظهر واللغة — قيد التطوير")
-        } }
-        Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("الخدمات الصحية", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
-            FutureEntry("الأدوية والعلاجات", "سجل الأدوية والجرعات", onMedications)
-            FutureEntry("المواعيد الطبية", "المراجعات والفحوصات", onAppointments)
-            FutureEntry("الملفات الطبية", "الوثائق والصور الطبية", onDocuments)
-            FutureEntry("التقارير الصحية", "ملخصات وتقارير لكل فرد", onReports)
-            FutureEntry("التنبيهات والتذكيرات", "المواعيد والمتابعات القادمة", onReminders)
-        } }
-        Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp)) {
-            Text("حول التطبيق", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
-            Text("صحتي - الإصدار ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
-            Text("فكرة وإعداد ميناس، بمساعدة ChatGPT", style = MaterialTheme.typography.bodySmall)
-        } }
-        AppearanceSettingsSection(
-            settings = appearance,
-            onPaletteSelected = onPaletteSelected,
-            onModeSelected = onThemeModeSelected,
-            onReset = onResetAppearance
-        )
-    }
-}
-
-@Composable
-private fun FutureEntry(title: String, subtitle: String, onClick: () -> Unit) {
-    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 10.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) { Text(title); Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-        Text("فتح", color = MaterialTheme.colorScheme.primary)
-    }
-}
-
-@Composable
-private fun FutureScreen(title: String, description: String, modifier: Modifier = Modifier) {
-    Column(modifier.fillMaxSize().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text(title, style = MaterialTheme.typography.headlineSmall)
-        Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("القسم ضمن مسارات التطبيق", style = MaterialTheme.typography.titleMedium)
-            Text(description)
-            Text("سيتم تفعيل وظائفه وربطه بملفات أفراد العائلة في مرحلة التطوير الخاصة به.", style = MaterialTheme.typography.bodySmall)
-        } }
-    }
-}
-
-
-@Composable
-private fun LockScreen(store: AppLockStore, onUnlocked: () -> Unit, onBiometric: () -> Unit) {
+private fun LockScreen(store: AppLockStore, onUnlocked: () -> Unit, biometricAvailable: Boolean, onBiometric: () -> Unit) {
     var pin by remember { mutableStateOf("") }
     var error by remember { mutableStateOf("") }
     var remainingLock by remember { mutableLongStateOf(store.remainingLockMillis()) }
@@ -1324,16 +1253,21 @@ private fun LockScreen(store: AppLockStore, onUnlocked: () -> Unit, onBiometric:
         Text("صحتي", style = MaterialTheme.typography.headlineLarge)
         Text("التطبيق مقفل لحماية الملفات الطبية", style = MaterialTheme.typography.bodyMedium)
         Spacer(Modifier.height(20.dp))
-        OutlinedTextField(value = pin, onValueChange = { if (it.length <= 6 && it.all(Char::isDigit)) pin = it; error = "" },
+        OutlinedTextField(value = pin, onValueChange = { if (it.length <= 6 && it.all(Char::isDigit)) pin = it.map { digit -> digit.digitToInt().digitToChar() }.joinToString(""); error = "" },
             label = { Text("رمز PIN من 6 أرقام") }, singleLine = true, visualTransformation = PasswordVisualTransformation(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
         if (remainingLock > 0L) Text("محاولات كثيرة. حاول بعد " + (remainingLock/1000) + " ثانية.", color = MaterialTheme.colorScheme.error)
         if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
         Button(enabled = pin.length == 6 && remainingLock <= 0L, onClick = {
-            if (store.verifyPin(pin.toCharArray())) { pin = ""; onUnlocked() }
-            else { pin = ""; error = "الرمز غير صحيح." }
+            val verified = runCatching { store.verifyPin(pin.toCharArray()) }
+            pin = ""
+            when {
+                verified.getOrDefault(false) -> onUnlocked()
+                verified.isFailure -> error = "تعذر فتح مفتاح PIN. حاول مجددًا بعد فتح قفل الهاتف."
+                else -> error = "الرمز غير صحيح."
+            }
         }, modifier = Modifier.fillMaxWidth()) { Text("فتح التطبيق") }
-        TextButton(onClick = onBiometric) { Text("استخدام البصمة / قفل الجهاز") }
+        if (biometricAvailable) TextButton(onClick = onBiometric) { Text("استخدام البصمة / قفل الجهاز") }
     }
 }
 
@@ -1345,8 +1279,8 @@ private fun PinSetupDialog(onDismiss: () -> Unit, onSave: (String) -> Unit) {
     AlertDialog(onDismissRequest = onDismiss, title = { Text("إعداد رمز PIN") }, text = {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("اختر رمزًا من 6 أرقام وكرره للتأكيد.")
-            OutlinedTextField(first, { if (it.length <= 6 && it.all(Char::isDigit)) first = it }, label = { Text("PIN الجديد") }, visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
-            OutlinedTextField(second, { if (it.length <= 6 && it.all(Char::isDigit)) second = it }, label = { Text("تأكيد PIN") }, visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+            OutlinedTextField(first, { if (it.length <= 6 && it.all(Char::isDigit)) first = it.map { digit -> digit.digitToInt().digitToChar() }.joinToString("") }, label = { Text("PIN الجديد") }, visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+            OutlinedTextField(second, { if (it.length <= 6 && it.all(Char::isDigit)) second = it.map { digit -> digit.digitToInt().digitToChar() }.joinToString("") }, label = { Text("تأكيد PIN") }, visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
             if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
         }
     }, confirmButton = { TextButton(onClick = {

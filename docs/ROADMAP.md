@@ -17,6 +17,12 @@
 
 ## Next milestones
 
+- [x] Phase 1: Replace the crowded settings page with a settings hub and independent, truthful section screens; keep existing theme, lock, backup/restore, and updater behavior connected. Local build/unit tests/lint/Android-test compilation pass; device validation remains unavailable.
+- [ ] Phase 2: Add qualitative lab results with a non-destructive Room migration and backup compatibility.
+- [ ] Phase 3: Implement dose history/reminders and appointments/visits.
+- [ ] Phase 4: Build the encrypted document library and Arabic PDF reports.
+- [ ] Phase 5: Implement Drive OAuth and encrypted scheduled backups after required OAuth setup.
+
 - [x] Add edit support for allergy records while enforcing member ownership in the database query; instrumented isolation test added (needs device execution).
 - [ ] Support qualitative lab results such as Nil and Hazy alongside numeric values.
 - [ ] Add medication dose logs, reminders, and treatment end notifications.

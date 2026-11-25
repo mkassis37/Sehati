@@ -1,0 +1,1117 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 11,
+    "identityHash": "a867bbe17110f44ee0aa09ac97c19dfc",
+    "entities": [
+      {
+        "tableName": "family_members",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `fullName` TEXT NOT NULL, `dateOfBirth` TEXT NOT NULL, `bloodGroup` TEXT NOT NULL, `medicalNotes` TEXT NOT NULL, `sex` TEXT NOT NULL DEFAULT '', `phone` TEXT NOT NULL DEFAULT '', `additionalInfo` TEXT NOT NULL DEFAULT '', `emergencyContactName` TEXT NOT NULL DEFAULT '', `emergencyContactPhone` TEXT NOT NULL DEFAULT '', `emergencyContactRelation` TEXT NOT NULL DEFAULT '', `emergencyShowAllergies` INTEGER NOT NULL DEFAULT 1, `emergencyShowMedications` INTEGER NOT NULL DEFAULT 1, `emergencyShowConditions` INTEGER NOT NULL DEFAULT 1, `emergencyShowNotes` INTEGER NOT NULL DEFAULT 0, `updatedAt` INTEGER NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "fullName",
+            "columnName": "fullName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "dateOfBirth",
+            "columnName": "dateOfBirth",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "bloodGroup",
+            "columnName": "bloodGroup",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "medicalNotes",
+            "columnName": "medicalNotes",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sex",
+            "columnName": "sex",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "''"
+          },
+          {
+            "fieldPath": "phone",
+            "columnName": "phone",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "''"
+          },
+          {
+            "fieldPath": "additionalInfo",
+            "columnName": "additionalInfo",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "''"
+          },
+          {
+            "fieldPath": "emergencyContactName",
+            "columnName": "emergencyContactName",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "''"
+          },
+          {
+            "fieldPath": "emergencyContactPhone",
+            "columnName": "emergencyContactPhone",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "''"
+          },
+          {
+            "fieldPath": "emergencyContactRelation",
+            "columnName": "emergencyContactRelation",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "''"
+          },
+          {
+            "fieldPath": "emergencyShowAllergies",
+            "columnName": "emergencyShowAllergies",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "1"
+          },
+          {
+            "fieldPath": "emergencyShowMedications",
+            "columnName": "emergencyShowMedications",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "1"
+          },
+          {
+            "fieldPath": "emergencyShowConditions",
+            "columnName": "emergencyShowConditions",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "1"
+          },
+          {
+            "fieldPath": "emergencyShowNotes",
+            "columnName": "emergencyShowNotes",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updatedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "allergy_records",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `memberId` INTEGER NOT NULL DEFAULT 1, `category` TEXT NOT NULL, `substance` TEXT NOT NULL, `commercialName` TEXT NOT NULL DEFAULT '', `activeIngredient` TEXT NOT NULL DEFAULT '', `reaction` TEXT NOT NULL, `severity` TEXT NOT NULL, `notes` TEXT NOT NULL, `createdAt` INTEGER NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "memberId",
+            "columnName": "memberId",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "1"
+          },
+          {
+            "fieldPath": "category",
+            "columnName": "category",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "substance",
+            "columnName": "substance",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "commercialName",
+            "columnName": "commercialName",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "''"
+          },
+          {
+            "fieldPath": "activeIngredient",
+            "columnName": "activeIngredient",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "''"
+          },
+          {
+            "fieldPath": "reaction",
+            "columnName": "reaction",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "severity",
+            "columnName": "severity",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "notes",
+            "columnName": "notes",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_allergy_records_memberId",
+            "unique": false,
+            "columnNames": [
+              "memberId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_allergy_records_memberId` ON `${TABLE_NAME}` (`memberId`)"
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "lab_results",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `memberId` INTEGER NOT NULL, `testName` TEXT NOT NULL, `value` REAL, `unit` TEXT NOT NULL, `referenceLow` REAL, `referenceHigh` REAL, `performedAt` TEXT NOT NULL, `laboratory` TEXT NOT NULL, `source` TEXT NOT NULL, `notes` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, `qualitativeValue` TEXT)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "memberId",
+            "columnName": "memberId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "testName",
+            "columnName": "testName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value",
+            "columnName": "value",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "unit",
+            "columnName": "unit",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "referenceLow",
+            "columnName": "referenceLow",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "referenceHigh",
+            "columnName": "referenceHigh",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "performedAt",
+            "columnName": "performedAt",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "laboratory",
+            "columnName": "laboratory",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "source",
+            "columnName": "source",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "notes",
+            "columnName": "notes",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "qualitativeValue",
+            "columnName": "qualitativeValue",
+            "affinity": "TEXT",
+            "notNull": false
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_lab_results_memberId_testName_performedAt",
+            "unique": false,
+            "columnNames": [
+              "memberId",
+              "testName",
+              "performedAt"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_lab_results_memberId_testName_performedAt` ON `${TABLE_NAME}` (`memberId`, `testName`, `performedAt`)"
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "medical_documents",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `memberId` INTEGER NOT NULL, `displayName` TEXT NOT NULL, `relativePath` TEXT NOT NULL, `mimeType` TEXT NOT NULL, `sizeBytes` INTEGER NOT NULL, `relatedProcedureId` INTEGER, `addedAt` INTEGER NOT NULL, `relatedAppointmentId` INTEGER, `relatedLabResultId` INTEGER, `category` TEXT NOT NULL DEFAULT 'OTHER', `documentDate` TEXT NOT NULL DEFAULT '')",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "memberId",
+            "columnName": "memberId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "displayName",
+            "columnName": "displayName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "relativePath",
+            "columnName": "relativePath",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "mimeType",
+            "columnName": "mimeType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sizeBytes",
+            "columnName": "sizeBytes",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "relatedProcedureId",
+            "columnName": "relatedProcedureId",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "addedAt",
+            "columnName": "addedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "relatedAppointmentId",
+            "columnName": "relatedAppointmentId",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "relatedLabResultId",
+            "columnName": "relatedLabResultId",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "category",
+            "columnName": "category",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "'OTHER'"
+          },
+          {
+            "fieldPath": "documentDate",
+            "columnName": "documentDate",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "''"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_medical_documents_memberId_addedAt",
+            "unique": false,
+            "columnNames": [
+              "memberId",
+              "addedAt"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_medical_documents_memberId_addedAt` ON `${TABLE_NAME}` (`memberId`, `addedAt`)"
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "medication_records",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `memberId` INTEGER NOT NULL, `name` TEXT NOT NULL, `strength` TEXT NOT NULL, `dosage` TEXT NOT NULL, `form` TEXT NOT NULL, `frequency` TEXT NOT NULL, `scheduledTimes` TEXT NOT NULL, `startDate` TEXT NOT NULL, `endDate` TEXT NOT NULL, `prescribingDoctor` TEXT NOT NULL, `instructions` TEXT NOT NULL, `notes` TEXT NOT NULL, `isActive` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, `completed` INTEGER NOT NULL DEFAULT 0)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "memberId",
+            "columnName": "memberId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "strength",
+            "columnName": "strength",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "dosage",
+            "columnName": "dosage",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "form",
+            "columnName": "form",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "frequency",
+            "columnName": "frequency",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "scheduledTimes",
+            "columnName": "scheduledTimes",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startDate",
+            "columnName": "startDate",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "endDate",
+            "columnName": "endDate",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "prescribingDoctor",
+            "columnName": "prescribingDoctor",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "instructions",
+            "columnName": "instructions",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "notes",
+            "columnName": "notes",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isActive",
+            "columnName": "isActive",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updatedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "completed",
+            "columnName": "completed",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_medication_records_memberId_isActive_name",
+            "unique": false,
+            "columnNames": [
+              "memberId",
+              "isActive",
+              "name"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_medication_records_memberId_isActive_name` ON `${TABLE_NAME}` (`memberId`, `isActive`, `name`)"
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "chronic_conditions",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `memberId` INTEGER NOT NULL, `name` TEXT NOT NULL, `diagnosedOn` TEXT NOT NULL, `diagnosingDoctor` TEXT NOT NULL, `status` TEXT NOT NULL, `treatment` TEXT NOT NULL, `notes` TEXT NOT NULL, `createdAt` INTEGER NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "memberId",
+            "columnName": "memberId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "diagnosedOn",
+            "columnName": "diagnosedOn",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "diagnosingDoctor",
+            "columnName": "diagnosingDoctor",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "treatment",
+            "columnName": "treatment",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "notes",
+            "columnName": "notes",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_chronic_conditions_memberId_status_diagnosedOn",
+            "unique": false,
+            "columnNames": [
+              "memberId",
+              "status",
+              "diagnosedOn"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_chronic_conditions_memberId_status_diagnosedOn` ON `${TABLE_NAME}` (`memberId`, `status`, `diagnosedOn`)"
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "medical_procedures",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `memberId` INTEGER NOT NULL, `name` TEXT NOT NULL, `performedOn` TEXT NOT NULL, `facility` TEXT NOT NULL, `doctor` TEXT NOT NULL, `reason` TEXT NOT NULL, `complications` TEXT NOT NULL, `notes` TEXT NOT NULL, `createdAt` INTEGER NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "memberId",
+            "columnName": "memberId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "performedOn",
+            "columnName": "performedOn",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "facility",
+            "columnName": "facility",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "doctor",
+            "columnName": "doctor",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "reason",
+            "columnName": "reason",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "complications",
+            "columnName": "complications",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "notes",
+            "columnName": "notes",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_medical_procedures_memberId_performedOn",
+            "unique": false,
+            "columnNames": [
+              "memberId",
+              "performedOn"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_medical_procedures_memberId_performedOn` ON `${TABLE_NAME}` (`memberId`, `performedOn`)"
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "medical_history_events",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `memberId` INTEGER NOT NULL, `category` TEXT NOT NULL, `title` TEXT NOT NULL, `eventDate` TEXT NOT NULL, `notes` TEXT NOT NULL, `createdAt` INTEGER NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "memberId",
+            "columnName": "memberId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "category",
+            "columnName": "category",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "title",
+            "columnName": "title",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "eventDate",
+            "columnName": "eventDate",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "notes",
+            "columnName": "notes",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_medical_history_events_memberId_eventDate",
+            "unique": false,
+            "columnNames": [
+              "memberId",
+              "eventDate"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_medical_history_events_memberId_eventDate` ON `${TABLE_NAME}` (`memberId`, `eventDate`)"
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "family_disease_history",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `memberId` INTEGER NOT NULL, `relative` TEXT NOT NULL, `disease` TEXT NOT NULL, `notes` TEXT NOT NULL, `createdAt` INTEGER NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "memberId",
+            "columnName": "memberId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "relative",
+            "columnName": "relative",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "disease",
+            "columnName": "disease",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "notes",
+            "columnName": "notes",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_family_disease_history_memberId_relative_disease",
+            "unique": false,
+            "columnNames": [
+              "memberId",
+              "relative",
+              "disease"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_family_disease_history_memberId_relative_disease` ON `${TABLE_NAME}` (`memberId`, `relative`, `disease`)"
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "body_measurements",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `memberId` INTEGER NOT NULL, `measuredOn` TEXT NOT NULL, `heightCm` REAL, `weightKg` REAL, `notes` TEXT NOT NULL, `createdAt` INTEGER NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "memberId",
+            "columnName": "memberId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "measuredOn",
+            "columnName": "measuredOn",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "heightCm",
+            "columnName": "heightCm",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "weightKg",
+            "columnName": "weightKg",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "notes",
+            "columnName": "notes",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_body_measurements_memberId_measuredOn",
+            "unique": false,
+            "columnNames": [
+              "memberId",
+              "measuredOn"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_body_measurements_memberId_measuredOn` ON `${TABLE_NAME}` (`memberId`, `measuredOn`)"
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "medical_appointments",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `memberId` INTEGER NOT NULL, `doctor` TEXT NOT NULL, `specialty` TEXT NOT NULL, `facility` TEXT NOT NULL, `date` TEXT NOT NULL, `time` TEXT NOT NULL, `reason` TEXT NOT NULL, `notes` TEXT NOT NULL, `status` TEXT NOT NULL, `outcome` TEXT NOT NULL, `diagnosis` TEXT NOT NULL, `recommendations` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, FOREIGN KEY(`memberId`) REFERENCES `family_members`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "memberId",
+            "columnName": "memberId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "doctor",
+            "columnName": "doctor",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "specialty",
+            "columnName": "specialty",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "facility",
+            "columnName": "facility",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "date",
+            "columnName": "date",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "time",
+            "columnName": "time",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "reason",
+            "columnName": "reason",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "notes",
+            "columnName": "notes",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "outcome",
+            "columnName": "outcome",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "diagnosis",
+            "columnName": "diagnosis",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "recommendations",
+            "columnName": "recommendations",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_medical_appointments_memberId_date_time",
+            "unique": false,
+            "columnNames": [
+              "memberId",
+              "date",
+              "time"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_medical_appointments_memberId_date_time` ON `${TABLE_NAME}` (`memberId`, `date`, `time`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "family_members",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "memberId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "dose_logs",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`medicationId` INTEGER NOT NULL, `memberId` INTEGER NOT NULL, `date` TEXT NOT NULL, `time` TEXT NOT NULL, `status` TEXT NOT NULL, `updatedAt` INTEGER NOT NULL, `snoozedUntil` INTEGER, PRIMARY KEY(`medicationId`, `date`, `time`), FOREIGN KEY(`medicationId`) REFERENCES `medication_records`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "medicationId",
+            "columnName": "medicationId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "memberId",
+            "columnName": "memberId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "date",
+            "columnName": "date",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "time",
+            "columnName": "time",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updatedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "snoozedUntil",
+            "columnName": "snoozedUntil",
+            "affinity": "INTEGER",
+            "notNull": false
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "medicationId",
+            "date",
+            "time"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_dose_logs_memberId_date",
+            "unique": false,
+            "columnNames": [
+              "memberId",
+              "date"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_dose_logs_memberId_date` ON `${TABLE_NAME}` (`memberId`, `date`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "medication_records",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "medicationId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      }
+    ],
+    "views": [],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'a867bbe17110f44ee0aa09ac97c19dfc')"
+    ]
+  }
+}

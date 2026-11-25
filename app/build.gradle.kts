@@ -5,6 +5,16 @@ plugins {
     id("com.google.devtools.ksp")
 }
 
+val googleDriveEnabled = providers.gradleProperty("sehatiGoogleDriveEnabled").map(String::toBoolean).orElse(false)
+
+val sourceCommit = providers.environmentVariable("GITHUB_SHA")
+    .orElse(providers.exec {
+        workingDir(rootProject.projectDir)
+        commandLine("git", "rev-parse", "HEAD")
+        isIgnoreExitValue = true
+    }.standardOutput.asText)
+    .map { it.trim().takeIf { sha -> sha.matches(Regex("[0-9a-f]{40}")) }.orEmpty() }
+
 android {
     namespace = "com.mkassis37.sehati"
     compileSdk = 35
@@ -15,6 +25,8 @@ android {
         targetSdk = 35
         versionCode = 3
         versionName = "0.3.0"
+        buildConfigField("String", "SOURCE_COMMIT", "\"${sourceCommit.get()}\"")
+        buildConfigField("boolean", "GOOGLE_DRIVE_ENABLED", googleDriveEnabled.get().toString())
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -63,6 +75,8 @@ android {
         buildConfig = true
     }
 
+    sourceSets.getByName("androidTest").assets.srcDir("$projectDir/schemas")
+
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
@@ -101,6 +115,8 @@ dependencies {
     implementation("net.zetetic:sqlcipher-android:4.9.0")
     implementation("androidx.sqlite:sqlite:2.4.0")
     implementation("com.google.mlkit:text-recognition:16.0.1")
+    implementation("com.google.android.gms:play-services-auth:21.3.0")
+    implementation("androidx.work:work-runtime-ktx:2.10.0")
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
     implementation("cz.adaptech.tesseract4android:tesseract4android:4.9.0")
 

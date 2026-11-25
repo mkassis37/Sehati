@@ -42,12 +42,16 @@ class AppLockStore(context: Context) {
     }
 
     fun verifyPin(pin: CharArray): Boolean {
-        if (!hasPin()) { pin.fill('\u0000'); return false }
+        return try { verifyPinInternal(pin) } finally { pin.fill('\u0000') }
+    }
+
+    private fun verifyPinInternal(pin: CharArray): Boolean {
+        if (!hasPin()) return false
         val salt = android.util.Base64.decode(prefs.getString("pin_salt", "")!!, android.util.Base64.NO_WRAP)
         val envelope = android.util.Base64.decode(prefs.getString("pin_cipher", "")!!, android.util.Base64.NO_WRAP)
         val iv = envelope.copyOfRange(0, 12)
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-        cipher.init(Cipher.DECRYPT_MODE, wrappingKey(), GCMParameterSpec(128, iv))
+        cipher.init(Cipher.DECRYPT_MODE, wrappingKey(create = false), GCMParameterSpec(128, iv))
         val expected = cipher.doFinal(envelope.copyOfRange(12, envelope.size))
         val actual = derive(pin, salt)
         val valid = java.security.MessageDigest.isEqual(expected, actual)
@@ -76,9 +80,10 @@ class AppLockStore(context: Context) {
         finally { spec.clearPassword() }
     }
 
-    private fun wrappingKey(): SecretKey {
+    private fun wrappingKey(create: Boolean = true): SecretKey {
         val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
         (store.getKey(KEY_ALIAS, null) as? SecretKey)?.let { return it }
+        check(create) { "The existing PIN verification key is unavailable." }
         val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
         generator.init(KeyGenParameterSpec.Builder(KEY_ALIAS,
             KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)

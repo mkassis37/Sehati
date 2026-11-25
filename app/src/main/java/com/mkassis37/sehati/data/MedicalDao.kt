@@ -4,15 +4,51 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.Query
 import androidx.room.Update
+import androidx.room.Upsert
 import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface MedicalDao {
+    @Query("""
+        SELECT m.id AS memberId, m.fullName AS memberName, records.kind, records.recordId,
+               records.title, records.detail
+          FROM (
+              SELECT id AS recordId, id AS ownerId, 'MEMBER' AS kind, fullName AS title,
+                     '' AS detail, fullName || ' ' || medicalNotes || ' ' || additionalInfo AS terms FROM family_members
+              UNION ALL SELECT id, memberId, 'ALLERGY', substance, category,
+                     substance || ' ' || commercialName || ' ' || activeIngredient || ' ' || reaction || ' ' || notes FROM allergy_records
+              UNION ALL SELECT id, memberId, 'LAB', testName, performedAt,
+                     testName || ' ' || COALESCE(qualitativeValue, '') || ' ' || laboratory || ' ' || notes FROM lab_results
+              UNION ALL SELECT id, memberId, 'MEDICATION', name, strength,
+                     name || ' ' || strength || ' ' || prescribingDoctor || ' ' || instructions || ' ' || notes FROM medication_records
+              UNION ALL SELECT id, memberId, 'VISIT', doctor, date,
+                     doctor || ' ' || specialty || ' ' || facility || ' ' || reason || ' ' || outcome || ' ' || diagnosis || ' ' || recommendations || ' ' || notes FROM medical_appointments
+              UNION ALL SELECT id, memberId, 'DOCUMENT', displayName, documentDate, displayName FROM medical_documents
+              UNION ALL SELECT id, memberId, 'HISTORY', title, eventDate,
+                     title || ' ' || category || ' ' || notes FROM medical_history_events
+              UNION ALL SELECT id, memberId, 'CONDITION', name, diagnosedOn,
+                     name || ' ' || diagnosingDoctor || ' ' || treatment || ' ' || notes FROM chronic_conditions
+              UNION ALL SELECT id, memberId, 'FAMILY_HISTORY', disease, relative,
+                     disease || ' ' || relative || ' ' || notes FROM family_disease_history
+              UNION ALL SELECT id, memberId, 'PROCEDURE', name, performedOn,
+                     name || ' ' || facility || ' ' || doctor || ' ' || reason || ' ' || complications || ' ' || notes FROM medical_procedures
+          ) AS records JOIN family_members AS m ON records.ownerId = m.id
+         WHERE (:memberId IS NULL OR m.id = :memberId)
+           AND instr(lower(records.terms), lower(:query)) > 0
+         ORDER BY CASE records.kind WHEN 'MEMBER' THEN 0 ELSE 1 END, m.fullName, records.kind, records.recordId DESC
+         LIMIT 100
+    """)
+    fun searchMedicalRecords(query: String, memberId: Long?): Flow<List<MedicalSearchHit>>
+
+
     @Query("SELECT * FROM family_members ORDER BY fullName COLLATE NOCASE")
     fun observeMembers(): Flow<List<FamilyMember>>
 
     @Query("SELECT * FROM family_members WHERE id = :memberId LIMIT 1")
     fun observeMember(memberId: Long): Flow<FamilyMember?>
+
+    @Query("SELECT EXISTS(SELECT 1 FROM family_members WHERE id = :memberId)")
+    suspend fun memberExists(memberId: Long): Boolean
 
     @Query("SELECT * FROM family_members ORDER BY id")
     suspend fun getAllMembers(): List<FamilyMember>
@@ -149,6 +185,51 @@ interface MedicalDao {
     @Query("DELETE FROM lab_results")
     suspend fun clearLabResults()
 
+    @Query("SELECT * FROM medical_appointments WHERE memberId = :memberId ORDER BY date, time, id")
+    fun observeAppointments(memberId: Long): Flow<List<MedicalAppointment>>
+
+    @Query("SELECT * FROM medical_appointments ORDER BY id")
+    suspend fun getAllAppointments(): List<MedicalAppointment>
+
+    @Insert suspend fun addAppointment(record: MedicalAppointment): Long
+    @Insert suspend fun insertAppointments(records: List<MedicalAppointment>)
+
+    @Query(
+        """UPDATE medical_appointments SET doctor = :doctor, specialty = :specialty, facility = :facility,
+           date = :date, time = :time, reason = :reason, notes = :notes, status = :status,
+           outcome = :outcome, diagnosis = :diagnosis, recommendations = :recommendations
+           WHERE id = :id AND memberId = :memberId"""
+    )
+    suspend fun updateAppointment(
+        id: Long, memberId: Long, doctor: String, specialty: String, facility: String,
+        date: String, time: String, reason: String, notes: String, status: String,
+        outcome: String, diagnosis: String, recommendations: String
+    ): Int
+
+    @Query("DELETE FROM medical_appointments WHERE id = :id AND memberId = :memberId")
+    suspend fun deleteAppointment(id: Long, memberId: Long): Int
+
+    @Query("SELECT EXISTS(SELECT 1 FROM medical_appointments WHERE id = :id AND memberId = :memberId)")
+    suspend fun ownsAppointment(id: Long, memberId: Long): Boolean
+
+    @Query("UPDATE medical_documents SET relatedAppointmentId = NULL WHERE relatedAppointmentId = :id AND memberId = :memberId")
+    suspend fun unlinkAppointmentDocuments(id: Long, memberId: Long)
+
+    @Query("SELECT * FROM dose_logs WHERE memberId = :memberId ORDER BY date DESC, time DESC")
+    fun observeDoseLogs(memberId: Long): Flow<List<DoseLog>>
+
+    @Query("SELECT * FROM dose_logs ORDER BY medicationId, date, time")
+    suspend fun getAllDoseLogs(): List<DoseLog>
+
+    @Query("SELECT * FROM dose_logs WHERE date >= :date")
+    suspend fun getDoseLogsSince(date: String): List<DoseLog>
+
+    @Insert suspend fun insertDoseLogs(rows: List<DoseLog>)
+    @Upsert suspend fun saveDoseLog(row: DoseLog)
+
+    @Query("SELECT * FROM medication_records WHERE id = :medicationId AND memberId = :memberId")
+    suspend fun findMedication(medicationId: Long, memberId: Long): MedicationRecord?
+
     @Query("SELECT * FROM medication_records WHERE memberId = :memberId ORDER BY isActive DESC, name COLLATE NOCASE")
     fun observeMedications(memberId: Long): Flow<List<MedicationRecord>>
 
@@ -172,6 +253,18 @@ interface MedicalDao {
 
     @Query("DELETE FROM medication_records")
     suspend fun clearMedications()
+
+    @Query("SELECT EXISTS(SELECT 1 FROM lab_results WHERE id = :id AND memberId = :memberId)")
+    suspend fun ownsLabResult(id: Long, memberId: Long): Boolean
+
+    @Query("SELECT EXISTS(SELECT 1 FROM medical_procedures WHERE id = :id AND memberId = :memberId)")
+    suspend fun ownsProcedure(id: Long, memberId: Long): Boolean
+
+    @Query("SELECT * FROM medical_documents WHERE id = :id AND memberId = :memberId")
+    suspend fun findDocument(id: Long, memberId: Long): MedicalDocument?
+
+    @Query("UPDATE medical_documents SET relatedLabResultId = NULL WHERE relatedLabResultId = :id AND memberId = :memberId")
+    suspend fun unlinkLabDocuments(id: Long, memberId: Long)
 
     @Query("SELECT * FROM medical_documents WHERE memberId = :memberId ORDER BY addedAt DESC")
     fun observeDocuments(memberId: Long): Flow<List<MedicalDocument>>
@@ -197,8 +290,8 @@ interface MedicalDao {
     @Query("DELETE FROM medical_documents WHERE memberId = :memberId")
     suspend fun deleteDocumentsForMember(memberId: Long)
 
-    @Query("UPDATE medical_documents SET relatedProcedureId = NULL WHERE relatedProcedureId = :procedureId")
-    suspend fun unlinkDocumentsFromProcedure(procedureId: Long)
+    @Query("UPDATE medical_documents SET relatedProcedureId = NULL WHERE relatedProcedureId = :procedureId AND memberId = :memberId")
+    suspend fun unlinkDocumentsFromProcedure(procedureId: Long, memberId: Long)
 
     @Query("DELETE FROM medical_documents")
     suspend fun clearDocuments()

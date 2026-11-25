@@ -113,4 +113,121 @@ class MemberHealthDatabaseTest {
         }
         migrated.close()
     }
+    @Test
+    fun migrationFromVersionSevenPreservesNumericResultsAndAllowsTextResults() {
+        val databaseName = "sehati-v7-to-v8-test"
+        migrationHelper.createDatabase(databaseName, 7).use { legacy ->
+            legacy.execSQL(
+                """INSERT INTO lab_results
+                   (id, memberId, testName, value, unit, referenceLow, referenceHigh, performedAt,
+                    laboratory, source, notes, createdAt)
+                   VALUES (15, 41, 'Synthetic numeric', 2.5, 'g/L', 1, 4, '2024-01-01',
+                           'Synthetic lab', 'manual', 'fixture', 1234)"""
+            )
+        }
+        migrationHelper.runMigrationsAndValidate(
+            databaseName, 8, true, MedicalDatabaseMigrations.LAB_RESULTS_7_8
+        ).use { migrated ->
+            migrated.query("SELECT memberId, value, unit, referenceLow, referenceHigh, qualitativeValue FROM lab_results WHERE id = 15").use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals(41L, cursor.getLong(0))
+                assertEquals(2.5, cursor.getDouble(1), 0.0)
+                assertEquals("g/L", cursor.getString(2))
+                assertEquals(1.0, cursor.getDouble(3), 0.0)
+                assertEquals(4.0, cursor.getDouble(4), 0.0)
+                assertTrue(cursor.isNull(5))
+            }
+            migrated.execSQL(
+                """INSERT INTO lab_results
+                   (memberId, testName, qualitativeValue, unit, performedAt, laboratory, source, notes, createdAt)
+                   VALUES (42, 'Synthetic qualitative', 'Trace', '', '2024-01-02', '', 'manual', '', 1235)"""
+            )
+            migrated.query("SELECT value, qualitativeValue FROM lab_results WHERE memberId = 42").use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertTrue(cursor.isNull(0))
+                assertEquals("Trace", cursor.getString(1))
+            }
+        }
+    }
+
+    @Test
+    fun appointmentEditsDeletionAndAttachmentsAreMemberScoped() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val database = Room.inMemoryDatabaseBuilder(context, SehatiDatabase::class.java).build()
+        try {
+            val dao = database.medicalDao()
+            val owner = dao.addMember(FamilyMember(fullName = "Synthetic owner"))
+            val other = dao.addMember(FamilyMember(fullName = "Synthetic other"))
+            val appointment = MedicalAppointment(
+                memberId = owner, doctor = "Synthetic doctor", specialty = "", facility = "",
+                date = "2026-12-01", time = "10:00", reason = "", notes = "",
+                status = AppointmentStatus.UPCOMING.name, outcome = "", diagnosis = "", recommendations = ""
+            )
+            assertTrue(database.saveAppointment(appointment, owner))
+            val saved = dao.observeAppointments(owner).first().single()
+            assertTrue(dao.observeAppointments(other).first().isEmpty())
+            assertFalse(database.saveAppointment(saved.copy(memberId = other, doctor = "Cross-member edit"), other))
+            assertFalse(database.deleteAppointment(saved.id, other))
+            assertEquals("Synthetic doctor", dao.observeAppointments(owner).first().single().doctor)
+
+            val document = MedicalDocument(memberId = owner, displayName = "fixture.pdf", relativePath = "$owner/fixture.shtd", sizeBytes = 10)
+            assertTrue(runCatching { database.addAppointmentDocument(document.copy(memberId = other), saved.id) }.isFailure)
+            database.addAppointmentDocument(document, saved.id)
+            assertEquals(saved.id, dao.getDocumentsForMember(owner).single().relatedAppointmentId)
+            assertTrue(database.deleteAppointment(saved.id, owner))
+            assertEquals(null, dao.getDocumentsForMember(owner).single().relatedAppointmentId)
+
+            assertTrue(database.saveAppointment(appointment, owner))
+            database.deleteMemberAndRecords(owner)
+            assertTrue(dao.observeAppointments(owner).first().isEmpty())
+            assertEquals(other, dao.observeMembers().first().single().id)
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
+    fun doseLogsAreOwnedByTheMedicationMemberAndCascadeOnDeletion() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val database = Room.inMemoryDatabaseBuilder(context, SehatiDatabase::class.java).build()
+        try {
+            val dao = database.medicalDao()
+            val owner = dao.addMember(FamilyMember(fullName = "Synthetic owner"))
+            val other = dao.addMember(FamilyMember(fullName = "Synthetic other"))
+            val medicationId = dao.addMedication(MedicationRecord(memberId = owner,
+                name = "Synthetic medication", startDate = "2026-11-25"))
+            val original = DoseLog(medicationId, owner, "2026-11-25", "08:00", DoseStatus.MISSED.name, 1234)
+            assertTrue(database.recordDose(original, owner))
+            assertFalse(database.recordDose(original.copy(memberId = other, status = DoseStatus.TAKEN.name), other))
+            assertTrue(dao.observeDoseLogs(other).first().isEmpty())
+            assertEquals(original, dao.observeDoseLogs(owner).first().single())
+            assertTrue(database.recordDose(original.copy(status = DoseStatus.TAKEN.name), owner))
+            assertEquals(DoseStatus.TAKEN.name, dao.observeDoseLogs(owner).first().single().status)
+            dao.deleteMedication(medicationId, owner)
+            assertTrue(dao.observeDoseLogs(owner).first().isEmpty())
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
+    fun familySearchCanLimitMatchesToOneMember() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val database = Room.inMemoryDatabaseBuilder(context, SehatiDatabase::class.java).build()
+        try {
+            val dao = database.medicalDao()
+            val first = dao.addMember(FamilyMember(fullName = "Synthetic first"))
+            val second = dao.addMember(FamilyMember(fullName = "Synthetic second"))
+            dao.addAllergy(AllergyRecord(memberId = first, category = "fixture", substance = "Shared keyword", reaction = "", severity = ""))
+            dao.addMedication(MedicationRecord(memberId = second, name = "Shared keyword", startDate = "2026-11-25"))
+            assertEquals(setOf(first, second), dao.searchMedicalRecords("shared keyword", null).first().map { it.memberId }.toSet())
+            val scoped = dao.searchMedicalRecords("shared keyword", first).first().single()
+            assertEquals(first, scoped.memberId)
+            assertEquals("ALLERGY", scoped.kind)
+            assertTrue(dao.searchMedicalRecords("%", null).first().isEmpty())
+        } finally {
+            database.close()
+        }
+    }
+
 }

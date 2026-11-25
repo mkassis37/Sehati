@@ -1,5 +1,6 @@
 package com.mkassis37.sehati.data
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
@@ -27,5 +28,6 @@ data class MedicationRecord(
     val notes: String = "",
     val isActive: Boolean = true,
     val createdAt: Long = System.currentTimeMillis(),
-    val updatedAt: Long = System.currentTimeMillis()
+    val updatedAt: Long = System.currentTimeMillis(),
+    @ColumnInfo(defaultValue = "0") val completed: Boolean = false
 )

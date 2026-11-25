@@ -19,6 +19,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import android.net.Uri
 import com.mkassis37.sehati.security.AppLockStore
 import com.mkassis37.sehati.data.EncryptedBackup
+import com.mkassis37.sehati.data.AppearanceSettingsStore
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.lifecycle.Lifecycle
@@ -58,6 +59,9 @@ import com.mkassis37.sehati.data.MedicationRecord
 import com.mkassis37.sehati.data.SecureMedicalDocumentStore
 import com.mkassis37.sehati.data.SehatiDatabase
 import com.mkassis37.sehati.ui.theme.SehatiTheme
+import com.mkassis37.sehati.ui.theme.AppearanceSettings
+import com.mkassis37.sehati.ui.theme.SehatiPalette
+import com.mkassis37.sehati.ui.theme.ThemeMode
 import java.time.Instant
 import java.time.LocalDate
 import java.time.Period
@@ -75,8 +79,11 @@ class MainActivity : FragmentActivity() {
         val db = SehatiDatabase.getInstance(applicationContext)
         window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN or WindowManager.LayoutParams.FLAG_SECURE)
         setContent {
+            val appearanceStore = remember { AppearanceSettingsStore(applicationContext) }
+            val appearance by appearanceStore.settings.collectAsState(initial = AppearanceSettings())
+            val appearanceScope = rememberCoroutineScope()
             var showSplash by remember { mutableStateOf(true) }
-            SehatiTheme {
+            SehatiTheme(appearance = appearance) {
                 CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
                     if (showSplash) {
                         SehatiSplashScreen()
@@ -86,7 +93,13 @@ class MainActivity : FragmentActivity() {
                             window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
                         }
                     } else {
-                        SehatiApp(db)
+                        SehatiApp(
+                            db = db,
+                            appearance = appearance,
+                            onPaletteSelected = { palette -> appearanceScope.launch { appearanceStore.updatePalette(palette) } },
+                            onThemeModeSelected = { mode -> appearanceScope.launch { appearanceStore.updateMode(mode) } },
+                            onResetAppearance = { appearanceScope.launch { appearanceStore.reset() } }
+                        )
                     }
                 }
             }
@@ -98,7 +111,13 @@ private enum class Screen { MEMBERS, DETAILS, FORM, HEALTH_RECORDS, ALLERGIES, L
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SehatiApp(db: SehatiDatabase) {
+private fun SehatiApp(
+    db: SehatiDatabase,
+    appearance: AppearanceSettings,
+    onPaletteSelected: (SehatiPalette) -> Unit,
+    onThemeModeSelected: (ThemeMode) -> Unit,
+    onResetAppearance: () -> Unit
+) {
     val dao = db.medicalDao()
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -439,6 +458,7 @@ private fun SehatiApp(db: SehatiDatabase) {
             Screen.ALLERGIES -> if (selected != null) {
                 AllergyScreen(selected, allergies,
                     addAllergy = { dao.addAllergy(it) },
+                    updateAllergy = { record -> dao.updateAllergy(record.id, selected.id, record.category, record.substance, record.commercialName, record.activeIngredient, record.reaction, record.severity, record.notes) },
                     deleteAllergy = { dao.deleteAllergy(it, selected.id) },
                     modifier = Modifier.padding(padding))
             }
@@ -473,6 +493,10 @@ private fun SehatiApp(db: SehatiDatabase) {
                 onDocuments = { screen = Screen.DOCUMENTS },
                 onReports = { screen = Screen.REPORTS },
                 onReminders = { screen = Screen.REMINDERS },
+                appearance = appearance,
+                onPaletteSelected = onPaletteSelected,
+                onThemeModeSelected = onThemeModeSelected,
+                onResetAppearance = onResetAppearance,
                 updateStatus = updateStatus,
                 updateBusy = updateBusy,
                 onCheckUpdates = {
@@ -1016,18 +1040,20 @@ private fun AllergyScreen(
     member: FamilyMember,
     records: List<AllergyRecord>,
     addAllergy: suspend (AllergyRecord) -> Unit,
+    updateAllergy: suspend (AllergyRecord) -> Unit,
     deleteAllergy: suspend (Long) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val scope = rememberCoroutineScope()
     var showDialog by rememberSaveable(member.id) { mutableStateOf(false) }
+    var editingRecord by remember(member.id) { mutableStateOf<AllergyRecord?>(null) }
     Column(modifier.fillMaxSize().padding(16.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Column {
                 Text("حساسيات ${member.fullName}", style = MaterialTheme.typography.titleLarge)
                 Text("هذا السجل خاص بهذا الفرد", style = MaterialTheme.typography.bodySmall)
             }
-            Button(onClick = { showDialog = true }) { Icon(Icons.Outlined.Add, null); Text("إضافة") }
+            Button(onClick = { editingRecord = null; showDialog = true }) { Icon(Icons.Outlined.Add, null); Text("إضافة") }
         }
         Spacer(Modifier.height(12.dp))
         if (records.isEmpty()) {
@@ -1047,7 +1073,10 @@ private fun AllergyScreen(
                             Text("الأعراض: ${record.reaction}")
                             Text("الشدة: ${record.severity}")
                             if (record.notes.isNotBlank()) Text(record.notes)
-                            TextButton(onClick = { scope.launch { deleteAllergy(record.id) } }) { Text("حذف السجل") }
+                            Row {
+                                TextButton(onClick = { editingRecord = record; showDialog = true }) { Text("تعديل") }
+                                TextButton(onClick = { scope.launch { deleteAllergy(record.id) } }) { Text("حذف السجل") }
+                            }
                         }
                     }
                 }
@@ -1055,8 +1084,9 @@ private fun AllergyScreen(
         }
     }
     if (showDialog) {
-        AllergyDialog(member.id, onDismiss = { showDialog = false }, onSave = { record ->
-            scope.launch { addAllergy(record) }
+        val recordToEdit = editingRecord
+        AllergyDialog(member.id, initial = recordToEdit, onDismiss = { showDialog = false }, onSave = { record ->
+            scope.launch { if (recordToEdit == null) addAllergy(record) else updateAllergy(record) }
             showDialog = false
         })
     }
@@ -1064,21 +1094,23 @@ private fun AllergyScreen(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun AllergyDialog(memberId: Long, onDismiss: () -> Unit, onSave: (AllergyRecord) -> Unit) {
-    var category by rememberSaveable { mutableStateOf("دواء") }
+private fun AllergyDialog(memberId: Long, initial: AllergyRecord?, onDismiss: () -> Unit, onSave: (AllergyRecord) -> Unit) {
+    val knownCategories = listOf("دواء", "طعام", "حساسية أخرى", "مسبب آخر", "مادة بيئية", "لسعة أو لدغة حشرة")
+    val knownSeverities = listOf("خفيفة", "متوسطة", "شديدة", "مهددة للحياة", "غير معروفة")
+    var category by rememberSaveable(initial?.id) { mutableStateOf(initial?.category?.takeIf { it in knownCategories } ?: if (initial == null) "دواء" else "أخرى") }
     var categoryMenuExpanded by rememberSaveable { mutableStateOf(false) }
-    var customCategory by rememberSaveable { mutableStateOf("") }
-    var substance by rememberSaveable { mutableStateOf("") }
-    var commercialName by rememberSaveable { mutableStateOf("") }
-    var activeIngredient by rememberSaveable { mutableStateOf("") }
-    var reaction by rememberSaveable { mutableStateOf("") }
-    var severity by rememberSaveable { mutableStateOf("متوسطة") }
+    var customCategory by rememberSaveable(initial?.id) { mutableStateOf(initial?.category?.takeIf { it !in knownCategories }.orEmpty()) }
+    var substance by rememberSaveable(initial?.id) { mutableStateOf(initial?.substance.orEmpty()) }
+    var commercialName by rememberSaveable(initial?.id) { mutableStateOf(initial?.commercialName.orEmpty()) }
+    var activeIngredient by rememberSaveable(initial?.id) { mutableStateOf(initial?.activeIngredient.orEmpty()) }
+    var reaction by rememberSaveable(initial?.id) { mutableStateOf(initial?.reaction.orEmpty()) }
+    var severity by rememberSaveable(initial?.id) { mutableStateOf(initial?.severity?.takeIf { it in knownSeverities } ?: if (initial == null) "متوسطة" else "أخرى") }
     var severityMenuExpanded by rememberSaveable { mutableStateOf(false) }
-    var customSeverity by rememberSaveable { mutableStateOf("") }
-    var notes by rememberSaveable { mutableStateOf("") }
+    var customSeverity by rememberSaveable(initial?.id) { mutableStateOf(initial?.severity?.takeIf { it !in knownSeverities }.orEmpty()) }
+    var notes by rememberSaveable(initial?.id) { mutableStateOf(initial?.notes.orEmpty()) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("إضافة حساسية") },
+        title = { Text(if (initial == null) "إضافة حساسية" else "تعديل الحساسية") },
         text = {
             Column(Modifier.fillMaxWidth().height(420.dp).verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1088,7 +1120,7 @@ private fun AllergyDialog(memberId: Long, onDismiss: () -> Unit, onSave: (Allerg
                         trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = categoryMenuExpanded) },
                         modifier = Modifier.fillMaxWidth().menuAnchor(), singleLine = true)
                     ExposedDropdownMenu(expanded = categoryMenuExpanded, onDismissRequest = { categoryMenuExpanded = false }) {
-                        listOf("دواء", "طعام", "حساسية أخرى", "مسبب آخر", "مادة بيئية", "لسعة أو لدغة حشرة", "أخرى (كتابة التصنيف)").forEach { option ->
+                        (knownCategories + "أخرى (كتابة التصنيف)").forEach { option ->
                             DropdownMenuItem(text = { Text(option) }, onClick = {
                                 category = if (option.startsWith("أخرى")) "أخرى" else option
                                 categoryMenuExpanded = false
@@ -1116,7 +1148,7 @@ private fun AllergyDialog(memberId: Long, onDismiss: () -> Unit, onSave: (Allerg
                         trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = severityMenuExpanded) },
                         modifier = Modifier.fillMaxWidth().menuAnchor(), singleLine = true)
                     ExposedDropdownMenu(expanded = severityMenuExpanded, onDismissRequest = { severityMenuExpanded = false }) {
-                        listOf("خفيفة", "متوسطة", "شديدة", "مهددة للحياة", "غير معروفة", "أخرى (كتابة الشدة)").forEach { option ->
+                        (knownSeverities + "أخرى (كتابة الشدة)").forEach { option ->
                             DropdownMenuItem(text = { Text(option) }, onClick = {
                                 severity = if (option.startsWith("أخرى")) "أخرى" else option
                                 severityMenuExpanded = false
@@ -1131,10 +1163,10 @@ private fun AllergyDialog(memberId: Long, onDismiss: () -> Unit, onSave: (Allerg
         },
         confirmButton = {
             Button(enabled = substance.isNotBlank() || commercialName.isNotBlank() || activeIngredient.isNotBlank(), onClick = {
-                onSave(AllergyRecord(memberId = memberId,
+                onSave(AllergyRecord(id = initial?.id ?: 0, memberId = memberId,
                     category = if (category == "أخرى") customCategory.trim().ifBlank { "أخرى" } else category.trim().ifBlank { "غير محدد" }, substance = substance.trim(),
                     commercialName = commercialName.trim(), activeIngredient = activeIngredient.trim(),
-                    reaction = reaction.trim(), severity = if (severity == "أخرى") customSeverity.trim().ifBlank { "أخرى" } else severity.trim(), notes = notes.trim()))
+                    reaction = reaction.trim(), severity = if (severity == "أخرى") customSeverity.trim().ifBlank { "أخرى" } else severity.trim(), notes = notes.trim(), createdAt = initial?.createdAt ?: System.currentTimeMillis()))
             }) { Text("حفظ") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("إلغاء") } }
@@ -1195,6 +1227,10 @@ private fun SettingsHub(
     onTimeout: (Int) -> Unit, onExport: () -> Unit, onImport: () -> Unit,
     onMedications: () -> Unit, onAppointments: () -> Unit, onDocuments: () -> Unit,
     onReports: () -> Unit, onReminders: () -> Unit,
+    appearance: AppearanceSettings,
+    onPaletteSelected: (SehatiPalette) -> Unit,
+    onThemeModeSelected: (ThemeMode) -> Unit,
+    onResetAppearance: () -> Unit,
     updateStatus: String, updateBusy: Boolean, onCheckUpdates: () -> Unit, modifier: Modifier = Modifier
 ) {
     val refresh = refreshToken
@@ -1248,6 +1284,12 @@ private fun SettingsHub(
             Text("صحتي - الإصدار ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
             Text("فكرة وإعداد ميناس، بمساعدة ChatGPT", style = MaterialTheme.typography.bodySmall)
         } }
+        AppearanceSettingsSection(
+            settings = appearance,
+            onPaletteSelected = onPaletteSelected,
+            onModeSelected = onThemeModeSelected,
+            onReset = onResetAppearance
+        )
     }
 }
 

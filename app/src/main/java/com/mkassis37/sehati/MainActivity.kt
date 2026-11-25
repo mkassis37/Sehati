@@ -806,7 +806,7 @@ private fun AllergyScreen(
                     Card(Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Text(record.commercialName.ifBlank { record.substance }, style = MaterialTheme.typography.titleMedium)
-                            if (record.category.equals("دواء", ignoreCase = true)) {
+                            if (record.category.contains("دواء", ignoreCase = true)) {
                                 if (record.commercialName.isNotBlank()) Text("الاسم التجاري: ${record.commercialName}")
                                 if (record.activeIngredient.isNotBlank()) Text("المركب العلمي: ${record.activeIngredient}")
                                 if (record.substance.isNotBlank()) Text("المادة المسجلة: ${record.substance}")

@@ -19,6 +19,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import android.net.Uri
 import com.mkassis37.sehati.security.AppLockStore
 import com.mkassis37.sehati.data.EncryptedBackup
+import com.mkassis37.sehati.data.BackupStatusStore
 import com.mkassis37.sehati.data.AppearanceSettingsStore
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -125,6 +126,7 @@ private fun SehatiApp(
     val lockStore = remember { AppLockStore(context.applicationContext) }
     val documentStore = remember { SecureMedicalDocumentStore(context.applicationContext) }
     val backup = remember { EncryptedBackup(db, documentStore) }
+    val backupStatusStore = remember { BackupStatusStore(context.applicationContext) }
     val releaseUpdater = remember { ReleaseUpdater(context.applicationContext) }
     var availableRelease by remember { mutableStateOf<SehatiRelease?>(null) }
     var updateStatus by remember { mutableStateOf("لم يتم فحص التحديثات بعد.") }
@@ -134,6 +136,10 @@ private fun SehatiApp(
     var lastBackgroundAt by remember { mutableLongStateOf(0L) }
     var lastInteractionAt by remember { mutableLongStateOf(System.currentTimeMillis()) }
     var settingsRefresh by remember { mutableIntStateOf(0) }
+    var settingsSection by rememberSaveable { mutableStateOf<SettingsSection?>(null) }
+    var medicationOpenedFromSettings by rememberSaveable { mutableStateOf(false) }
+    var lastBackupAt by remember { mutableStateOf(backupStatusStore.lastSuccessAt) }
+    var lastBackupSizeBytes by remember { mutableStateOf(backupStatusStore.lastSizeBytes) }
     var showPinSetup by remember { mutableStateOf(false) }
     var showBackupPassword by remember { mutableStateOf(false) }
     var backupMode by remember { mutableStateOf("export") }
@@ -230,7 +236,7 @@ private fun SehatiApp(
         Screen.HEALTH_RECORDS -> "الملف الصحي"
         Screen.ALLERGIES -> "سجل الحساسيات"
         Screen.LAB_RESULTS -> "الفحوصات المخبرية"
-        Screen.SETTINGS -> "الإعدادات"
+        Screen.SETTINGS -> settingsSection?.title ?: "الإعدادات"
         Screen.MEDICATIONS -> "الأدوية والعلاجات"
         Screen.APPOINTMENTS -> "المواعيد الطبية"
         Screen.DOCUMENTS -> "الملفات الطبية"
@@ -244,8 +250,16 @@ private fun SehatiApp(
         screen = when (screen) {
             Screen.FORM -> if (editingId == null) Screen.MEMBERS else Screen.DETAILS
             Screen.DETAILS -> Screen.MEMBERS
-            Screen.ALLERGIES, Screen.LAB_RESULTS, Screen.MEDICATIONS, Screen.HEALTH_RECORDS -> Screen.DETAILS
-            Screen.SETTINGS, Screen.APPOINTMENTS, Screen.DOCUMENTS,
+            Screen.ALLERGIES, Screen.LAB_RESULTS, Screen.HEALTH_RECORDS -> Screen.DETAILS
+            Screen.MEDICATIONS -> if (medicationOpenedFromSettings) {
+                medicationOpenedFromSettings = false
+                Screen.SETTINGS
+            } else Screen.DETAILS
+            Screen.SETTINGS -> if (settingsSection != null) {
+                settingsSection = null
+                Screen.SETTINGS
+            } else Screen.MEMBERS
+            Screen.APPOINTMENTS, Screen.DOCUMENTS,
             Screen.REPORTS, Screen.REMINDERS -> Screen.MEMBERS
             Screen.MEMBERS -> Screen.MEMBERS
         }
@@ -474,47 +488,61 @@ private fun SehatiApp(
             } else {
                 FutureScreen("الأدوية والعلاجات", "افتح الملف الطبي لأحد أفراد العائلة أولًا لإدارة أدويته وعلاجاته.", Modifier.padding(padding))
             }
-            Screen.SETTINGS -> SettingsHub(
-                refreshToken = settingsRefresh,
-                lockEnabled = lockStore.isEnabled(),
-                biometricEnabled = lockStore.isBiometricEnabled(),
-                timeoutMinutes = lockStore.timeoutMinutes(),
-                onSetPin = { showPinSetup = true },
-                onLockEnabled = { enabled ->
-                    if (enabled && !lockStore.hasPin()) showPinSetup = true
-                    else { lockStore.setEnabled(enabled); locked = false; settingsRefresh++ }
-                },
-                onBiometric = { enabled -> lockStore.setBiometricEnabled(enabled); settingsRefresh++ },
-                onTimeout = { lockStore.setTimeoutMinutes(it); settingsRefresh++ },
-                onExport = { createBackup.launch("sehati-backup.shtb") },
-                onImport = { openBackup.launch(arrayOf("*/*")) },
-                onMedications = { screen = Screen.MEDICATIONS },
-                onAppointments = { screen = Screen.APPOINTMENTS },
-                onDocuments = { screen = Screen.DOCUMENTS },
-                onReports = { screen = Screen.REPORTS },
-                onReminders = { screen = Screen.REMINDERS },
-                appearance = appearance,
-                onPaletteSelected = onPaletteSelected,
-                onThemeModeSelected = onThemeModeSelected,
-                onResetAppearance = onResetAppearance,
-                updateStatus = updateStatus,
-                updateBusy = updateBusy,
-                onCheckUpdates = {
-                    if (BuildConfig.DEBUG) {
-                        updateStatus = "فحص التحديثات متاح في النسخة المثبتة من Release فقط."
-                    } else {
-                        scope.launch {
-                            updateBusy = true
-                            updateStatus = "جارٍ فحص الإصدارات..."
-                            try {
-                                availableRelease = releaseUpdater.checkForUpdate(BuildConfig.VERSION_CODE)
-                                updateStatus = if (availableRelease == null) "أنت تستخدم أحدث إصدار." else "يتوفر تحديث ${availableRelease?.versionName}."
-                            } catch (_: Exception) { updateStatus = "تعذر فحص التحديثات. حاول مجددًا." }
-                            finally { updateBusy = false }
+            Screen.SETTINGS -> if (settingsSection == null) {
+                SettingsHomeScreen(onOpen = { settingsSection = it }, modifier = Modifier.padding(padding))
+            } else {
+                SettingsSectionScreen(
+                    section = settingsSection!!,
+                    refreshToken = settingsRefresh,
+                    appearance = appearance,
+                    onPaletteSelected = onPaletteSelected,
+                    onThemeModeSelected = onThemeModeSelected,
+                    onResetAppearance = onResetAppearance,
+                    lockEnabled = lockStore.isEnabled(),
+                    biometricEnabled = lockStore.isBiometricEnabled(),
+                    timeoutMinutes = lockStore.timeoutMinutes(),
+                    hasPin = lockStore.hasPin(),
+                    onSetPin = { showPinSetup = true },
+                    onLockEnabled = { enabled ->
+                        if (enabled && !lockStore.hasPin()) showPinSetup = true
+                        else { lockStore.setEnabled(enabled); locked = false; settingsRefresh++ }
+                    },
+                    onBiometric = { enabled -> lockStore.setBiometricEnabled(enabled); settingsRefresh++ },
+                    onTimeout = { lockStore.setTimeoutMinutes(it); settingsRefresh++ },
+                    onExport = { createBackup.launch("sehati-backup.shtb") },
+                    onImport = { openBackup.launch(arrayOf("*/*")) },
+                    backupLastSuccessAt = lastBackupAt,
+                    backupLastSizeBytes = lastBackupSizeBytes,
+                    backupMessage = backupMessage,
+                    updateStatus = updateStatus,
+                    updateBusy = updateBusy,
+                    onCheckUpdates = {
+                        if (BuildConfig.DEBUG) {
+                            updateStatus = "فحص التحديثات متاح في النسخة المثبتة من Release فقط."
+                        } else {
+                            scope.launch {
+                                updateBusy = true
+                                updateStatus = "جارٍ فحص الإصدارات..."
+                                try {
+                                    availableRelease = releaseUpdater.checkForUpdate(BuildConfig.VERSION_CODE)
+                                    updateStatus = if (availableRelease == null) "أنت تستخدم أحدث إصدار." else "يتوفر تحديث ${availableRelease?.versionName}."
+                                } catch (_: Exception) { updateStatus = "تعذر فحص التحديثات. حاول مجددًا." }
+                                finally { updateBusy = false }
+                            }
                         }
-                    }
-                },
-                modifier = Modifier.padding(padding))
+                    },
+                    selectedMemberName = selected?.fullName,
+                    onOpenMedications = {
+                        if (selected != null) {
+                            medicationOpenedFromSettings = true
+                            settingsSection = null
+                            screen = Screen.MEDICATIONS
+                        }
+                    },
+                    onSelectMember = { settingsSection = null; screen = Screen.MEMBERS },
+                    modifier = Modifier.padding(padding)
+                )
+            }
             Screen.APPOINTMENTS -> FutureScreen("المواعيد الطبية", "سيُضاف هنا سجل المواعيد والزيارات الطبية.", Modifier.padding(padding))
             Screen.DOCUMENTS -> FutureScreen("الملفات الطبية", "سيُضاف هنا تنظيم الوثائق والصور الطبية.", Modifier.padding(padding))
             Screen.REPORTS -> FutureScreen("التقارير الصحية", "سيُضاف هنا إنشاء ملخصات وتقارير صحية.", Modifier.padding(padding))
@@ -574,6 +602,15 @@ private fun SehatiApp(
                         if (backupMode == "export") {
                             backup.write(context.contentResolver, uri, pass)
                             backupMessage = "تم إنشاء النسخة الاحتياطية المشفّرة."
+                            val savedAt = System.currentTimeMillis()
+                            val savedSize = runCatching {
+                                context.contentResolver.openFileDescriptor(uri, "r")?.use { descriptor ->
+                                    descriptor.statSize.takeIf { it >= 0L }
+                                }
+                            }.getOrNull()
+                            backupStatusStore.recordSuccess(savedAt, savedSize)
+                            lastBackupAt = savedAt
+                            if (savedSize != null) lastBackupSizeBytes = savedSize
                         } else {
                             backupPreview = backup.preview(context.contentResolver, uri, pass)
                             backupMessage = ""
@@ -1218,88 +1255,6 @@ internal fun String.ageOnDate(today: LocalDate = LocalDate.now()): Int? = runCat
     Period.between(birthday, today).years.takeIf { birthday <= today && it >= 0 }
 }.getOrNull()
 
-
-@Composable
-private fun SettingsHub(
-    refreshToken: Int,
-    lockEnabled: Boolean, biometricEnabled: Boolean, timeoutMinutes: Int,
-    onSetPin: () -> Unit, onLockEnabled: (Boolean) -> Unit, onBiometric: (Boolean) -> Unit,
-    onTimeout: (Int) -> Unit, onExport: () -> Unit, onImport: () -> Unit,
-    onMedications: () -> Unit, onAppointments: () -> Unit, onDocuments: () -> Unit,
-    onReports: () -> Unit, onReminders: () -> Unit,
-    appearance: AppearanceSettings,
-    onPaletteSelected: (SehatiPalette) -> Unit,
-    onThemeModeSelected: (ThemeMode) -> Unit,
-    onResetAppearance: () -> Unit,
-    updateStatus: String, updateBusy: Boolean, onCheckUpdates: () -> Unit, modifier: Modifier = Modifier
-) {
-    val refresh = refreshToken
-    Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("إعدادات صحتي", style = MaterialTheme.typography.headlineSmall)
-        Text("إدارة التطبيق والخدمات الصحية الحالية والمستقبلية.")
-        Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("إدارة التطبيق", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) { Text("قفل التطبيق"); Text("رمز PIN من 6 أرقام", style = MaterialTheme.typography.bodySmall) }
-                Switch(checked = lockEnabled, onCheckedChange = onLockEnabled)
-            }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) { Text("تغيير أو إعداد PIN"); Text("الرمز الاحتياطي لفتح التطبيق", style = MaterialTheme.typography.bodySmall) }
-                TextButton(onClick = onSetPin) { Text("إعداد") }
-            }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) { Text("فتح بالبصمة أو قفل الجهاز"); Text("عند دعم الجهاز", style = MaterialTheme.typography.bodySmall) }
-                Switch(checked = biometricEnabled, onCheckedChange = onBiometric)
-            }
-            Text("القفل بعد مغادرة التطبيق: $timeoutMinutes دقيقة")
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf(1, 5, 10, 30).forEach { minutes ->
-                    FilterChip(selected = timeoutMinutes == minutes, onClick = { onTimeout(minutes) }, label = { Text("$minutes د") })
-                }
-            }
-            Divider()
-            Text("النسخ الاحتياطي المشفّر", style = MaterialTheme.typography.titleSmall)
-            Text("كلمة مرور مستقلة عن PIN، لا تقل عن 10 أحرف. لا يتم رفع أي بيانات تلقائيًا.", style = MaterialTheme.typography.bodySmall)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = onExport) { Text("إنشاء نسخة") }
-                OutlinedButton(onClick = onImport) { Text("استعادة نسخة") }
-            }
-            Divider()
-            Text("تحديث التطبيق", style = MaterialTheme.typography.titleSmall)
-            Text(updateStatus, style = MaterialTheme.typography.bodySmall)
-            OutlinedButton(enabled = !updateBusy, onClick = onCheckUpdates) { Text("فحص التحديثات الآن") }
-            Text("يتم التحقق من بصمة SHA-256 قبل فتح مثبت أندرويد.", style = MaterialTheme.typography.bodySmall)
-            Text("المظهر واللغة — قيد التطوير")
-        } }
-        Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("الخدمات الصحية", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
-            FutureEntry("الأدوية والعلاجات", "سجل الأدوية والجرعات", onMedications)
-            FutureEntry("المواعيد الطبية", "المراجعات والفحوصات", onAppointments)
-            FutureEntry("الملفات الطبية", "الوثائق والصور الطبية", onDocuments)
-            FutureEntry("التقارير الصحية", "ملخصات وتقارير لكل فرد", onReports)
-            FutureEntry("التنبيهات والتذكيرات", "المواعيد والمتابعات القادمة", onReminders)
-        } }
-        Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp)) {
-            Text("حول التطبيق", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
-            Text("صحتي - الإصدار ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
-            Text("فكرة وإعداد ميناس، بمساعدة ChatGPT", style = MaterialTheme.typography.bodySmall)
-        } }
-        AppearanceSettingsSection(
-            settings = appearance,
-            onPaletteSelected = onPaletteSelected,
-            onModeSelected = onThemeModeSelected,
-            onReset = onResetAppearance
-        )
-    }
-}
-
-@Composable
-private fun FutureEntry(title: String, subtitle: String, onClick: () -> Unit) {
-    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 10.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) { Text(title); Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-        Text("فتح", color = MaterialTheme.colorScheme.primary)
-    }
-}
 
 @Composable
 private fun FutureScreen(title: String, description: String, modifier: Modifier = Modifier) {

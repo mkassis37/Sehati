@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.Query
 import androidx.room.Update
+import androidx.room.Upsert
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -178,6 +179,21 @@ interface MedicalDao {
 
     @Query("UPDATE medical_documents SET relatedAppointmentId = NULL WHERE relatedAppointmentId = :id AND memberId = :memberId")
     suspend fun unlinkAppointmentDocuments(id: Long, memberId: Long)
+
+    @Query("SELECT * FROM dose_logs WHERE memberId = :memberId ORDER BY date DESC, time DESC")
+    fun observeDoseLogs(memberId: Long): Flow<List<DoseLog>>
+
+    @Query("SELECT * FROM dose_logs ORDER BY medicationId, date, time")
+    suspend fun getAllDoseLogs(): List<DoseLog>
+
+    @Query("SELECT * FROM dose_logs WHERE date >= :date")
+    suspend fun getDoseLogsSince(date: String): List<DoseLog>
+
+    @Insert suspend fun insertDoseLogs(rows: List<DoseLog>)
+    @Upsert suspend fun saveDoseLog(row: DoseLog)
+
+    @Query("SELECT * FROM medication_records WHERE id = :medicationId AND memberId = :memberId")
+    suspend fun findMedication(medicationId: Long, memberId: Long): MedicationRecord?
 
     @Query("SELECT * FROM medication_records WHERE memberId = :memberId ORDER BY isActive DESC, name COLLATE NOCASE")
     fun observeMedications(memberId: Long): Flow<List<MedicationRecord>>

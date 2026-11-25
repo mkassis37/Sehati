@@ -47,4 +47,20 @@ internal object MedicalDatabaseMigrations {
             db.execSQL("ALTER TABLE medical_documents ADD COLUMN relatedAppointmentId INTEGER")
         }
     }
+
+    val DOSES_9_10 = object : Migration(9, 10) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE medication_records ADD COLUMN completed INTEGER NOT NULL DEFAULT 0")
+            db.execSQL(
+                """CREATE TABLE dose_logs (
+                    medicationId INTEGER NOT NULL, memberId INTEGER NOT NULL,
+                    date TEXT NOT NULL, time TEXT NOT NULL, status TEXT NOT NULL,
+                    updatedAt INTEGER NOT NULL, snoozedUntil INTEGER,
+                    PRIMARY KEY(medicationId, date, time),
+                    FOREIGN KEY(medicationId) REFERENCES medication_records(id) ON UPDATE NO ACTION ON DELETE CASCADE
+                )"""
+            )
+            db.execSQL("CREATE INDEX index_dose_logs_memberId_date ON dose_logs(memberId, date)")
+        }
+    }
 }

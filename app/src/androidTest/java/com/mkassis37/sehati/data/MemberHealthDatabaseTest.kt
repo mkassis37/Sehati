@@ -186,4 +186,28 @@ class MemberHealthDatabaseTest {
         }
     }
 
+    @Test
+    fun doseLogsAreOwnedByTheMedicationMemberAndCascadeOnDeletion() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val database = Room.inMemoryDatabaseBuilder(context, SehatiDatabase::class.java).build()
+        try {
+            val dao = database.medicalDao()
+            val owner = dao.addMember(FamilyMember(fullName = "Synthetic owner"))
+            val other = dao.addMember(FamilyMember(fullName = "Synthetic other"))
+            val medicationId = dao.addMedication(MedicationRecord(memberId = owner,
+                name = "Synthetic medication", startDate = "2026-11-25"))
+            val original = DoseLog(medicationId, owner, "2026-11-25", "08:00", DoseStatus.MISSED.name, 1234)
+            assertTrue(database.recordDose(original, owner))
+            assertFalse(database.recordDose(original.copy(memberId = other, status = DoseStatus.TAKEN.name), other))
+            assertTrue(dao.observeDoseLogs(other).first().isEmpty())
+            assertEquals(original, dao.observeDoseLogs(owner).first().single())
+            assertTrue(database.recordDose(original.copy(status = DoseStatus.TAKEN.name), owner))
+            assertEquals(DoseStatus.TAKEN.name, dao.observeDoseLogs(owner).first().single().status)
+            dao.deleteMedication(medicationId, owner)
+            assertTrue(dao.observeDoseLogs(owner).first().isEmpty())
+        } finally {
+            database.close()
+        }
+    }
+
 }

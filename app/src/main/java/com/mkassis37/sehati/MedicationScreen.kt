@@ -12,6 +12,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.mkassis37.sehati.data.DoseLog
 import com.mkassis37.sehati.data.FamilyMember
 import com.mkassis37.sehati.data.MedicationRecord
 import kotlinx.coroutines.launch
@@ -21,22 +22,26 @@ import java.time.LocalDate
 internal fun MedicationScreen(
     member: FamilyMember,
     records: List<MedicationRecord>,
+    doseLogs: List<DoseLog>,
+    onRecordDose: suspend (DoseLog) -> Boolean,
     addMedication: suspend (MedicationRecord) -> Unit,
     updateMedication: suspend (MedicationRecord) -> Unit,
     deleteMedication: suspend (MedicationRecord) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val scope = rememberCoroutineScope()
+    var selectedDoseMedicationId by rememberSaveable(member.id) { mutableStateOf<Long?>(null) }
     var editing by remember { mutableStateOf<MedicationRecord?>(null) }
     var showForm by rememberSaveable(member.id) { mutableStateOf(false) }
     var showInactive by rememberSaveable(member.id) { mutableStateOf(false) }
-    val visible = records.filter { showInactive || it.isActive }
+    val active = records.filter { it.isActive && !it.completed && (it.endDate.isEmpty() || it.endDate >= LocalDate.now().toString()) }
+    val visible = if (showInactive) records else active
     Column(modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("أدوية وعلاجات ${member.fullName}", style = MaterialTheme.typography.titleLarge)
         Text("كل سجل مرتبط بهذا الفرد فقط. أدخل تفاصيل العلاج كما وصفها الطبيب أو الصيدلي.", style = MaterialTheme.typography.bodySmall)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Text("العلاجات الحالية: ${records.count { it.isActive }}")
-            TextButton(onClick = { showInactive = !showInactive }) { Text(if (showInactive) "إخفاء المتوقفة" else "عرض المتوقفة") }
+            Text("العلاجات الحالية: ${active.size}")
+            TextButton(onClick = { showInactive = !showInactive }) { Text(if (showInactive) "إخفاء العلاجات السابقة" else "عرض العلاجات السابقة") }
         }
         Button(onClick = { editing = null; showForm = true }, modifier = Modifier.fillMaxWidth()) { Text("إضافة دواء أو علاج") }
         if (visible.isEmpty()) {
@@ -54,8 +59,12 @@ internal fun MedicationScreen(
                                     Text(record.name, style = MaterialTheme.typography.titleMedium)
                                     if (record.strength.isNotBlank()) Text(record.strength, style = MaterialTheme.typography.bodySmall)
                                 }
-                                AssistChip(onClick = { scope.launch { updateMedication(record.copy(isActive = !record.isActive, updatedAt = System.currentTimeMillis())) } },
-                                    label = { Text(if (record.isActive) "نشط" else "متوقف") })
+                                val treatmentStatus = when {
+                                    record.completed || (record.endDate.isNotBlank() && record.endDate < LocalDate.now().toString()) -> "مكتمل"
+                                    record.isActive -> "نشط"
+                                    else -> "متوقف"
+                                }
+                                Text(treatmentStatus, style = MaterialTheme.typography.labelMedium)
                             }
                             DetailRow("الجرعة", record.dosage.ifBlank { "غير محددة" })
                             DetailRow("الشكل", record.form.ifBlank { "غير محدد" })
@@ -65,6 +74,17 @@ internal fun MedicationScreen(
                             if (record.prescribingDoctor.isNotBlank()) DetailRow("الطبيب", record.prescribingDoctor)
                             if (record.instructions.isNotBlank()) DetailRow("طريقة الاستخدام", record.instructions)
                             if (record.notes.isNotBlank()) Text(record.notes, style = MaterialTheme.typography.bodySmall)
+                            TextButton(onClick = { selectedDoseMedicationId = record.id }) { Text("سجل الجرعات") }
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                if (!record.completed) {
+                                    TextButton(onClick = {
+                                        scope.launch { updateMedication(record.copy(isActive = !record.isActive, updatedAt = System.currentTimeMillis())) }
+                                    }) { Text(if (record.isActive) "إيقاف" else "استئناف") }
+                                    TextButton(onClick = {
+                                        scope.launch { updateMedication(record.copy(isActive = false, completed = true, updatedAt = System.currentTimeMillis())) }
+                                    }) { Text("إكمال العلاج") }
+                                }
+                            }
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 TextButton(onClick = { editing = record; showForm = true }) { Text("تعديل") }
                                 TextButton(onClick = { scope.launch { deleteMedication(record) } }) { Text("حذف", color = MaterialTheme.colorScheme.error) }
@@ -74,6 +94,12 @@ internal fun MedicationScreen(
                 }
             }
         }
+    }
+    records.firstOrNull { it.id == selectedDoseMedicationId }?.let { medication ->
+        DoseHistoryDialog(
+            medication, doseLogs.filter { it.medicationId == medication.id },
+            onRecordDose, onDismiss = { selectedDoseMedicationId = null }
+        )
     }
     if (showForm) MedicationEditor(member.id, editing, { showForm = false; editing = null }, { record ->
         scope.launch {
@@ -120,8 +146,9 @@ private fun MedicationEditor(
                 OutlinedTextField(form, { form = it }, label = { Text("الشكل (حبوب، شراب، كريم...)") }, singleLine = true)
                 OutlinedTextField(frequency, { frequency = it }, label = { Text("عدد مرات الاستخدام") }, singleLine = true)
                 OutlinedTextField(times, { times = it }, label = { Text("أوقات الجرعات (مثال: 08:00، 20:00)") })
-                OutlinedTextField(start, { start = it }, label = { Text("تاريخ بداية العلاج (YYYY-MM-DD) *") }, singleLine = true)
-                OutlinedTextField(end, { end = it }, label = { Text("تاريخ انتهاء العلاج (اختياري)") }, singleLine = true)
+                DatePickerField("تاريخ بداية العلاج", start, { start = it }, Modifier.fillMaxWidth())
+                DatePickerField("تاريخ انتهاء العلاج", end, { end = it }, Modifier.fillMaxWidth())
+                if (end.isNotBlank()) TextButton(onClick = { end = "" }) { Text("بدون تاريخ انتهاء") }
                 OutlinedTextField(doctor, { doctor = it }, label = { Text("الطبيب أو الصيدلي") }, singleLine = true)
                 OutlinedTextField(instructions, { instructions = it }, label = { Text("تعليمات الاستخدام") })
                 OutlinedTextField(notes, { notes = it }, label = { Text("ملاحظات") })
@@ -141,7 +168,8 @@ private fun MedicationEditor(
                 frequency = frequency.trim(), scheduledTimes = times.trim(), startDate = start,
                 endDate = end, prescribingDoctor = doctor.trim(), instructions = instructions.trim(),
                 notes = notes.trim(), isActive = initial?.isActive ?: true,
-                createdAt = initial?.createdAt ?: System.currentTimeMillis(), updatedAt = System.currentTimeMillis()
+                createdAt = initial?.createdAt ?: System.currentTimeMillis(), updatedAt = System.currentTimeMillis(),
+                completed = initial?.completed ?: false
             ))
         }) { Text("حفظ") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("إلغاء") } }

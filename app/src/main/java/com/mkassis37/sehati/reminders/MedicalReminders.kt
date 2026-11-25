@@ -53,15 +53,17 @@ internal class MedicalReminders(context: Context, private val database: SehatiDa
                     ReminderKind.entries.forEach { alarms.cancel(alarmIntent(it)) }
                     return@withLock
                 }
-                val (medications, appointments) = database.withTransaction {
-                    database.medicalDao().run { getAllMedications() to getAllAppointments() }
-                }
                 val now = Instant.now()
                 val zone = ZoneId.systemDefault()
+                val (medications, appointments, doses) = database.withTransaction {
+                    val oldestDate = minOf(now, if (expectedAt > 0L) Instant.ofEpochMilli(expectedAt) else now)
+                        .atZone(zone).toLocalDate().minusDays(1).toString()
+                    database.medicalDao().run { Triple(getAllMedications(), getAllAppointments(), getDoseLogsSince(oldestDate)) }
+                }
                 if (deliveredKind != null && enabled(deliveredKind) && expectedAt > 0L) {
                     val expected = Instant.ofEpochMilli(expectedAt)
                     if (expected <= now && Duration.between(expected, now).toMinutes() <= 90 &&
-                        nextReminder(deliveredKind, expected, zone, medications, appointments) == expected) {
+                        nextReminder(deliveredKind, expected, zone, medications, appointments, doses) == expected) {
                         post(deliveredKind, deliveredKind.body, deliveredKind.ordinal + 100)
                     }
                 }
@@ -69,7 +71,7 @@ internal class MedicalReminders(context: Context, private val database: SehatiDa
                     val earliest = if (deliveredKind == kind && expectedAt > 0L) {
                         maxOf(now, Instant.ofEpochMilli(expectedAt).plusMillis(1))
                     } else now
-                    val next = if (enabled(kind)) nextReminder(kind, earliest, zone, medications, appointments) else null
+                    val next = if (enabled(kind)) nextReminder(kind, earliest, zone, medications, appointments, doses) else null
                     if (next == null) alarms.cancel(alarmIntent(kind))
                     else schedule(kind, next.toEpochMilli())
                 }

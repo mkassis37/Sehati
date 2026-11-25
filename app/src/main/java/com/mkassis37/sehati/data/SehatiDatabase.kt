@@ -9,7 +9,7 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
 
-@Database(entities = [FamilyMember::class, AllergyRecord::class, LabResult::class, MedicalDocument::class, MedicationRecord::class, ChronicCondition::class, MedicalProcedure::class, MedicalHistoryEvent::class, FamilyDiseaseHistory::class, BodyMeasurement::class, MedicalAppointment::class], version = 9, exportSchema = true)
+@Database(entities = [FamilyMember::class, AllergyRecord::class, LabResult::class, MedicalDocument::class, MedicationRecord::class, ChronicCondition::class, MedicalProcedure::class, MedicalHistoryEvent::class, FamilyDiseaseHistory::class, BodyMeasurement::class, MedicalAppointment::class, DoseLog::class], version = 10, exportSchema = true)
 abstract class SehatiDatabase : RoomDatabase() {
     abstract fun medicalDao(): MedicalDao
 
@@ -57,6 +57,23 @@ abstract class SehatiDatabase : RoomDatabase() {
         val dao = medicalDao()
         check(dao.ownsAppointment(appointmentId, document.memberId))
         dao.addDocument(document.copy(relatedAppointmentId = appointmentId))
+    }
+
+    suspend fun recordDose(log: DoseLog, memberId: Long): Boolean = withTransaction {
+        require(log.memberId == memberId)
+        val dao = medicalDao()
+        val medication = dao.findMedication(log.medicationId, memberId) ?: return@withTransaction false
+        val status = DoseStatus.valueOf(log.status)
+        java.time.LocalTime.parse(log.time)
+        java.time.LocalDate.parse(log.date)
+        if (status == DoseStatus.SNOOZED) {
+            if (!medication.isActive || medication.completed) return@withTransaction false
+            require(log.snoozedUntil != null && log.snoozedUntil > log.updatedAt)
+        } else {
+            require(log.snoozedUntil == null)
+        }
+        dao.saveDoseLog(log)
+        true
     }
 
     companion object {
@@ -197,7 +214,7 @@ abstract class SehatiDatabase : RoomDatabase() {
             val factory = SupportOpenHelperFactory(passphrase)
             return Room.databaseBuilder(context, SehatiDatabase::class.java, "sehati.db")
                 .openHelperFactory(factory)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MedicalDatabaseMigrations.LAB_RESULTS_7_8, MedicalDatabaseMigrations.APPOINTMENTS_8_9)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MedicalDatabaseMigrations.LAB_RESULTS_7_8, MedicalDatabaseMigrations.APPOINTMENTS_8_9, MedicalDatabaseMigrations.DOSES_9_10)
                 .build()
         }
     }

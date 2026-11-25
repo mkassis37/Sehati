@@ -125,7 +125,7 @@ private fun SehatiApp(
     val context = LocalContext.current
     val reminders = remember(context, db) { MedicalReminders(context, db) }
     LaunchedEffect(reminders) {
-        db.invalidationTrackerFlow("medication_records", "medical_appointments").collect {
+        db.invalidationTrackerFlow("medication_records", "medical_appointments", "dose_logs").collect {
             try {
                 reminders.updateAlarms()
             } catch (cancelled: CancellationException) {
@@ -241,6 +241,8 @@ private fun SehatiApp(
     }
     val appointments by key(selectedId) { appointmentFlow.collectAsState(initial = emptyList()) }
     val medicationFlow = remember(selectedId) { selectedId?.let { dao.observeMedications(it) } ?: flowOf(emptyList()) }
+    val doseLogFlow = remember(selectedId) { selectedId?.let { dao.observeDoseLogs(it) } ?: flowOf(emptyList()) }
+    val doseLogs by key(selectedId) { doseLogFlow.collectAsState(initial = emptyList()) }
     val medications by key(selectedId) { medicationFlow.collectAsState(initial = emptyList()) }
     val conditionFlow = remember(selectedId) { selectedId?.let { dao.observeConditions(it) } ?: flowOf(emptyList()) }
     val conditions by key(selectedId) { conditionFlow.collectAsState(initial = emptyList()) }
@@ -515,6 +517,8 @@ private fun SehatiApp(
                 MedicationScreen(
                     member = selected,
                     records = medications,
+                    doseLogs = doseLogs,
+                    onRecordDose = { db.recordDose(it, selected.id) },
                     addMedication = { dao.addMedication(it); Unit },
                     updateMedication = { dao.updateMedication(it) },
                     deleteMedication = { dao.deleteMedication(it.id, selected.id) },
@@ -686,6 +690,7 @@ private fun SehatiApp(
                 Text("عدد نتائج الفحوصات: ${preview.labResultCount}")
                 Text("عدد الأدوية والعلاجات: ${preview.medicationCount}")
                 Text("عدد المواعيد والزيارات: ${preview.appointmentCount}")
+                Text("عدد الجرعات المسجلة: ${preview.doseLogCount}")
                 Text("الحالات المزمنة: ${preview.conditionCount}")
                 Text("العمليات والإجراءات: ${preview.procedureCount}")
                 Text("أحداث التاريخ السابق: ${preview.historyEventCount}")

@@ -1,6 +1,8 @@
 package com.mkassis37.sehati.reminders
 
 import com.mkassis37.sehati.data.AppointmentStatus
+import com.mkassis37.sehati.data.DoseLog
+import com.mkassis37.sehati.data.DoseStatus
 import com.mkassis37.sehati.data.MedicalAppointment
 import com.mkassis37.sehati.data.MedicationRecord
 import java.time.Instant
@@ -28,19 +30,31 @@ internal fun nextReminder(
     from: Instant,
     zone: ZoneId,
     medications: List<MedicationRecord>,
-    appointments: List<MedicalAppointment>
+    appointments: List<MedicalAppointment>,
+    doses: List<DoseLog> = emptyList()
 ): Instant? {
     val date = from.atZone(zone).toLocalDate()
     return when (kind) {
-        ReminderKind.DOSE -> medications.asSequence().filter { it.isActive }.flatMap { medication ->
-            val start = runCatching { LocalDate.parse(medication.startDate) }.getOrNull()
-                ?: return@flatMap emptySequence()
-            val end = if (medication.endDate.isBlank()) null
-                else runCatching { LocalDate.parse(medication.endDate) }.getOrNull() ?: return@flatMap emptySequence()
-            val first = maxOf(date, start)
-            val times = parseDoseTimes(medication.scheduledTimes)
-            sequenceOf(first, first.plusDays(1)).filter { end == null || it <= end }.flatMap { day ->
-                times.asSequence().map { day.atTime(it).atZone(zone).toInstant() }
+        ReminderKind.DOSE -> {
+            val records = doses.groupBy { it.medicationId }
+            medications.asSequence().filter { it.isActive && !it.completed }.flatMap { medication ->
+                val logs = records[medication.id].orEmpty().filter { it.memberId == medication.memberId }
+                val bySlot = logs.associateBy { it.date to it.time }
+                val snoozed = logs.asSequence().filter { it.status == DoseStatus.SNOOZED.name }
+                    .mapNotNull { it.snoozedUntil?.let(Instant::ofEpochMilli) }
+
+                val start = runCatching { LocalDate.parse(medication.startDate) }.getOrNull()
+                    ?: return@flatMap emptySequence()
+                val end = if (medication.endDate.isBlank()) null
+                    else runCatching { LocalDate.parse(medication.endDate) }.getOrNull() ?: return@flatMap emptySequence()
+                val first = maxOf(date, start)
+                val times = parseDoseTimes(medication.scheduledTimes)
+                val routine = sequenceOf(first, runCatching { first.plusDays(1) }.getOrNull()).filterNotNull()
+                    .filter { end == null || it <= end }.flatMap { day ->
+                        times.asSequence().filter { day.toString() to it.toString() !in bySlot }
+                            .map { day.atTime(it).atZone(zone).toInstant() }
+                    }
+                routine + snoozed
             }
         }
         ReminderKind.APPOINTMENT -> appointments.asSequence()
@@ -51,7 +65,7 @@ internal fun nextReminder(
                         .atZone(zone).toInstant().minusSeconds(30 * 60L)
                 }.getOrNull()
             }
-        ReminderKind.TREATMENT_END -> medications.asSequence().filter { it.isActive }
+        ReminderKind.TREATMENT_END -> medications.asSequence().filter { it.isActive && !it.completed }
             .mapNotNull { medication ->
                 runCatching {
                     val end = LocalDate.parse(medication.endDate)

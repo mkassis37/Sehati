@@ -1,6 +1,8 @@
 package com.mkassis37.sehati.reminders
 
 import com.mkassis37.sehati.data.AppointmentStatus
+import com.mkassis37.sehati.data.DoseLog
+import com.mkassis37.sehati.data.DoseStatus
 import com.mkassis37.sehati.data.MedicalAppointment
 import com.mkassis37.sehati.data.MedicationRecord
 import java.time.Instant
@@ -40,4 +42,16 @@ class ReminderScheduleTest {
         assertNull(nextReminder(ReminderKind.APPOINTMENT, current, zone, emptyList(),
             listOf(visit.copy(status = AppointmentStatus.CANCELLED.name))))
     }
+    @Test
+    fun snoozedDoseUsesNewTimeAndStopsWhenTreatmentCompletes() {
+        val current = Instant.parse("2026-11-25T04:55:00Z")
+        val snoozedAt = Instant.parse("2026-11-25T05:10:00Z")
+        val medication = MedicationRecord(id = 7, memberId = 3, name = "Synthetic reminder",
+            scheduledTimes = "08:00", startDate = "2026-11-25")
+        val log = DoseLog(7, 3, "2026-11-25", "08:00", DoseStatus.SNOOZED.name,
+            Instant.parse("2026-11-25T05:00:00Z").toEpochMilli(), snoozedAt.toEpochMilli())
+        assertEquals(snoozedAt, nextReminder(ReminderKind.DOSE, current, zone, listOf(medication), emptyList(), listOf(log)))
+        assertNull(nextReminder(ReminderKind.DOSE, current, zone, listOf(medication.copy(completed = true)), emptyList(), listOf(log)))
+    }
+
 }

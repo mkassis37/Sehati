@@ -37,6 +37,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
+import com.mkassis37.sehati.reminders.MedicalReminders
+import com.mkassis37.sehati.reminders.ReminderSettings
 import com.mkassis37.sehati.ui.theme.AppearanceSettings
 import com.mkassis37.sehati.ui.theme.SehatiPalette
 import com.mkassis37.sehati.ui.theme.ThemeMode
@@ -108,6 +110,7 @@ internal fun SettingsSectionScreen(
     section: SettingsSection,
     refreshToken: Int,
     appearance: AppearanceSettings,
+    reminders: MedicalReminders,
     onPaletteSelected: (SehatiPalette) -> Unit,
     onThemeModeSelected: (ThemeMode) -> Unit,
     onResetAppearance: () -> Unit,
@@ -160,11 +163,7 @@ internal fun SettingsSectionScreen(
                 description = "لا يوجد تكامل OAuth أو رفع سحابي مهيأ في هذا الإصدار. لا ترفع صحتي بيانات طبية إلى Drive حاليًا.",
                 details = listOf("النسخ المحلي المشفر متاح من قسم النسخ الاحتياطي.", "يتطلب تفعيل Drive إعداد OAuth رسميًا وموافقة المستخدم.")
             )
-            SettingsSection.NOTIFICATIONS -> StatusSection(
-                title = "تنبيهات الجرعات والمواعيد غير مفعلة",
-                description = "لا توجد حاليًا جدولة فعلية لجرعات الأدوية أو المواعيد؛ لذلك لا نعرض مفاتيح تشغيل أو طلب أذونات لا تستخدمها وظيفة.",
-                details = listOf("تنبيهات Android ستظهر هنا بعد تنفيذ سجل الجرعات والمواعيد.")
-            )
+            SettingsSection.NOTIFICATIONS -> ReminderSettings(reminders)
             SettingsSection.MEDICATIONS -> MedicationSettingsSection(selectedMemberName, onOpenMedications, onSelectMember)
             SettingsSection.UPDATES -> UpdatesSection(updateStatus, updateBusy, onCheckUpdates)
             SettingsSection.ABOUT -> AboutSection()
@@ -271,7 +270,7 @@ private fun MedicationSettingsSection(selectedMemberName: String?, onOpen: () ->
             Button(onClick = onSelectMember) { Text("اختيار فرد") }
         } else {
             Text("الفرد المحدد: $selectedMemberName")
-            Text("إدارة سجل الدواء متاحة من شاشة الأدوية. التنبيهات وسجل الجرعات غير منفذين بعد.", style = MaterialTheme.typography.bodySmall)
+            Text("إدارة سجل الدواء متاحة من شاشة الأدوية. تتوفر مفاتيح التذكير في قسم الإشعارات والتنبيهات.", style = MaterialTheme.typography.bodySmall)
             Button(onClick = onOpen) { Icon(Icons.Outlined.Medication, contentDescription = null); Spacer(Modifier.size(8.dp)); Text("فتح سجل الأدوية") }
         }
     }
@@ -309,7 +308,7 @@ private fun DiagnosticsSection(lastBackupAt: Long?) {
         InfoRow("نسخ Android التلقائي", "معطل لبيانات التطبيق الخاصة")
         InfoRow("آخر نسخة يدوية", lastBackupAt?.let(::formatTimestamp) ?: "لا توجد نسخة مسجلة")
         InfoRow("Google Drive", "غير متصل وغير مهيأ")
-        InfoRow("التنبيهات والزيارات", "غير مكتملة")
+        InfoRow("التنبيهات والزيارات", "تتوفر إعدادات التنبيهات وسجل المواعيد")
         InfoRow("التقارير الطبية PDF", "غير مكتملة")
         Text("لا تعرض شاشة التشخيص أي أسماء أو قيم طبية.", style = MaterialTheme.typography.bodySmall)
     }

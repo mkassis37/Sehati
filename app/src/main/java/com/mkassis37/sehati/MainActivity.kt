@@ -18,11 +18,15 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.text.KeyboardOptions
 import android.net.Uri
 import com.mkassis37.sehati.security.AppLockStore
+import com.mkassis37.sehati.reminders.MedicalReminders
+import com.mkassis37.sehati.reminders.ReminderSettings
+import kotlinx.coroutines.CancellationException
 import com.mkassis37.sehati.data.EncryptedBackup
 import com.mkassis37.sehati.data.BackupStatusStore
 import com.mkassis37.sehati.data.AppearanceSettingsStore
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.room.invalidationTrackerFlow
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ProcessLifecycleOwner
@@ -119,6 +123,18 @@ private fun SehatiApp(
     val dao = db.medicalDao()
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    val reminders = remember(context, db) { MedicalReminders(context, db) }
+    LaunchedEffect(reminders) {
+        db.invalidationTrackerFlow("medication_records", "medical_appointments").collect {
+            try {
+                reminders.updateAlarms()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // The notification settings provide a retry and status.
+            }
+        }
+    }
     val activity = context as? FragmentActivity
     val authenticators = if (Build.VERSION.SDK_INT >= 30) {
         BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL
@@ -514,6 +530,7 @@ private fun SehatiApp(
                     section = settingsSection!!,
                     refreshToken = settingsRefresh,
                     appearance = appearance,
+                    reminders = reminders,
                     onPaletteSelected = onPaletteSelected,
                     onThemeModeSelected = onThemeModeSelected,
                     onResetAppearance = onResetAppearance,
@@ -581,7 +598,7 @@ private fun SehatiApp(
             )
             Screen.DOCUMENTS -> FutureScreen("الملفات الطبية", "سيُضاف هنا تنظيم الوثائق والصور الطبية.", Modifier.padding(padding))
             Screen.REPORTS -> FutureScreen("التقارير الصحية", "سيُضاف هنا إنشاء ملخصات وتقارير صحية.", Modifier.padding(padding))
-            Screen.REMINDERS -> FutureScreen("التنبيهات والتذكيرات", "سيُضاف هنا تذكير المواعيد والمتابعات.", Modifier.padding(padding))
+            Screen.REMINDERS -> Column(Modifier.padding(padding).padding(16.dp).verticalScroll(rememberScrollState())) { ReminderSettings(reminders) }
         }
     }
 

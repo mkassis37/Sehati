@@ -17,5 +17,6 @@ data class MedicalDocument(
     val mimeType: String = "application/pdf",
     val sizeBytes: Long,
     val relatedProcedureId: Long? = null,
-    val addedAt: Long = System.currentTimeMillis()
+    val addedAt: Long = System.currentTimeMillis(),
+    val relatedAppointmentId: Long? = null
 )

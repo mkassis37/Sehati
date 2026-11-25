@@ -149,6 +149,36 @@ interface MedicalDao {
     @Query("DELETE FROM lab_results")
     suspend fun clearLabResults()
 
+    @Query("SELECT * FROM medical_appointments WHERE memberId = :memberId ORDER BY date, time, id")
+    fun observeAppointments(memberId: Long): Flow<List<MedicalAppointment>>
+
+    @Query("SELECT * FROM medical_appointments ORDER BY id")
+    suspend fun getAllAppointments(): List<MedicalAppointment>
+
+    @Insert suspend fun addAppointment(record: MedicalAppointment): Long
+    @Insert suspend fun insertAppointments(records: List<MedicalAppointment>)
+
+    @Query(
+        """UPDATE medical_appointments SET doctor = :doctor, specialty = :specialty, facility = :facility,
+           date = :date, time = :time, reason = :reason, notes = :notes, status = :status,
+           outcome = :outcome, diagnosis = :diagnosis, recommendations = :recommendations
+           WHERE id = :id AND memberId = :memberId"""
+    )
+    suspend fun updateAppointment(
+        id: Long, memberId: Long, doctor: String, specialty: String, facility: String,
+        date: String, time: String, reason: String, notes: String, status: String,
+        outcome: String, diagnosis: String, recommendations: String
+    ): Int
+
+    @Query("DELETE FROM medical_appointments WHERE id = :id AND memberId = :memberId")
+    suspend fun deleteAppointment(id: Long, memberId: Long): Int
+
+    @Query("SELECT EXISTS(SELECT 1 FROM medical_appointments WHERE id = :id AND memberId = :memberId)")
+    suspend fun ownsAppointment(id: Long, memberId: Long): Boolean
+
+    @Query("UPDATE medical_documents SET relatedAppointmentId = NULL WHERE relatedAppointmentId = :id AND memberId = :memberId")
+    suspend fun unlinkAppointmentDocuments(id: Long, memberId: Long)
+
     @Query("SELECT * FROM medication_records WHERE memberId = :memberId ORDER BY isActive DESC, name COLLATE NOCASE")
     fun observeMedications(memberId: Long): Flow<List<MedicationRecord>>
 

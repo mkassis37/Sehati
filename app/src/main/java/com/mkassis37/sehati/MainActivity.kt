@@ -220,6 +220,10 @@ private fun SehatiApp(
     val labResults by key(selectedId) { labFlow.collectAsState(initial = emptyList()) }
     val documentFlow = remember(selectedId) { selectedId?.let { dao.observeDocuments(it) } ?: flowOf(emptyList()) }
     val medicalDocuments by key(selectedId) { documentFlow.collectAsState(initial = emptyList()) }
+    val appointmentFlow = remember(selectedId) {
+        selectedId?.let { dao.observeAppointments(it) } ?: flowOf(emptyList())
+    }
+    val appointments by key(selectedId) { appointmentFlow.collectAsState(initial = emptyList()) }
     val medicationFlow = remember(selectedId) { selectedId?.let { dao.observeMedications(it) } ?: flowOf(emptyList()) }
     val medications by key(selectedId) { medicationFlow.collectAsState(initial = emptyList()) }
     val conditionFlow = remember(selectedId) { selectedId?.let { dao.observeConditions(it) } ?: flowOf(emptyList()) }
@@ -232,6 +236,13 @@ private fun SehatiApp(
     val familyHistory by key(selectedId) { familyHistoryFlow.collectAsState(initial = emptyList()) }
     val measurementFlow = remember(selectedId) { selectedId?.let { dao.observeBodyMeasurements(it) } ?: flowOf(emptyList()) }
     val measurements by key(selectedId) { measurementFlow.collectAsState(initial = emptyList()) }
+
+    val appointmentAttachments = rememberAppointmentAttachments(db, documentStore) { memberId ->
+        if (selectedId == null || selectedId == memberId) {
+            selectedId = memberId
+            screen = Screen.APPOINTMENTS
+        }
+    }
 
     val title = when (screen) {
         Screen.MEMBERS -> "أفراد العائلة"
@@ -263,7 +274,8 @@ private fun SehatiApp(
                 settingsSection = null
                 Screen.SETTINGS
             } else Screen.MEMBERS
-            Screen.APPOINTMENTS, Screen.DOCUMENTS,
+            Screen.APPOINTMENTS -> if (selectedId != null) Screen.DETAILS else Screen.MEMBERS
+            Screen.DOCUMENTS,
             Screen.REPORTS, Screen.REMINDERS -> Screen.MEMBERS
             Screen.MEMBERS -> Screen.MEMBERS
         }
@@ -340,6 +352,8 @@ private fun SehatiApp(
                     { screen = Screen.ALLERGIES }, allergies.size,
                     { screen = Screen.LAB_RESULTS }, labResults.size,
                     { screen = Screen.MEDICATIONS }, medications.size,
+                    onAppointments = { screen = Screen.APPOINTMENTS },
+                    appointmentCount = appointments.size,
                     onDelete = {
                         scope.launch {
                             try {
@@ -452,7 +466,7 @@ private fun SehatiApp(
                             try {
                                 val file = documentStore.createTemporaryFile(document)
                                 val contentUri = FileProvider.getUriForFile(context, context.packageName + ".fileprovider", file)
-                                context.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(contentUri, "application/pdf")
+                                context.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(contentUri, document.mimeType)
                                     .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
                             } catch (_: Exception) {
                                 android.widget.Toast.makeText(context, "تعذر فتح التقرير. تأكد من وجود تطبيق لعرض PDF.", android.widget.Toast.LENGTH_LONG).show()
@@ -555,7 +569,16 @@ private fun SehatiApp(
                     modifier = Modifier.padding(padding)
                 )
             }
-            Screen.APPOINTMENTS -> FutureScreen("المواعيد الطبية", "سيُضاف هنا سجل المواعيد والزيارات الطبية.", Modifier.padding(padding))
+            Screen.APPOINTMENTS -> if (selected != null) AppointmentScreen(
+                member = selected,
+                appointments = appointments,
+                documents = medicalDocuments,
+                onAttach = appointmentAttachments.attach,
+                onOpenDocument = appointmentAttachments.open,
+                onSave = { db.saveAppointment(it, selected.id) },
+                onDelete = { db.deleteAppointment(it.id, selected.id) },
+                modifier = Modifier.padding(padding)
+            )
             Screen.DOCUMENTS -> FutureScreen("الملفات الطبية", "سيُضاف هنا تنظيم الوثائق والصور الطبية.", Modifier.padding(padding))
             Screen.REPORTS -> FutureScreen("التقارير الصحية", "سيُضاف هنا إنشاء ملخصات وتقارير صحية.", Modifier.padding(padding))
             Screen.REMINDERS -> FutureScreen("التنبيهات والتذكيرات", "سيُضاف هنا تذكير المواعيد والمتابعات.", Modifier.padding(padding))
@@ -645,6 +668,7 @@ private fun SehatiApp(
                 Text("عدد سجلات الحساسية: ${preview.allergyCount}")
                 Text("عدد نتائج الفحوصات: ${preview.labResultCount}")
                 Text("عدد الأدوية والعلاجات: ${preview.medicationCount}")
+                Text("عدد المواعيد والزيارات: ${preview.appointmentCount}")
                 Text("الحالات المزمنة: ${preview.conditionCount}")
                 Text("العمليات والإجراءات: ${preview.procedureCount}")
                 Text("أحداث التاريخ السابق: ${preview.historyEventCount}")
@@ -731,6 +755,8 @@ private fun MemberDetailsScreen(
     labCount: Int,
     onMedications: () -> Unit,
     medicationCount: Int,
+    onAppointments: () -> Unit,
+    appointmentCount: Int,
     onDelete: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -757,6 +783,9 @@ private fun MemberDetailsScreen(
                 Text("الملف الصحي المتكامل", style = MaterialTheme.typography.titleMedium)
                 Text("الحالات والعمليات والتاريخ السابق والقياسات وبطاقة الطوارئ", style = MaterialTheme.typography.bodySmall)
             }
+        }
+        OutlinedButton(onClick = onAppointments, modifier = Modifier.fillMaxWidth()) {
+            Text("المواعيد والزيارات ($appointmentCount)")
         }
         OutlinedButton(onClick = onEmergency, modifier = Modifier.fillMaxWidth()) { Text("بطاقة الطوارئ") }
         Card(Modifier.fillMaxWidth().clickable(onClick = onAllergies)) {

@@ -29,4 +29,22 @@ internal object MedicalDatabaseMigrations {
             )
         }
     }
+
+    val APPOINTMENTS_8_9 = object : Migration(8, 9) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                """CREATE TABLE medical_appointments (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                    memberId INTEGER NOT NULL, doctor TEXT NOT NULL,
+                    specialty TEXT NOT NULL, facility TEXT NOT NULL,
+                    date TEXT NOT NULL, time TEXT NOT NULL, reason TEXT NOT NULL,
+                    notes TEXT NOT NULL, status TEXT NOT NULL, outcome TEXT NOT NULL,
+                    diagnosis TEXT NOT NULL, recommendations TEXT NOT NULL, createdAt INTEGER NOT NULL,
+                    FOREIGN KEY(memberId) REFERENCES family_members(id) ON UPDATE NO ACTION ON DELETE CASCADE
+                )"""
+            )
+            db.execSQL("CREATE INDEX index_medical_appointments_memberId_date_time ON medical_appointments(memberId, date, time)")
+            db.execSQL("ALTER TABLE medical_documents ADD COLUMN relatedAppointmentId INTEGER")
+        }
+    }
 }

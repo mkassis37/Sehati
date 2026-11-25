@@ -150,4 +150,40 @@ class MemberHealthDatabaseTest {
         }
     }
 
+    @Test
+    fun appointmentEditsDeletionAndAttachmentsAreMemberScoped() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val database = Room.inMemoryDatabaseBuilder(context, SehatiDatabase::class.java).build()
+        try {
+            val dao = database.medicalDao()
+            val owner = dao.addMember(FamilyMember(fullName = "Synthetic owner"))
+            val other = dao.addMember(FamilyMember(fullName = "Synthetic other"))
+            val appointment = MedicalAppointment(
+                memberId = owner, doctor = "Synthetic doctor", specialty = "", facility = "",
+                date = "2026-12-01", time = "10:00", reason = "", notes = "",
+                status = AppointmentStatus.UPCOMING.name, outcome = "", diagnosis = "", recommendations = ""
+            )
+            assertTrue(database.saveAppointment(appointment, owner))
+            val saved = dao.observeAppointments(owner).first().single()
+            assertTrue(dao.observeAppointments(other).first().isEmpty())
+            assertFalse(database.saveAppointment(saved.copy(memberId = other, doctor = "Cross-member edit"), other))
+            assertFalse(database.deleteAppointment(saved.id, other))
+            assertEquals("Synthetic doctor", dao.observeAppointments(owner).first().single().doctor)
+
+            val document = MedicalDocument(memberId = owner, displayName = "fixture.pdf", relativePath = "$owner/fixture.shtd", sizeBytes = 10)
+            assertTrue(runCatching { database.addAppointmentDocument(document.copy(memberId = other), saved.id) }.isFailure)
+            database.addAppointmentDocument(document, saved.id)
+            assertEquals(saved.id, dao.getDocumentsForMember(owner).single().relatedAppointmentId)
+            assertTrue(database.deleteAppointment(saved.id, owner))
+            assertEquals(null, dao.getDocumentsForMember(owner).single().relatedAppointmentId)
+
+            assertTrue(database.saveAppointment(appointment, owner))
+            database.deleteMemberAndRecords(owner)
+            assertTrue(dao.observeAppointments(owner).first().isEmpty())
+            assertEquals(other, dao.observeMembers().first().single().id)
+        } finally {
+            database.close()
+        }
+    }
+
 }

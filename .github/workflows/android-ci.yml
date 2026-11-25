@@ -48,11 +48,40 @@ jobs:
       - name: Run Android lint
         run: gradle --no-daemon lintDebug
 
+      - name: Build Android instrumentation APK
+        run: gradle --no-daemon assembleDebugAndroidTest
+
       - name: Upload debug APK
         if: success()
         uses: actions/upload-artifact@v4
         with:
           name: sehati-debug-apk
           path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Package complete project and verified debug APK
+        run: |
+          set -euo pipefail
+          bundle="sehati-project.zip"
+          apk="app/build/outputs/apk/debug/app-debug.apk"
+          signer="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)"
+          test -x "$signer"
+          "$signer" verify "$apk"
+          git archive --format=zip --prefix=Sehati/ -o "$bundle" HEAD
+          staging="$(mktemp -d)"
+          mkdir -p "$staging/Sehati/test-builds"
+          cp "$apk" "$staging/Sehati/test-builds/sehati-debug.apk"
+          sha="$(sha256sum "$apk" | cut -d ' ' -f 1)"
+          printf 'Commit: %s\nAPK: sehati-debug.apk\nBytes: %s\nSHA-256: %s\n' \
+            "$(git rev-parse HEAD)" "$(stat -c %s "$apk")" "$sha" > "$staging/Sehati/test-builds/BUILD_INFO.txt"
+          (cd "$staging" && zip -q "$GITHUB_WORKSPACE/$bundle" Sehati/test-builds/*)
+          unzip -tq "$bundle"
+
+      - name: Upload complete Sehati project ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: sehati-project-zip
+          path: sehati-project.zip
           if-no-files-found: error
           retention-days: 14

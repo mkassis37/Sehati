@@ -67,7 +67,8 @@ jobs:
             -PsehatiStoreFile="$RUNNER_TEMP/sehati-release.jks" \
             -PsehatiStorePassword="$ANDROID_KEYSTORE_PASSWORD" \
             -PsehatiKeyAlias="$ANDROID_KEY_ALIAS" \
-            -PsehatiKeyPassword="$ANDROID_KEY_PASSWORD"
+            -PsehatiKeyPassword="$ANDROID_KEY_PASSWORD" \
+            -PsehatiGoogleDriveEnabled=true
 
       - name: Verify APK signature
         run: |

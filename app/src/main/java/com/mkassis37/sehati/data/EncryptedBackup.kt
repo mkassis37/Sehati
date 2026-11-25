@@ -3,17 +3,26 @@ package com.mkassis37.sehati.data
 import android.content.ContentResolver
 import android.net.Uri
 import android.util.Base64
+import android.util.Base64OutputStream
 import androidx.room.withTransaction
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.ByteArrayOutputStream
+import java.io.FilterOutputStream
+import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
 import java.security.SecureRandom
 import javax.crypto.Cipher
+import javax.crypto.CipherOutputStream
 import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.PBEKeySpec
 import javax.crypto.spec.SecretKeySpec
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 
 /** Versioned, authenticated backup format. No cloud upload is performed by this class. */
 class EncryptedBackup(private val database: SehatiDatabase, private val documentStore: SecureMedicalDocumentStore) {
@@ -25,7 +34,15 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
         val appointments: List<MedicalAppointment>, val doses: List<DoseLog>
     )
 
-    suspend fun write(resolver: ContentResolver, uri: Uri, password: CharArray) {
+    suspend fun write(resolver: ContentResolver, uri: Uri, password: CharArray) = withContext(Dispatchers.IO) {
+        try {
+            backupLock.withLock { writeInternal(resolver, uri, password) }
+        } finally {
+            password.fill('\u0000')
+        }
+    }
+
+    private suspend fun writeInternal(resolver: ContentResolver, uri: Uri, password: CharArray) {
         require(password.size >= 10) { "Backup password must be at least 10 characters." }
         val rows = database.withTransaction {
             val dao = database.medicalDao()
@@ -129,35 +146,47 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
                     .put("diagnosis", a.diagnosis).put("recommendations", a.recommendations)
                     .put("createdAt", a.createdAt)) }
             })
-            .put("documents", JSONArray().apply {
-                documents.forEach { doc ->
-                    val plain = documentStore.readPlaintextBytes(doc)
-                    try {
-                        put(JSONObject().put("id", doc.id).put("memberId", doc.memberId)
-                            .put("displayName", doc.displayName).put("mimeType", doc.mimeType)
-                            .put("sizeBytes", doc.sizeBytes).put("relatedProcedureId", doc.relatedProcedureId ?: JSONObject.NULL)
-                            .put("addedAt", doc.addedAt)
-                            .put("relatedAppointmentId", doc.relatedAppointmentId ?: JSONObject.NULL)
-                            .put("relatedLabResultId", doc.relatedLabResultId ?: JSONObject.NULL)
-                            .put("category", doc.category).put("documentDate", doc.documentDate)
-                            .put("content", Base64.encodeToString(plain, Base64.NO_WRAP)))
-                    } finally { plain.fill(0) }
-                }
-            }).toString().toByteArray(Charsets.UTF_8)
 
         val salt = ByteArray(16).also(SecureRandom()::nextBytes)
-        val key = derive(password, salt)
-        password.fill('\u0000')
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-        cipher.init(Cipher.ENCRYPT_MODE, key)
-        val encrypted = cipher.doFinal(payload)
-        val envelope = MAGIC + byteArrayOf(1) + salt + cipher.iv + encrypted
-        resolver.openOutputStream(uri, "wt")!!.use { it.write(envelope) }
-        payload.fill(0)
+        cipher.init(Cipher.ENCRYPT_MODE, derive(password, salt))
+        checkNotNull(resolver.openOutputStream(uri, "wt")).buffered().use { destination ->
+            val bounded = BackupLimitOutput(destination)
+            bounded.write(MAGIC)
+            bounded.write(1)
+            bounded.write(salt)
+            bounded.write(cipher.iv)
+            CipherOutputStream(bounded, cipher).use { encrypted ->
+                fun json(text: String) { encrypted.write(text.toByteArray(Charsets.UTF_8)) }
+                json(payload.toString().dropLast(1))
+                json(",\"documents\":[")
+                documents.forEachIndexed { index, doc ->
+                    if (index > 0) json(",")
+                    val metadata = JSONObject().put("id", doc.id).put("memberId", doc.memberId)
+                        .put("displayName", doc.displayName).put("mimeType", doc.mimeType)
+                        .put("sizeBytes", doc.sizeBytes).put("relatedProcedureId", doc.relatedProcedureId ?: JSONObject.NULL)
+                        .put("addedAt", doc.addedAt)
+                        .put("relatedAppointmentId", doc.relatedAppointmentId ?: JSONObject.NULL)
+                        .put("relatedLabResultId", doc.relatedLabResultId ?: JSONObject.NULL)
+                        .put("category", doc.category).put("documentDate", doc.documentDate)
+                    json(metadata.toString().dropLast(1))
+                    json(",\"content\":\"")
+                    Base64OutputStream(encrypted, Base64.NO_WRAP or Base64.NO_CLOSE).use {
+                        documentStore.copyPlaintextTo(doc, it)
+                    }
+                    json("\"}")
+                }
+                json("]}")
+            }
+        }
     }
 
-    suspend fun preview(resolver: ContentResolver, uri: Uri, password: CharArray): BackupPreview {
-        val root = decrypt(resolver.openInputStream(uri)!!, password)
+    suspend fun preview(resolver: ContentResolver, uri: Uri, password: CharArray): BackupPreview = withContext(Dispatchers.IO) {
+        val root = try {
+            decrypt(checkNotNull(resolver.openInputStream(uri)), password)
+        } finally {
+            password.fill('\u0000')
+        }
         require(root.optString("format") == "sehati-backup" && root.optInt("version") in 1..6) {
             "Unsupported backup file."
         }
@@ -165,10 +194,14 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
             val members = root.getJSONArray("members")
             for (i in 0 until members.length()) add(members.getJSONObject(i).optString("fullName"))
         }
-        return BackupPreview(names, root.getJSONArray("allergies").length(), root)
+        BackupPreview(names, root.getJSONArray("allergies").length(), root)
     }
 
-    suspend fun restore(preview: BackupPreview) {
+    suspend fun restore(preview: BackupPreview) = withContext(Dispatchers.IO) {
+        backupLock.withLock { restoreInternal(preview) }
+    }
+
+    private suspend fun restoreInternal(preview: BackupPreview) {
         val root = preview.payload
         val members = root.getJSONArray("members")
         val allergies = root.getJSONArray("allergies")
@@ -361,7 +394,12 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
     }
 
     private fun decrypt(input: InputStream, password: CharArray): JSONObject {
-        val bytes = input.use { it.readBytes() }
+        val bytes = input.use { source ->
+            val result = ByteArrayOutputStream()
+            val bounded = BackupLimitOutput(result)
+            source.copyTo(bounded)
+            result.toByteArray()
+        }
         require(bytes.size > 45 && bytes.copyOfRange(0, 4).contentEquals(MAGIC) && bytes[4].toInt() == 1) {
             "Invalid backup file."
         }
@@ -371,7 +409,7 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
         password.fill('\u0000')
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(128, iv))
-        val plain = cipher.doFinal(bytes.copyOfRange(33, bytes.size))
+        val plain = cipher.doFinal(bytes, 33, bytes.size - 33)
         return try { JSONObject(String(plain, Charsets.UTF_8)) } finally { plain.fill(0) }
     }
 
@@ -398,5 +436,30 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
             for (i in 0 until docs.length()) add(docs.getJSONObject(i).optString("displayName"))
         }
     }
-    companion object { private val MAGIC = byteArrayOf(0x53, 0x48, 0x54, 0x42) }
+    private class BackupLimitOutput(output: OutputStream) : FilterOutputStream(output) {
+        private var size = 0L
+
+        override fun write(value: Int) {
+            reserve(1)
+            out.write(value)
+        }
+
+        override fun write(buffer: ByteArray, offset: Int, length: Int) {
+            reserve(length)
+            out.write(buffer, offset, length)
+        }
+
+        private fun reserve(length: Int) {
+            if (size + length > MAX_BACKUP_BYTES) throw BackupSizeLimitException()
+            size += length
+        }
+    }
+
+    companion object {
+        const val MAX_BACKUP_BYTES = 64L * 1024 * 1024
+        private val MAGIC = byteArrayOf(0x53, 0x48, 0x54, 0x42)
+        private val backupLock = Mutex()
+    }
 }
+
+class BackupSizeLimitException : IOException("Backup exceeds the 64 MiB limit.")

@@ -9,6 +9,38 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface MedicalDao {
+    @Query("""
+        SELECT m.id AS memberId, m.fullName AS memberName, records.kind, records.recordId,
+               records.title, records.detail
+          FROM (
+              SELECT id AS recordId, id AS ownerId, 'MEMBER' AS kind, fullName AS title,
+                     '' AS detail, fullName || ' ' || medicalNotes || ' ' || additionalInfo AS terms FROM family_members
+              UNION ALL SELECT id, memberId, 'ALLERGY', substance, category,
+                     substance || ' ' || commercialName || ' ' || activeIngredient || ' ' || reaction || ' ' || notes FROM allergy_records
+              UNION ALL SELECT id, memberId, 'LAB', testName, performedAt,
+                     testName || ' ' || COALESCE(qualitativeValue, '') || ' ' || laboratory || ' ' || notes FROM lab_results
+              UNION ALL SELECT id, memberId, 'MEDICATION', name, strength,
+                     name || ' ' || strength || ' ' || prescribingDoctor || ' ' || instructions || ' ' || notes FROM medication_records
+              UNION ALL SELECT id, memberId, 'VISIT', doctor, date,
+                     doctor || ' ' || specialty || ' ' || facility || ' ' || reason || ' ' || outcome || ' ' || diagnosis || ' ' || recommendations || ' ' || notes FROM medical_appointments
+              UNION ALL SELECT id, memberId, 'DOCUMENT', displayName, documentDate, displayName FROM medical_documents
+              UNION ALL SELECT id, memberId, 'HISTORY', title, eventDate,
+                     title || ' ' || category || ' ' || notes FROM medical_history_events
+              UNION ALL SELECT id, memberId, 'CONDITION', name, diagnosedOn,
+                     name || ' ' || diagnosingDoctor || ' ' || treatment || ' ' || notes FROM chronic_conditions
+              UNION ALL SELECT id, memberId, 'FAMILY_HISTORY', disease, relative,
+                     disease || ' ' || relative || ' ' || notes FROM family_disease_history
+              UNION ALL SELECT id, memberId, 'PROCEDURE', name, performedOn,
+                     name || ' ' || facility || ' ' || doctor || ' ' || reason || ' ' || complications || ' ' || notes FROM medical_procedures
+          ) AS records JOIN family_members AS m ON records.ownerId = m.id
+         WHERE (:memberId IS NULL OR m.id = :memberId)
+           AND instr(lower(records.terms), lower(:query)) > 0
+         ORDER BY CASE records.kind WHEN 'MEMBER' THEN 0 ELSE 1 END, m.fullName, records.kind, records.recordId DESC
+         LIMIT 100
+    """)
+    fun searchMedicalRecords(query: String, memberId: Long?): Flow<List<MedicalSearchHit>>
+
+
     @Query("SELECT * FROM family_members ORDER BY fullName COLLATE NOCASE")
     fun observeMembers(): Flow<List<FamilyMember>>
 

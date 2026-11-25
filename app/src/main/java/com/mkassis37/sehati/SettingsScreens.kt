@@ -37,6 +37,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
+import com.mkassis37.sehati.data.EncryptedBackup
+import com.mkassis37.sehati.drive.DriveAuthorization
+import com.mkassis37.sehati.drive.DriveSettings
 import com.mkassis37.sehati.reminders.MedicalReminders
 import com.mkassis37.sehati.reminders.ReminderSettings
 import com.mkassis37.sehati.ui.theme.AppearanceSettings
@@ -111,6 +114,9 @@ internal fun SettingsSectionScreen(
     refreshToken: Int,
     appearance: AppearanceSettings,
     reminders: MedicalReminders,
+    backup: EncryptedBackup,
+    driveAuthorization: DriveAuthorization,
+    onDrivePreview: (EncryptedBackup.BackupPreview) -> Unit,
     onPaletteSelected: (SehatiPalette) -> Unit,
     onThemeModeSelected: (ThemeMode) -> Unit,
     onResetAppearance: () -> Unit,
@@ -158,11 +164,7 @@ internal fun SettingsSectionScreen(
             SettingsSection.BACKUP -> BackupSection(
                 backupLastSuccessAt, backupLastSizeBytes, backupMessage, onExport, onImport
             )
-            SettingsSection.DRIVE -> StatusSection(
-                title = "Google Drive غير متصل",
-                description = "لا يوجد تكامل OAuth أو رفع سحابي مهيأ في هذا الإصدار. لا ترفع صحتي بيانات طبية إلى Drive حاليًا.",
-                details = listOf("النسخ المحلي المشفر متاح من قسم النسخ الاحتياطي.", "يتطلب تفعيل Drive إعداد OAuth رسميًا وموافقة المستخدم.")
-            )
+            SettingsSection.DRIVE -> DriveSettings(backup, driveAuthorization, onDrivePreview)
             SettingsSection.NOTIFICATIONS -> ReminderSettings(reminders)
             SettingsSection.MEDICATIONS -> MedicationSettingsSection(selectedMemberName, onOpenMedications, onSelectMember)
             SettingsSection.UPDATES -> UpdatesSection(updateStatus, updateBusy, onCheckUpdates)
@@ -258,7 +260,6 @@ private fun BackupSection(
             Button(onClick = onExport) { Text("إنشاء نسخة مشفرة") }
             OutlinedButton(onClick = onImport) { Text("استعادة نسخة") }
         }
-        Text("لا يوجد رفع تلقائي أو ربط Google Drive في هذا الإصدار.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -307,18 +308,10 @@ private fun DiagnosticsSection(lastBackupAt: Long?) {
         InfoRow("تشفير المرفقات", "مفعّل — AES-GCM وKeystore")
         InfoRow("نسخ Android التلقائي", "معطل لبيانات التطبيق الخاصة")
         InfoRow("آخر نسخة يدوية", lastBackupAt?.let(::formatTimestamp) ?: "لا توجد نسخة مسجلة")
-        InfoRow("Google Drive", "غير متصل وغير مهيأ")
+        InfoRow("Google Drive", if (BuildConfig.GOOGLE_DRIVE_ENABLED) "راجع قسم Drive لحالة الحساب" else "يتطلب إعداد OAuth للبناء")
         InfoRow("التنبيهات والزيارات", "تتوفر إعدادات التنبيهات وسجل المواعيد")
         InfoRow("التقارير الطبية PDF", "متاحة من ملف الفرد")
         Text("لا تعرض شاشة التشخيص أي أسماء أو قيم طبية.", style = MaterialTheme.typography.bodySmall)
-    }
-}
-
-@Composable
-private fun StatusSection(title: String, description: String, details: List<String>) {
-    InfoCard(title) {
-        Text(description)
-        details.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall) }
     }
 }
 

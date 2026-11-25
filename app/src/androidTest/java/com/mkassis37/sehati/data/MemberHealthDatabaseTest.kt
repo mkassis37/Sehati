@@ -210,4 +210,24 @@ class MemberHealthDatabaseTest {
         }
     }
 
+    @Test
+    fun familySearchCanLimitMatchesToOneMember() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val database = Room.inMemoryDatabaseBuilder(context, SehatiDatabase::class.java).build()
+        try {
+            val dao = database.medicalDao()
+            val first = dao.addMember(FamilyMember(fullName = "Synthetic first"))
+            val second = dao.addMember(FamilyMember(fullName = "Synthetic second"))
+            dao.addAllergy(AllergyRecord(memberId = first, category = "fixture", substance = "Shared keyword", reaction = "", severity = ""))
+            dao.addMedication(MedicationRecord(memberId = second, name = "Shared keyword", startDate = "2026-11-25"))
+            assertEquals(setOf(first, second), dao.searchMedicalRecords("shared keyword", null).first().map { it.memberId }.toSet())
+            val scoped = dao.searchMedicalRecords("shared keyword", first).first().single()
+            assertEquals(first, scoped.memberId)
+            assertEquals("ALLERGY", scoped.kind)
+            assertTrue(dao.searchMedicalRecords("%", null).first().isEmpty())
+        } finally {
+            database.close()
+        }
+    }
+
 }

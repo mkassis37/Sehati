@@ -3,7 +3,7 @@ package com.mkassis37.sehati.data
 import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
-import android.util.Base64
+import android.util.AtomicFile
 import java.io.File
 import java.security.KeyStore
 import java.security.SecureRandom
@@ -30,11 +30,19 @@ internal class SecurePassphraseStore(private val context: Context) {
 
         val passphrase = ByteArray(32).also { SecureRandom().nextBytes(it) }
         val cipher = Cipher.getInstance(TRANSFORMATION)
-        cipher.init(Cipher.ENCRYPT_MODE, getOrCreateWrappingKey())
+        cipher.init(Cipher.ENCRYPT_MODE, wrappingKey())
         val encrypted = cipher.doFinal(passphrase)
         val iv = cipher.iv
         val envelope = byteArrayOf(iv.size.toByte()) + iv + encrypted
-        envelopeFile.writeBytes(envelope)
+        val stableFile = AtomicFile(envelopeFile)
+        val output = stableFile.startWrite()
+        try {
+            output.write(envelope)
+            stableFile.finishWrite(output)
+        } catch (error: Exception) {
+            stableFile.failWrite(output)
+            throw error
+        }
         return passphrase
     }
 
@@ -47,14 +55,15 @@ internal class SecurePassphraseStore(private val context: Context) {
         val iv = envelope.copyOfRange(1, 1 + ivLength)
         val ciphertext = envelope.copyOfRange(1 + ivLength, envelope.size)
         val cipher = Cipher.getInstance(TRANSFORMATION)
-        cipher.init(Cipher.DECRYPT_MODE, getOrCreateWrappingKey(), GCMParameterSpec(128, iv))
+        cipher.init(Cipher.DECRYPT_MODE, wrappingKey(create = false), GCMParameterSpec(128, iv))
         return cipher.doFinal(ciphertext)
     }
 
-    private fun getOrCreateWrappingKey(): SecretKey {
+    private fun wrappingKey(create: Boolean = true): SecretKey {
         val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
         (keyStore.getKey(alias, null) as? SecretKey)?.let { return it }
 
+        check(create) { "The existing database wrapping key is unavailable." }
         val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
         generator.init(
             KeyGenParameterSpec.Builder(

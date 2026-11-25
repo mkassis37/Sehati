@@ -25,7 +25,10 @@ import com.mkassis37.sehati.reports.rememberMedicalReportActions
 import com.mkassis37.sehati.reports.reportRecords
 import kotlinx.coroutines.CancellationException
 import com.mkassis37.sehati.data.EncryptedBackup
+import com.mkassis37.sehati.data.BackupSizeLimitException
 import com.mkassis37.sehati.data.BackupStatusStore
+import com.mkassis37.sehati.drive.rememberDriveAuthorization
+import com.mkassis37.sehati.drive.scheduleDriveBackup
 import com.mkassis37.sehati.data.AppearanceSettingsStore
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -46,6 +49,7 @@ import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.WarningAmber
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -81,7 +85,21 @@ import com.mkassis37.sehati.update.SehatiRelease
 class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val db = SehatiDatabase.getInstance(applicationContext)
+        val db = runCatching { SehatiDatabase.getInstance(applicationContext) }.getOrNull()
+        if (db == null) {
+            setContent {
+                SehatiTheme {
+                    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
+                        Column(Modifier.fillMaxSize().padding(24.dp),
+                            verticalArrangement = Arrangement.Center) {
+                            Text("تعذر فتح البيانات المشفرة", style = MaterialTheme.typography.headlineSmall)
+                            Text("افتح قفل الهاتف وأعد تشغيل صحتي. إذا بقي المفتاح غير متاح، استخدم نسخة احتياطية مشفرة لاستعادة سجلاتك على تثبيت منفصل.")
+                        }
+                    }
+                }
+            }
+            return
+        }
         window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN or WindowManager.LayoutParams.FLAG_SECURE)
         setContent {
             val appearanceStore = remember { AppearanceSettingsStore(applicationContext) }
@@ -112,7 +130,7 @@ class MainActivity : FragmentActivity() {
     }
 }
 
-private enum class Screen { MEMBERS, DETAILS, FORM, HEALTH_RECORDS, ALLERGIES, LAB_RESULTS, SETTINGS, MEDICATIONS, APPOINTMENTS, DOCUMENTS, REPORTS, REMINDERS }
+private enum class Screen { MEMBERS, DETAILS, FORM, HEALTH_RECORDS, ALLERGIES, LAB_RESULTS, SETTINGS, SEARCH, MEDICATIONS, APPOINTMENTS, DOCUMENTS, REPORTS, REMINDERS }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -159,6 +177,7 @@ private fun SehatiApp(
     var lastBackgroundAt by remember { mutableLongStateOf(0L) }
     var lastInteractionAt by remember { mutableLongStateOf(System.currentTimeMillis()) }
     var settingsRefresh by remember { mutableIntStateOf(0) }
+    var screen by rememberSaveable { mutableStateOf(Screen.MEMBERS) }
     var settingsSection by rememberSaveable { mutableStateOf<SettingsSection?>(null) }
     var medicationOpenedFromSettings by rememberSaveable { mutableStateOf(false) }
     var lastBackupAt by remember { mutableStateOf(backupStatusStore.lastSuccessAt) }
@@ -170,6 +189,13 @@ private fun SehatiApp(
     var backupUri by remember { mutableStateOf<Uri?>(null) }
     var backupPreview by remember { mutableStateOf<EncryptedBackup.BackupPreview?>(null) }
     var backupMessage by remember { mutableStateOf("") }
+    val driveAuthorization = rememberDriveAuthorization(backup) {
+        settingsSection = SettingsSection.DRIVE
+        screen = Screen.SETTINGS
+    }
+    LaunchedEffect(context) {
+        if (BuildConfig.GOOGLE_DRIVE_ENABLED) scheduleDriveBackup(context)
+    }
     val createBackup = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
         if (uri != null) { backupUri = uri; backupMode = "export"; showBackupPassword = true }
     }
@@ -206,7 +232,6 @@ private fun SehatiApp(
         }
     }
     val members by dao.observeMembers().collectAsState(initial = emptyList())
-    var screen by rememberSaveable { mutableStateOf(Screen.MEMBERS) }
     var selectedId by rememberSaveable { mutableStateOf<Long?>(null) }
     var editingId by rememberSaveable { mutableStateOf<Long?>(null) }
     var healthInitialTab by rememberSaveable { mutableIntStateOf(0) }
@@ -282,6 +307,7 @@ private fun SehatiApp(
         Screen.ALLERGIES -> "سجل الحساسيات"
         Screen.LAB_RESULTS -> "الفحوصات المخبرية"
         Screen.SETTINGS -> settingsSection?.title ?: "الإعدادات"
+        Screen.SEARCH -> "البحث الشامل"
         Screen.MEDICATIONS -> "الأدوية والعلاجات"
         Screen.APPOINTMENTS -> "المواعيد الطبية"
         Screen.DOCUMENTS -> "الملفات الطبية"
@@ -307,7 +333,7 @@ private fun SehatiApp(
             Screen.APPOINTMENTS -> if (selectedId != null) Screen.DETAILS else Screen.MEMBERS
             Screen.DOCUMENTS -> if (selectedId != null) Screen.DETAILS else Screen.MEMBERS
             Screen.REPORTS -> if (selectedId != null) Screen.DETAILS else Screen.MEMBERS
-            Screen.REMINDERS -> Screen.MEMBERS
+            Screen.REMINDERS, Screen.SEARCH -> Screen.MEMBERS
             Screen.MEMBERS -> Screen.MEMBERS
         }
     }
@@ -316,13 +342,17 @@ private fun SehatiApp(
     if (locked && lockStore.isEnabled()) {
         LockScreen(
             store = lockStore,
-            onUnlocked = { locked = false },
+            onUnlocked = { lastInteractionAt = System.currentTimeMillis(); locked = false },
+            biometricAvailable = biometricAvailable && lockStore.isBiometricEnabled(),
             onBiometric = {
                 val host = activity
                 if (host != null && biometricAvailable && lockStore.isBiometricEnabled()) {
                     val prompt = BiometricPrompt(host, ContextCompat.getMainExecutor(host),
                         object : BiometricPrompt.AuthenticationCallback() {
-                            override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) { locked = false }
+                            override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                                lastInteractionAt = System.currentTimeMillis()
+                                locked = false
+                            }
                         })
                     val promptInfo = BiometricPrompt.PromptInfo.Builder()
                         .setTitle("فتح صحتي")
@@ -353,6 +383,9 @@ private fun SehatiApp(
             },
             actions = {
                 if (screen == Screen.MEMBERS) {
+                    IconButton(onClick = { screen = Screen.SEARCH }) {
+                        Icon(Icons.Outlined.Search, contentDescription = "البحث الشامل")
+                    }
                     IconButton(onClick = { screen = Screen.SETTINGS }) {
                         Icon(Icons.Outlined.Settings, contentDescription = "الإعدادات")
                     }
@@ -375,6 +408,32 @@ private fun SehatiApp(
                 selectedId = it
                 screen = Screen.DETAILS
             }, Modifier.padding(padding))
+
+            Screen.SEARCH -> MedicalSearchScreen(
+                members = members,
+                search = dao::searchMedicalRecords,
+                open = { result ->
+                    selectedId = result.memberId
+                    screen = when (result.kind) {
+                        "ALLERGY" -> Screen.ALLERGIES
+                        "LAB" -> Screen.LAB_RESULTS
+                        "MEDICATION" -> Screen.MEDICATIONS
+                        "VISIT" -> Screen.APPOINTMENTS
+                        "DOCUMENT" -> Screen.DOCUMENTS
+                        "PROCEDURE", "HISTORY", "CONDITION", "FAMILY_HISTORY" -> {
+                            healthInitialTab = when (result.kind) {
+                                "CONDITION" -> 1
+                                "PROCEDURE" -> 2
+                                "HISTORY" -> 3
+                                else -> 4
+                            }
+                            Screen.HEALTH_RECORDS
+                        }
+                        else -> Screen.DETAILS
+                    }
+                },
+                modifier = Modifier.padding(padding)
+            )
 
             Screen.DETAILS -> if (selected != null) {
                 MemberDetailsScreen(selected, { editingId = selected.id; screen = Screen.FORM },
@@ -540,7 +599,10 @@ private fun SehatiApp(
                     modifier = Modifier.padding(padding)
                 )
             } else {
-                FutureScreen("الأدوية والعلاجات", "افتح الملف الطبي لأحد أفراد العائلة أولًا لإدارة أدويته وعلاجاته.", Modifier.padding(padding))
+                Column(Modifier.padding(padding).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("اختر فردًا لعرض سجل الأدوية والعلاجات.")
+                    Button(onClick = { screen = Screen.MEMBERS }) { Text("اختيار فرد") }
+                }
             }
             Screen.SETTINGS -> if (settingsSection == null) {
                 SettingsHomeScreen(onOpen = { settingsSection = it }, modifier = Modifier.padding(padding))
@@ -550,6 +612,9 @@ private fun SehatiApp(
                     refreshToken = settingsRefresh,
                     appearance = appearance,
                     reminders = reminders,
+                    backup = backup,
+                    driveAuthorization = driveAuthorization,
+                    onDrivePreview = { backupPreview = it },
                     onPaletteSelected = onPaletteSelected,
                     onThemeModeSelected = onThemeModeSelected,
                     onResetAppearance = onResetAppearance,
@@ -666,11 +731,17 @@ private fun SehatiApp(
     if (showPinSetup) PinSetupDialog(
         onDismiss = { showPinSetup = false },
         onSave = { pin ->
-            lockStore.setPin(pin.toCharArray())
-            lockStore.setEnabled(true)
-            locked = false
-            showPinSetup = false
-            settingsRefresh++
+            val entered = pin.toCharArray()
+            try {
+                lockStore.setPin(entered)
+                locked = false
+                showPinSetup = false
+                settingsRefresh++
+            } catch (_: Exception) {
+                android.widget.Toast.makeText(context, "تعذر حفظ رمز PIN عبر مفتاح الجهاز.", android.widget.Toast.LENGTH_LONG).show()
+            } finally {
+                entered.fill('\u0000')
+            }
         }
     )
 
@@ -704,8 +775,14 @@ private fun SehatiApp(
                             backupPreview = backup.preview(context.contentResolver, uri, pass)
                             backupMessage = ""
                         }
-                    } catch (e: Exception) {
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: BackupSizeLimitException) {
+                        backupMessage = "حجم النسخة يتجاوز الحد المسموح (64 ميبيبايت)."
+                    } catch (_: Exception) {
                         backupMessage = "تعذّرت العملية. تأكد من كلمة المرور وسلامة الملف."
+                    } finally {
+                        pass.fill('\u0000')
                     }
                 }
             }
@@ -1167,20 +1244,7 @@ internal fun String.ageOnDate(today: LocalDate = LocalDate.now()): Int? = runCat
 
 
 @Composable
-private fun FutureScreen(title: String, description: String, modifier: Modifier = Modifier) {
-    Column(modifier.fillMaxSize().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text(title, style = MaterialTheme.typography.headlineSmall)
-        Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("القسم ضمن مسارات التطبيق", style = MaterialTheme.typography.titleMedium)
-            Text(description)
-            Text("سيتم تفعيل وظائفه وربطه بملفات أفراد العائلة في مرحلة التطوير الخاصة به.", style = MaterialTheme.typography.bodySmall)
-        } }
-    }
-}
-
-
-@Composable
-private fun LockScreen(store: AppLockStore, onUnlocked: () -> Unit, onBiometric: () -> Unit) {
+private fun LockScreen(store: AppLockStore, onUnlocked: () -> Unit, biometricAvailable: Boolean, onBiometric: () -> Unit) {
     var pin by remember { mutableStateOf("") }
     var error by remember { mutableStateOf("") }
     var remainingLock by remember { mutableLongStateOf(store.remainingLockMillis()) }
@@ -1189,16 +1253,21 @@ private fun LockScreen(store: AppLockStore, onUnlocked: () -> Unit, onBiometric:
         Text("صحتي", style = MaterialTheme.typography.headlineLarge)
         Text("التطبيق مقفل لحماية الملفات الطبية", style = MaterialTheme.typography.bodyMedium)
         Spacer(Modifier.height(20.dp))
-        OutlinedTextField(value = pin, onValueChange = { if (it.length <= 6 && it.all(Char::isDigit)) pin = it; error = "" },
+        OutlinedTextField(value = pin, onValueChange = { if (it.length <= 6 && it.all(Char::isDigit)) pin = it.map { digit -> digit.digitToInt().digitToChar() }.joinToString(""); error = "" },
             label = { Text("رمز PIN من 6 أرقام") }, singleLine = true, visualTransformation = PasswordVisualTransformation(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
         if (remainingLock > 0L) Text("محاولات كثيرة. حاول بعد " + (remainingLock/1000) + " ثانية.", color = MaterialTheme.colorScheme.error)
         if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
         Button(enabled = pin.length == 6 && remainingLock <= 0L, onClick = {
-            if (store.verifyPin(pin.toCharArray())) { pin = ""; onUnlocked() }
-            else { pin = ""; error = "الرمز غير صحيح." }
+            val verified = runCatching { store.verifyPin(pin.toCharArray()) }
+            pin = ""
+            when {
+                verified.getOrDefault(false) -> onUnlocked()
+                verified.isFailure -> error = "تعذر فتح مفتاح PIN. حاول مجددًا بعد فتح قفل الهاتف."
+                else -> error = "الرمز غير صحيح."
+            }
         }, modifier = Modifier.fillMaxWidth()) { Text("فتح التطبيق") }
-        TextButton(onClick = onBiometric) { Text("استخدام البصمة / قفل الجهاز") }
+        if (biometricAvailable) TextButton(onClick = onBiometric) { Text("استخدام البصمة / قفل الجهاز") }
     }
 }
 
@@ -1210,8 +1279,8 @@ private fun PinSetupDialog(onDismiss: () -> Unit, onSave: (String) -> Unit) {
     AlertDialog(onDismissRequest = onDismiss, title = { Text("إعداد رمز PIN") }, text = {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("اختر رمزًا من 6 أرقام وكرره للتأكيد.")
-            OutlinedTextField(first, { if (it.length <= 6 && it.all(Char::isDigit)) first = it }, label = { Text("PIN الجديد") }, visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
-            OutlinedTextField(second, { if (it.length <= 6 && it.all(Char::isDigit)) second = it }, label = { Text("تأكيد PIN") }, visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+            OutlinedTextField(first, { if (it.length <= 6 && it.all(Char::isDigit)) first = it.map { digit -> digit.digitToInt().digitToChar() }.joinToString("") }, label = { Text("PIN الجديد") }, visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+            OutlinedTextField(second, { if (it.length <= 6 && it.all(Char::isDigit)) second = it.map { digit -> digit.digitToInt().digitToChar() }.joinToString("") }, label = { Text("تأكيد PIN") }, visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
             if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
         }
     }, confirmButton = { TextButton(onClick = {

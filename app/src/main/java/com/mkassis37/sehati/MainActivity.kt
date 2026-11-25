@@ -61,6 +61,7 @@ import com.mkassis37.sehati.ui.theme.SehatiTheme
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
+import java.util.Locale
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
@@ -92,7 +93,7 @@ class MainActivity : FragmentActivity() {
     }
 }
 
-private enum class Screen { MEMBERS, DETAILS, FORM, ALLERGIES, LAB_RESULTS, SETTINGS, MEDICATIONS, APPOINTMENTS, DOCUMENTS, REPORTS, REMINDERS }
+private enum class Screen { MEMBERS, DETAILS, FORM, HEALTH_RECORDS, ALLERGIES, LAB_RESULTS, SETTINGS, MEDICATIONS, APPOINTMENTS, DOCUMENTS, REPORTS, REMINDERS }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -159,6 +160,7 @@ private fun SehatiApp(db: SehatiDatabase) {
     var screen by rememberSaveable { mutableStateOf(Screen.MEMBERS) }
     var selectedId by rememberSaveable { mutableStateOf<Long?>(null) }
     var editingId by rememberSaveable { mutableStateOf<Long?>(null) }
+    var healthInitialTab by rememberSaveable { mutableIntStateOf(0) }
     LaunchedEffect(lockStore.isEnabled(), lockStore.timeoutMinutes(), appInForeground, locked) {
         while (lockStore.isEnabled() && appInForeground && !locked) {
             delay(1_000)
@@ -190,11 +192,22 @@ private fun SehatiApp(db: SehatiDatabase) {
     val medicalDocuments by documentFlow.collectAsState(initial = emptyList())
     val medicationFlow = remember(selectedId) { selectedId?.let { dao.observeMedications(it) } ?: flowOf(emptyList()) }
     val medications by medicationFlow.collectAsState(initial = emptyList())
+    val conditionFlow = remember(selectedId) { selectedId?.let { dao.observeConditions(it) } ?: flowOf(emptyList()) }
+    val conditions by conditionFlow.collectAsState(initial = emptyList())
+    val procedureFlow = remember(selectedId) { selectedId?.let { dao.observeProcedures(it) } ?: flowOf(emptyList()) }
+    val procedures by procedureFlow.collectAsState(initial = emptyList())
+    val historyFlow = remember(selectedId) { selectedId?.let { dao.observeHistoryEvents(it) } ?: flowOf(emptyList()) }
+    val historyEvents by historyFlow.collectAsState(initial = emptyList())
+    val familyHistoryFlow = remember(selectedId) { selectedId?.let { dao.observeFamilyDiseaseHistory(it) } ?: flowOf(emptyList()) }
+    val familyHistory by familyHistoryFlow.collectAsState(initial = emptyList())
+    val measurementFlow = remember(selectedId) { selectedId?.let { dao.observeBodyMeasurements(it) } ?: flowOf(emptyList()) }
+    val measurements by measurementFlow.collectAsState(initial = emptyList())
 
     val title = when (screen) {
         Screen.MEMBERS -> "أفراد العائلة"
         Screen.DETAILS -> selected?.fullName ?: "الملف الطبي"
         Screen.FORM -> if (editingId == null) "إضافة فرد" else "تعديل البيانات"
+        Screen.HEALTH_RECORDS -> "الملف الصحي"
         Screen.ALLERGIES -> "سجل الحساسيات"
         Screen.LAB_RESULTS -> "الفحوصات المخبرية"
         Screen.SETTINGS -> "الإعدادات"
@@ -211,7 +224,7 @@ private fun SehatiApp(db: SehatiDatabase) {
         screen = when (screen) {
             Screen.FORM -> if (editingId == null) Screen.MEMBERS else Screen.DETAILS
             Screen.DETAILS -> Screen.MEMBERS
-            Screen.ALLERGIES, Screen.LAB_RESULTS, Screen.MEDICATIONS -> Screen.DETAILS
+            Screen.ALLERGIES, Screen.LAB_RESULTS, Screen.MEDICATIONS, Screen.HEALTH_RECORDS -> Screen.DETAILS
             Screen.SETTINGS, Screen.APPOINTMENTS, Screen.DOCUMENTS,
             Screen.REPORTS, Screen.REMINDERS -> Screen.MEMBERS
             Screen.MEMBERS -> Screen.MEMBERS
@@ -283,28 +296,98 @@ private fun SehatiApp(db: SehatiDatabase) {
 
             Screen.DETAILS -> if (selected != null) {
                 MemberDetailsScreen(selected, { editingId = selected.id; screen = Screen.FORM },
+                    { healthInitialTab = 0; screen = Screen.HEALTH_RECORDS },
+                    { healthInitialTab = 6; screen = Screen.HEALTH_RECORDS },
                     { screen = Screen.ALLERGIES }, allergies.size,
                     { screen = Screen.LAB_RESULTS }, labResults.size,
-                    { screen = Screen.MEDICATIONS }, medications.size, Modifier.padding(padding))
+                    { screen = Screen.MEDICATIONS }, medications.size,
+                    onDelete = {
+                        scope.launch {
+                            try {
+                                val removedDocuments = db.deleteMemberAndRecords(selected.id)
+                                selectedId = null
+                                screen = Screen.MEMBERS
+                                val cleanupFailed = removedDocuments.any { document ->
+                                    runCatching {
+                                        documentStore.clearTemporaryPdf(document.id)
+                                        documentStore.delete(document)
+                                    }.isFailure
+                                }
+                                val message = if (cleanupFailed) "حُذف الملف وسجلاته، لكن تعذر تنظيف مرفق مشفر واحد على الأقل." else "تم حذف الملف الطبي وبياناته المرتبطة."
+                                android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_LONG).show()
+                            } catch (_: Exception) {
+                                android.widget.Toast.makeText(context, "تعذر حذف الملف الطبي. لم تُحذف سجلاته.", android.widget.Toast.LENGTH_LONG).show()
+                            }
+                        }
+                    }, modifier = Modifier.padding(padding))
             } else {
                 MembersScreen(members, { editingId = null; screen = Screen.FORM },
                     { selectedId = it; screen = Screen.DETAILS }, Modifier.padding(padding))
+            }
+
+            Screen.HEALTH_RECORDS -> if (selected != null) {
+                MedicalHealthScreen(
+                    member = selected, initialTab = healthInitialTab, allergies = allergies, medications = medications, labResults = labResults, documents = medicalDocuments,
+                    conditions = conditions, procedures = procedures, history = historyEvents,
+                    familyHistory = familyHistory, measurements = measurements,
+                    onSaveMember = { dao.updateMember(it) },
+                    onAddCondition = { dao.addCondition(it); Unit }, onUpdateCondition = { dao.updateCondition(it) },
+                    onDeleteCondition = { dao.deleteCondition(it, selected.id) },
+                    onAddProcedure = { dao.addProcedure(it); Unit }, onUpdateProcedure = { dao.updateProcedure(it) },
+                    onDeleteProcedure = { db.deleteProcedureAndUnlinkAttachments(it, selected.id) },
+                    onAttachProcedure = { procedureId, uri ->
+                        val name = context.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)
+                            ?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null } ?: "مرفق العملية"
+                        dao.addDocument(documentStore.save(uri, selected.id, name).copy(relatedProcedureId = procedureId))
+                        Unit
+                    },
+                    onAddHistory = { dao.addHistoryEvent(it); Unit }, onUpdateHistory = { dao.updateHistoryEvent(it) },
+                    onDeleteHistory = { dao.deleteHistoryEvent(it, selected.id) },
+                    onAddFamilyHistory = { dao.addFamilyDiseaseHistory(it); Unit }, onUpdateFamilyHistory = { dao.updateFamilyDiseaseHistory(it) },
+                    onDeleteFamilyHistory = { dao.deleteFamilyDiseaseHistory(it, selected.id) },
+                    onAddMeasurement = { dao.addBodyMeasurement(it); Unit }, onUpdateMeasurement = { dao.updateBodyMeasurement(it) },
+                    onDeleteMeasurement = { dao.deleteBodyMeasurement(it, selected.id) },
+                    onOpenDocument = { document ->
+                        scope.launch {
+                            try {
+                                val file = documentStore.createTemporaryFile(document)
+                                val uri = FileProvider.getUriForFile(context, context.packageName + ".fileprovider", file)
+                                context.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, document.mimeType).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
+                            } catch (_: Exception) { android.widget.Toast.makeText(context, "تعذر فتح المرفق.", android.widget.Toast.LENGTH_LONG).show() }
+                        }
+                    },
+                    onDeleteDocument = { document ->
+                        scope.launch {
+                            runCatching {
+                                dao.deleteDocument(document.id, selected.id)
+                                documentStore.clearTemporaryDocument(document.id)
+                                documentStore.delete(document)
+                            }.onFailure { android.widget.Toast.makeText(context, "تعذر حذف المرفق وتنظيف الملف المشفر.", android.widget.Toast.LENGTH_LONG).show() }
+                        }
+                    },
+                    onOpenLabResults = { screen = Screen.LAB_RESULTS },
+                    onOpenAllergies = { screen = Screen.ALLERGIES },
+                    onOpenMedications = { screen = Screen.MEDICATIONS },
+                    modifier = Modifier.padding(padding)
+                )
             }
 
             Screen.FORM -> {
                 val editing = members.firstOrNull { it.id == editingId }
                 MemberFormScreen(editing,
                     onCancel = { screen = if (editingId == null) Screen.MEMBERS else Screen.DETAILS },
-                    onSave = { name, dob, blood, notes ->
+                    onSave = { name, dob, blood, notes, sex, phone, additionalInfo ->
                         if (editing == null) {
                             selectedId = dao.addMember(FamilyMember(
                                 fullName = name, dateOfBirth = dob, bloodGroup = blood,
-                                medicalNotes = notes, updatedAt = System.currentTimeMillis()
+                                medicalNotes = notes, sex = sex, phone = phone, additionalInfo = additionalInfo,
+                                updatedAt = System.currentTimeMillis()
                             ))
                         } else {
                             dao.updateMember(editing.copy(
                                 fullName = name, dateOfBirth = dob, bloodGroup = blood,
-                                medicalNotes = notes, updatedAt = System.currentTimeMillis()
+                                medicalNotes = notes, sex = sex, phone = phone, additionalInfo = additionalInfo,
+                                updatedAt = System.currentTimeMillis()
                             ))
                             selectedId = editing.id
                         }
@@ -328,7 +411,7 @@ private fun SehatiApp(db: SehatiDatabase) {
                     openDocument = { document ->
                         scope.launch {
                             try {
-                                val file = documentStore.createTemporaryPdf(document)
+                                val file = documentStore.createTemporaryFile(document)
                                 val contentUri = FileProvider.getUriForFile(context, context.packageName + ".fileprovider", file)
                                 context.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(contentUri, "application/pdf")
                                     .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
@@ -339,8 +422,13 @@ private fun SehatiApp(db: SehatiDatabase) {
                     },
                     deleteDocument = { document ->
                         scope.launch {
-                            dao.deleteDocument(document.id, selected.id)
-                            documentStore.delete(document)
+                            try {
+                                dao.deleteDocument(document.id, selected.id)
+                                documentStore.clearTemporaryPdf(document.id)
+                                documentStore.delete(document)
+                            } catch (_: Exception) {
+                                android.widget.Toast.makeText(context, "تعذر تنظيف الملف المشفر بعد حذف سجل المرفق.", android.widget.Toast.LENGTH_LONG).show()
+                            }
                         }
                         Unit
                     },
@@ -477,12 +565,17 @@ private fun SehatiApp(db: SehatiDatabase) {
         AlertDialog(
             onDismissRequest = { backupPreview = null },
             title = { Text("معاينة النسخة الاحتياطية") },
-            text = { Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            text = { Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("عدد الأفراد: ${preview.memberNames.size}")
                 preview.memberNames.forEach { Text("• $it") }
                 Text("عدد سجلات الحساسية: ${preview.allergyCount}")
                 Text("عدد نتائج الفحوصات: ${preview.labResultCount}")
                 Text("عدد الأدوية والعلاجات: ${preview.medicationCount}")
+                Text("الحالات المزمنة: ${preview.conditionCount}")
+                Text("العمليات والإجراءات: ${preview.procedureCount}")
+                Text("أحداث التاريخ السابق: ${preview.historyEventCount}")
+                Text("أمراض العائلة: ${preview.familyHistoryCount}")
+                Text("قياسات الطول والوزن: ${preview.measurementCount}")
                 Text("عدد التقارير والمرفقات: ${preview.documentCount}")
                 preview.documentNames.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall) }
                 Text("استعادة النسخة ستستبدل البيانات الحالية بالكامل.")
@@ -555,27 +648,41 @@ private fun MembersScreen(
 private fun MemberDetailsScreen(
     member: FamilyMember,
     onEdit: () -> Unit,
+    onHealthRecords: () -> Unit,
+    onEmergency: () -> Unit,
     onAllergies: () -> Unit,
     allergyCount: Int,
     onLabResults: () -> Unit,
     labCount: Int,
     onMedications: () -> Unit,
     medicationCount: Int,
+    onDelete: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    var showDeleteConfirmation by rememberSaveable(member.id) { mutableStateOf(false) }
     Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(18.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(member.fullName, style = MaterialTheme.typography.headlineSmall)
                 DetailLine("تاريخ الميلاد", member.dateOfBirth.toDisplayDate().ifBlank { "غير مسجل" })
+                DetailLine("الجنس", member.sex.ifBlank { "غير مسجل" })
                 DetailLine("فصيلة الدم", member.bloodGroup.ifBlank { "غير مسجلة" })
+                DetailLine("رقم التواصل", member.phone.ifBlank { "غير مسجل" })
+                if (member.additionalInfo.isNotBlank()) DetailLine("معلومات إضافية", member.additionalInfo)
                 DetailLine("التاريخ والملاحظات الطبية", member.medicalNotes.ifBlank { "لا توجد ملاحظات" })
                 Button(onClick = onEdit, Modifier.fillMaxWidth()) {
                     Icon(Icons.Outlined.Edit, null); Text("تعديل بيانات الفرد")
                 }
             }
         }
+        Card(Modifier.fillMaxWidth().clickable(onClick = onHealthRecords)) {
+            Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("الملف الصحي المتكامل", style = MaterialTheme.typography.titleMedium)
+                Text("الحالات والعمليات والتاريخ السابق والقياسات وبطاقة الطوارئ", style = MaterialTheme.typography.bodySmall)
+            }
+        }
+        OutlinedButton(onClick = onEmergency, modifier = Modifier.fillMaxWidth()) { Text("بطاقة الطوارئ") }
         Card(Modifier.fillMaxWidth().clickable(onClick = onAllergies)) {
             Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically) {
@@ -608,7 +715,18 @@ private fun MemberDetailsScreen(
                 Text(labCount.toString())
             }
         }
+        OutlinedButton(onClick = { showDeleteConfirmation = true }, modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)) {
+            Text("حذف الملف الطبي لهذا الفرد")
+        }
     }
+    if (showDeleteConfirmation) AlertDialog(
+        onDismissRequest = { showDeleteConfirmation = false },
+        title = { Text("تأكيد حذف الملف الطبي") },
+        text = { Text("سيُحذف ملف ${member.fullName} وسجلات حساسياته ونتائجه وأدويته ومرفقاته نهائيًا من هذا الجهاز. لا يمكن التراجع عن الحذف.") },
+        confirmButton = { TextButton(onClick = { showDeleteConfirmation = false; onDelete() }) { Text("حذف نهائي") } },
+        dismissButton = { TextButton(onClick = { showDeleteConfirmation = false }) { Text("إلغاء") } }
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -647,7 +765,7 @@ private fun LabResultsScreen(member: FamilyMember, records: List<LabResult>, doc
                     Row(Modifier.fillMaxWidth().padding(10.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                             Text(document.displayName, style = MaterialTheme.typography.titleSmall)
-                            Text(String.format("%.1f KB", document.sizeBytes / 1024.0), style = MaterialTheme.typography.bodySmall)
+                            Text(String.format(Locale.getDefault(), "%.1f KB", document.sizeBytes / 1024.0), style = MaterialTheme.typography.bodySmall)
                             Text(document.addedAt.toString(), style = MaterialTheme.typography.labelSmall)
                         }
                         TextButton(onClick = { openDocument(document) }) { Text("فتح") }
@@ -738,11 +856,12 @@ private fun DetailLine(label: String, value: String) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun MemberFormScreen(
     member: FamilyMember?,
     onCancel: () -> Unit,
-    onSave: suspend (String, String, String, String) -> Unit,
+    onSave: suspend (String, String, String, String, String, String, String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val scope = rememberCoroutineScope()
@@ -750,8 +869,13 @@ private fun MemberFormScreen(
     var dob by rememberSaveable(member?.id) { mutableStateOf(member?.dateOfBirth.orEmpty()) }
     var blood by rememberSaveable(member?.id) { mutableStateOf(member?.bloodGroup.orEmpty()) }
     var notes by rememberSaveable(member?.id) { mutableStateOf(member?.medicalNotes.orEmpty()) }
+    var sex by rememberSaveable(member?.id) { mutableStateOf(member?.sex.orEmpty()) }
+    var phone by rememberSaveable(member?.id) { mutableStateOf(member?.phone.orEmpty()) }
+    var additionalInfo by rememberSaveable(member?.id) { mutableStateOf(member?.additionalInfo.orEmpty()) }
     var saving by remember { mutableStateOf(false) }
     var error by rememberSaveable(member?.id) { mutableStateOf("") }
+    var bloodMenuExpanded by remember { mutableStateOf(false) }
+    var sexMenuExpanded by remember { mutableStateOf(false) }
 
     Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(18.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -760,15 +884,43 @@ private fun MemberFormScreen(
         OutlinedTextField(name, { name = it; error = "" }, label = { Text("الاسم الكامل") },
             modifier = Modifier.fillMaxWidth(), singleLine = true)
         DatePickerField("تاريخ الميلاد", dob, { dob = it }, Modifier.fillMaxWidth())
-        OutlinedTextField(blood, { blood = it }, label = { Text("فصيلة الدم") },
-            modifier = Modifier.fillMaxWidth(), singleLine = true)
+        Box(Modifier.fillMaxWidth()) {
+            OutlinedTextField(sex, {}, readOnly = true, label = { Text("الجنس (اختياري)") },
+                placeholder = { Text("اختياري") }, modifier = Modifier.fillMaxWidth().clickable { sexMenuExpanded = true }, singleLine = true)
+            DropdownMenu(expanded = sexMenuExpanded, onDismissRequest = { sexMenuExpanded = false }) {
+                listOf("ذكر", "أنثى", "أفضل عدم التحديد").forEach { option -> DropdownMenuItem(text = { Text(option) }, onClick = { sex = option; sexMenuExpanded = false }) }
+            }
+        }
+        OutlinedTextField(phone, { phone = it }, label = { Text("رقم التواصل (اختياري)") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+        Box(Modifier.fillMaxWidth()) {
+            OutlinedTextField(
+                value = blood,
+                onValueChange = {},
+                readOnly = true,
+                label = { Text("فصيلة الدم") },
+                placeholder = { Text("اختاري فصيلة الدم") },
+                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = bloodMenuExpanded) },
+                modifier = Modifier.fillMaxWidth().clickable { bloodMenuExpanded = true },
+                singleLine = true
+            )
+            DropdownMenu(expanded = bloodMenuExpanded, onDismissRequest = { bloodMenuExpanded = false }) {
+                (listOf("غير محددة") + listOf("A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-")).forEach { group ->
+                    DropdownMenuItem(
+                        text = { Text(group) },
+                        onClick = { blood = if (group == "غير محددة") "" else group; bloodMenuExpanded = false }
+                    )
+                }
+            }
+        }
         OutlinedTextField(notes, { notes = it }, label = { Text("التاريخ والملاحظات الطبية") },
             modifier = Modifier.fillMaxWidth(), minLines = 4)
+        OutlinedTextField(additionalInfo, { additionalInfo = it }, label = { Text("معلومات إضافية اختيارية") },
+            modifier = Modifier.fillMaxWidth(), minLines = 2)
         Button(enabled = !saving && name.isNotBlank(), onClick = {
             scope.launch {
                 saving = true
                 error = ""
-                try { onSave(name.trim(), dob, blood.trim(), notes.trim()) }
+                try { onSave(name.trim(), dob, blood.trim(), notes.trim(), sex.trim(), phone.trim(), additionalInfo.trim()) }
                 catch (_: Exception) { error = "تعذّر حفظ البيانات. بقيت المعلومات المدخلة كما هي." }
                 finally { saving = false }
             }
@@ -880,7 +1032,7 @@ private fun AllergyDialog(memberId: Long, onDismiss: () -> Unit, onSave: (Allerg
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun DatePickerField(label: String, date: String, onDateSelected: (String) -> Unit, modifier: Modifier = Modifier) {
+internal fun DatePickerField(label: String, date: String, onDateSelected: (String) -> Unit, modifier: Modifier = Modifier) {
     var showPicker by rememberSaveable { mutableStateOf(false) }
     OutlinedTextField(value = date.toDisplayDate(), onValueChange = {}, readOnly = true,
         label = { Text(label) }, placeholder = { Text("اختر التاريخ") },
@@ -910,7 +1062,7 @@ private fun String.toUtcMillis(): Long? = runCatching {
     LocalDate.parse(this).atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
 }.getOrNull()
 
-private fun String.toDisplayDate(): String {
+internal fun String.toDisplayDate(): String {
     if (isBlank()) return ""
     return runCatching {
         val d = LocalDate.parse(this)

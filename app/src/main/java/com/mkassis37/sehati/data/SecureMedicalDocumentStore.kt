@@ -28,6 +28,7 @@ class SecureMedicalDocumentStore(private val context: Context) {
         val target = File(directory, "$memberId/$id.shtd")
         target.parentFile?.mkdirs()
         var plainSize = 0L
+        var detectedMime = ""
         try {
             input.use { source ->
                 val cipher = Cipher.getInstance("AES/GCM/NoPadding")
@@ -36,10 +37,9 @@ class SecureMedicalDocumentStore(private val context: Context) {
                     file.write(MAGIC)
                     file.write(cipher.iv)
                     CipherOutputStream(file, cipher).use { encrypted ->
-                        val header = readExactly(source, 5)
-                        require(String(header, Charsets.US_ASCII) == "%PDF-") {
-                            "الملف المحدد ليس PDF صالحًا."
-                        }
+                        val header = readAtMost(source, 12)
+                        detectedMime = detectMime(header)
+                            ?: throw IllegalArgumentException("الصيغ المدعومة هي PDF وJPG وPNG وWebP فقط.")
                         plainSize += header.size
                         encrypted.write(header)
                         val buffer = ByteArray(16 * 1024)
@@ -57,7 +57,7 @@ class SecureMedicalDocumentStore(private val context: Context) {
             target.delete()
             throw error
         }
-        MedicalDocument(memberId = memberId, displayName = displayName.take(180),
+        MedicalDocument(memberId = memberId, displayName = displayName.take(180), mimeType = detectedMime,
             relativePath = target.relativeTo(directory).path, sizeBytes = plainSize)
     }
 
@@ -66,7 +66,9 @@ class SecureMedicalDocumentStore(private val context: Context) {
     }
 
     suspend fun restore(document: MedicalDocument, plaintext: ByteArray): MedicalDocument = withContext(Dispatchers.IO) {
-        require(plaintext.size <= MAX_DOCUMENT_BYTES && plaintext.size >= 5 && String(plaintext.copyOfRange(0, 5), Charsets.US_ASCII) == "%PDF-")
+        require(plaintext.size <= MAX_DOCUMENT_BYTES && detectMime(plaintext.copyOfRange(0, minOf(12, plaintext.size))) == document.mimeType) {
+            "صيغة المرفق غير متوافقة مع بيانات النسخة الاحتياطية."
+        }
         val target = resolve(document.relativePath)
         target.parentFile?.mkdirs()
         try {
@@ -84,8 +86,15 @@ class SecureMedicalDocumentStore(private val context: Context) {
         }
     }
 
-    suspend fun createTemporaryPdf(document: MedicalDocument): File = withContext(Dispatchers.IO) {
-        val output = File(context.cacheDir, "sehati-${document.id}.pdf")
+    suspend fun createTemporaryFile(document: MedicalDocument): File = withContext(Dispatchers.IO) {
+        val extension = when (document.mimeType) {
+            "application/pdf" -> "pdf"
+            "image/jpeg" -> "jpg"
+            "image/png" -> "png"
+            "image/webp" -> "webp"
+            else -> throw IllegalArgumentException("نوع مرفق غير مدعوم.")
+        }
+        val output = File(context.cacheDir, "sehati-${document.id}.$extension")
         decryptFile(resolve(document.relativePath)).use { input ->
             FileOutputStream(output).use { input.copyTo(it) }
         }
@@ -97,7 +106,15 @@ class SecureMedicalDocumentStore(private val context: Context) {
 
     fun clearTemporaryPdfs() {
         context.cacheDir.listFiles()?.filter {
-            it.isFile && it.name.startsWith("sehati-") && it.name.endsWith(".pdf")
+            it.isFile && it.name.startsWith("sehati-") && it.extension.lowercase() in setOf("pdf", "jpg", "png", "webp")
+        }?.forEach { it.delete() }
+    }
+
+    fun clearTemporaryPdf(documentId: Long) = clearTemporaryDocument(documentId)
+
+    fun clearTemporaryDocument(documentId: Long) {
+        context.cacheDir.listFiles()?.filter {
+            it.isFile && it.nameWithoutExtension == "sehati-$documentId" && it.extension.lowercase() in setOf("pdf", "jpg", "png", "webp")
         }?.forEach { it.delete() }
     }
 
@@ -125,6 +142,27 @@ class SecureMedicalDocumentStore(private val context: Context) {
             offset += count
         }
         return bytes
+    }
+
+    private fun readAtMost(input: java.io.InputStream, maxSize: Int): ByteArray {
+        val buffer = ByteArray(maxSize)
+        var count = 0
+        while (count < maxSize) {
+            val read = input.read(buffer, count, maxSize - count)
+            if (read < 0) break
+            if (read == 0) continue
+            count += read
+        }
+        if (count == 0) throw IllegalArgumentException("الملف فارغ.")
+        return buffer.copyOf(count)
+    }
+
+    private fun detectMime(header: ByteArray): String? = when {
+        header.size >= 5 && String(header, 0, 5, Charsets.US_ASCII) == "%PDF-" -> "application/pdf"
+        header.size >= 3 && header[0] == 0xFF.toByte() && header[1] == 0xD8.toByte() && header[2] == 0xFF.toByte() -> "image/jpeg"
+        header.size >= 8 && header.copyOfRange(0, 8).contentEquals(byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A)) -> "image/png"
+        header.size >= 12 && String(header, 0, 4, Charsets.US_ASCII) == "RIFF" && String(header, 8, 4, Charsets.US_ASCII) == "WEBP" -> "image/webp"
+        else -> null
     }
 
     private fun resolve(relativePath: String): File {

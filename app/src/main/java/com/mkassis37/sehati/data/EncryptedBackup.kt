@@ -17,22 +17,49 @@ import javax.crypto.spec.SecretKeySpec
 
 /** Versioned, authenticated backup format. No cloud upload is performed by this class. */
 class EncryptedBackup(private val database: SehatiDatabase, private val documentStore: SecureMedicalDocumentStore) {
+    private data class BackupRows(
+        val members: List<FamilyMember>, val allergies: List<AllergyRecord>, val labResults: List<LabResult>,
+        val documents: List<MedicalDocument>, val medications: List<MedicationRecord>, val conditions: List<ChronicCondition>,
+        val procedures: List<MedicalProcedure>, val historyEvents: List<MedicalHistoryEvent>,
+        val familyHistory: List<FamilyDiseaseHistory>, val measurements: List<BodyMeasurement>
+    )
+
     suspend fun write(resolver: ContentResolver, uri: Uri, password: CharArray) {
         require(password.size >= 10) { "Backup password must be at least 10 characters." }
-        val dao = database.medicalDao()
-        val members = dao.getAllMembers()
-        val allergies = dao.getAllAllergies()
-        val labResults = dao.getAllLabResults()
-        val documents = dao.getAllDocuments()
-        val medications = dao.getAllMedications()
+        val rows = database.withTransaction {
+            val dao = database.medicalDao()
+            BackupRows(
+                members = dao.getAllMembers(), allergies = dao.getAllAllergies(), labResults = dao.getAllLabResults(),
+                documents = dao.getAllDocuments(), medications = dao.getAllMedications(), conditions = dao.getAllConditions(),
+                procedures = dao.getAllProcedures(), historyEvents = dao.getAllHistoryEvents(),
+                familyHistory = dao.getAllFamilyDiseaseHistory(), measurements = dao.getAllBodyMeasurements()
+            )
+        }
+        val members = rows.members
+        val allergies = rows.allergies
+        val labResults = rows.labResults
+        val documents = rows.documents
+        val medications = rows.medications
+        val conditions = rows.conditions
+        val procedures = rows.procedures
+        val historyEvents = rows.historyEvents
+        val familyHistory = rows.familyHistory
+        val measurements = rows.measurements
         val payload = JSONObject()
             .put("format", "sehati-backup")
-            .put("version", 1)
+            .put("version", 2)
             .put("createdAt", System.currentTimeMillis())
             .put("members", JSONArray().apply {
                 members.forEach { m -> put(JSONObject()
                     .put("id", m.id).put("fullName", m.fullName).put("dateOfBirth", m.dateOfBirth)
-                    .put("bloodGroup", m.bloodGroup).put("medicalNotes", m.medicalNotes).put("updatedAt", m.updatedAt)) }
+                    .put("bloodGroup", m.bloodGroup).put("medicalNotes", m.medicalNotes)
+                    .put("sex", m.sex).put("phone", m.phone).put("additionalInfo", m.additionalInfo)
+                    .put("emergencyContactName", m.emergencyContactName).put("emergencyContactPhone", m.emergencyContactPhone)
+                    .put("emergencyContactRelation", m.emergencyContactRelation)
+                    .put("emergencyShowAllergies", m.emergencyShowAllergies)
+                    .put("emergencyShowMedications", m.emergencyShowMedications)
+                    .put("emergencyShowConditions", m.emergencyShowConditions)
+                    .put("emergencyShowNotes", m.emergencyShowNotes).put("updatedAt", m.updatedAt)) }
             })
             .put("allergies", JSONArray().apply {
                 allergies.forEach { a -> put(JSONObject()
@@ -60,13 +87,32 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
                     .put("notes", m.notes).put("isActive", m.isActive)
                     .put("createdAt", m.createdAt).put("updatedAt", m.updatedAt)) }
             })
+            .put("chronicConditions", JSONArray().apply { conditions.forEach { r -> put(JSONObject()
+                .put("id", r.id).put("memberId", r.memberId).put("name", r.name).put("diagnosedOn", r.diagnosedOn)
+                .put("diagnosingDoctor", r.diagnosingDoctor).put("status", r.status).put("treatment", r.treatment)
+                .put("notes", r.notes).put("createdAt", r.createdAt)) } })
+            .put("medicalProcedures", JSONArray().apply { procedures.forEach { r -> put(JSONObject()
+                .put("id", r.id).put("memberId", r.memberId).put("name", r.name).put("performedOn", r.performedOn)
+                .put("facility", r.facility).put("doctor", r.doctor).put("reason", r.reason)
+                .put("complications", r.complications).put("notes", r.notes).put("createdAt", r.createdAt)) } })
+            .put("historyEvents", JSONArray().apply { historyEvents.forEach { r -> put(JSONObject()
+                .put("id", r.id).put("memberId", r.memberId).put("category", r.category).put("title", r.title)
+                .put("eventDate", r.eventDate).put("notes", r.notes).put("createdAt", r.createdAt)) } })
+            .put("familyDiseaseHistory", JSONArray().apply { familyHistory.forEach { r -> put(JSONObject()
+                .put("id", r.id).put("memberId", r.memberId).put("relative", r.relative).put("disease", r.disease)
+                .put("notes", r.notes).put("createdAt", r.createdAt)) } })
+            .put("bodyMeasurements", JSONArray().apply { measurements.forEach { r -> put(JSONObject()
+                .put("id", r.id).put("memberId", r.memberId).put("measuredOn", r.measuredOn)
+                .put("heightCm", r.heightCm ?: JSONObject.NULL).put("weightKg", r.weightKg ?: JSONObject.NULL)
+                .put("notes", r.notes).put("createdAt", r.createdAt)) } })
             .put("documents", JSONArray().apply {
                 documents.forEach { doc ->
                     val plain = documentStore.readPlaintextBytes(doc)
                     try {
                         put(JSONObject().put("id", doc.id).put("memberId", doc.memberId)
                             .put("displayName", doc.displayName).put("mimeType", doc.mimeType)
-                            .put("sizeBytes", doc.sizeBytes).put("addedAt", doc.addedAt)
+                            .put("sizeBytes", doc.sizeBytes).put("relatedProcedureId", doc.relatedProcedureId ?: JSONObject.NULL)
+                            .put("addedAt", doc.addedAt)
                             .put("content", Base64.encodeToString(plain, Base64.NO_WRAP)))
                     } finally { plain.fill(0) }
                 }
@@ -85,7 +131,7 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
 
     suspend fun preview(resolver: ContentResolver, uri: Uri, password: CharArray): BackupPreview {
         val root = decrypt(resolver.openInputStream(uri)!!, password)
-        require(root.optString("format") == "sehati-backup" && root.optInt("version") == 1) {
+        require(root.optString("format") == "sehati-backup" && root.optInt("version") in 1..2) {
             "Unsupported backup file."
         }
         val names = buildList {
@@ -104,7 +150,13 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
             val o = members.getJSONObject(i)
             FamilyMember(id = o.getLong("id"), fullName = o.getString("fullName"),
                 dateOfBirth = o.optString("dateOfBirth"), bloodGroup = o.optString("bloodGroup"),
-                medicalNotes = o.optString("medicalNotes"), updatedAt = o.optLong("updatedAt"))
+                medicalNotes = o.optString("medicalNotes"), sex = o.optString("sex"), phone = o.optString("phone"),
+                additionalInfo = o.optString("additionalInfo"), emergencyContactName = o.optString("emergencyContactName"),
+                emergencyContactPhone = o.optString("emergencyContactPhone"), emergencyContactRelation = o.optString("emergencyContactRelation"),
+                emergencyShowAllergies = o.optBoolean("emergencyShowAllergies", true),
+                emergencyShowMedications = o.optBoolean("emergencyShowMedications", true),
+                emergencyShowConditions = o.optBoolean("emergencyShowConditions", true),
+                emergencyShowNotes = o.optBoolean("emergencyShowNotes", false), updatedAt = o.optLong("updatedAt"))
         }
         val allergyRows = (0 until allergies.length()).map { i ->
             val o = allergies.getJSONObject(i)
@@ -137,6 +189,39 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
                 notes = o.optString("notes"), isActive = o.optBoolean("isActive", true),
                 createdAt = o.optLong("createdAt"), updatedAt = o.optLong("updatedAt"))
         }
+        fun array(name: String) = root.optJSONArray(name) ?: JSONArray()
+        val conditionRows = (0 until array("chronicConditions").length()).map { i ->
+            val o = array("chronicConditions").getJSONObject(i)
+            ChronicCondition(id = o.getLong("id"), memberId = o.getLong("memberId"), name = o.getString("name"),
+                diagnosedOn = o.optString("diagnosedOn"), diagnosingDoctor = o.optString("diagnosingDoctor"),
+                status = o.optString("status", "نشط"), treatment = o.optString("treatment"),
+                notes = o.optString("notes"), createdAt = o.optLong("createdAt"))
+        }
+        val procedureRows = (0 until array("medicalProcedures").length()).map { i ->
+            val o = array("medicalProcedures").getJSONObject(i)
+            MedicalProcedure(id = o.getLong("id"), memberId = o.getLong("memberId"), name = o.getString("name"),
+                performedOn = o.optString("performedOn"), facility = o.optString("facility"), doctor = o.optString("doctor"),
+                reason = o.optString("reason"), complications = o.optString("complications"),
+                notes = o.optString("notes"), createdAt = o.optLong("createdAt"))
+        }
+        val historyRows = (0 until array("historyEvents").length()).map { i ->
+            val o = array("historyEvents").getJSONObject(i)
+            MedicalHistoryEvent(id = o.getLong("id"), memberId = o.getLong("memberId"), category = o.getString("category"),
+                title = o.getString("title"), eventDate = o.optString("eventDate"), notes = o.optString("notes"),
+                createdAt = o.optLong("createdAt"))
+        }
+        val familyHistoryRows = (0 until array("familyDiseaseHistory").length()).map { i ->
+            val o = array("familyDiseaseHistory").getJSONObject(i)
+            FamilyDiseaseHistory(id = o.getLong("id"), memberId = o.getLong("memberId"), relative = o.getString("relative"),
+                disease = o.getString("disease"), notes = o.optString("notes"), createdAt = o.optLong("createdAt"))
+        }
+        val measurementRows = (0 until array("bodyMeasurements").length()).map { i ->
+            val o = array("bodyMeasurements").getJSONObject(i)
+            BodyMeasurement(id = o.getLong("id"), memberId = o.getLong("memberId"), measuredOn = o.getString("measuredOn"),
+                heightCm = if (o.isNull("heightCm")) null else o.getDouble("heightCm"),
+                weightKg = if (o.isNull("weightKg")) null else o.getDouble("weightKg"),
+                notes = o.optString("notes"), createdAt = o.optLong("createdAt"))
+        }
         val documentArray = root.optJSONArray("documents") ?: JSONArray()
         val documentRows = (0 until documentArray.length()).map { i ->
             val o = documentArray.getJSONObject(i)
@@ -146,15 +231,25 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
             MedicalDocument(id = id, memberId = memberId,
                 displayName = o.getString("displayName"), relativePath = relativePath,
                 mimeType = o.optString("mimeType", "application/pdf"),
-                sizeBytes = o.optLong("sizeBytes"), addedAt = o.optLong("addedAt"))
+                sizeBytes = o.optLong("sizeBytes"),
+                relatedProcedureId = if (o.isNull("relatedProcedureId")) null else o.optLong("relatedProcedureId"),
+                addedAt = o.optLong("addedAt"))
         }
         require(allergyRows.all { row -> memberRows.any { it.id == row.memberId } } &&
             labRows.all { row -> memberRows.any { it.id == row.memberId } } &&
             medicationRows.all { row -> memberRows.any { it.id == row.memberId } } &&
-            documentRows.all { row -> memberRows.any { it.id == row.memberId } }) {
+            documentRows.all { row -> memberRows.any { it.id == row.memberId } } &&
+            conditionRows.all { row -> memberRows.any { it.id == row.memberId } } &&
+            procedureRows.all { row -> memberRows.any { it.id == row.memberId } } &&
+            historyRows.all { row -> memberRows.any { it.id == row.memberId } } &&
+            familyHistoryRows.all { row -> memberRows.any { it.id == row.memberId } } &&
+            measurementRows.all { row -> memberRows.any { it.id == row.memberId } } &&
+            documentRows.all { row -> row.relatedProcedureId == null || procedureRows.any { it.id == row.relatedProcedureId && it.memberId == row.memberId } }) {
             "Backup contains records without a matching family member."
         }
         val createdFiles = mutableListOf<MedicalDocument>()
+        var databaseCommitted = false
+        val oldDocuments = database.medicalDao().getAllDocuments()
         try {
             documentRows.forEachIndexed { index, row ->
                 val encoded = documentArray.getJSONObject(index).getString("content")
@@ -163,9 +258,13 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
                 finally { plain.fill(0) }
             }
             val dao = database.medicalDao()
-            val oldDocuments = dao.getAllDocuments()
             database.withTransaction {
                 dao.clearAllergies()
+                dao.clearConditions()
+                dao.clearProcedures()
+                dao.clearHistoryEvents()
+                dao.clearFamilyDiseaseHistory()
+                dao.clearBodyMeasurements()
                 dao.clearLabResults()
                 dao.clearDocuments()
                 dao.clearMedications()
@@ -174,13 +273,20 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
                 dao.insertAllergies(allergyRows)
                 dao.insertLabResults(labRows)
                 dao.insertMedications(medicationRows)
+                dao.insertConditions(conditionRows)
+                dao.insertProcedures(procedureRows)
+                dao.insertHistoryEvents(historyRows)
+                dao.insertFamilyDiseaseHistory(familyHistoryRows)
+                dao.insertBodyMeasurements(measurementRows)
                 dao.insertDocuments(createdFiles)
             }
-            oldDocuments.forEach(documentStore::delete)
+            databaseCommitted = true
         } catch (error: Exception) {
-            createdFiles.forEach(documentStore::delete)
+            if (!databaseCommitted) createdFiles.forEach { runCatching { documentStore.delete(it) } }
             throw error
         }
+        // File cleanup after the DB commit is best effort; never delete newly restored files on cleanup failure.
+        oldDocuments.forEach { runCatching { documentStore.delete(it) } }
     }
 
     private fun decrypt(input: InputStream, password: CharArray): JSONObject {
@@ -207,6 +313,11 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
 
     data class BackupPreview(val memberNames: List<String>, val allergyCount: Int, internal val payload: JSONObject) {
         val labResultCount: Int get() = payload.optJSONArray("labResults")?.length() ?: 0
+        val conditionCount: Int get() = payload.optJSONArray("chronicConditions")?.length() ?: 0
+        val procedureCount: Int get() = payload.optJSONArray("medicalProcedures")?.length() ?: 0
+        val historyEventCount: Int get() = payload.optJSONArray("historyEvents")?.length() ?: 0
+        val familyHistoryCount: Int get() = payload.optJSONArray("familyDiseaseHistory")?.length() ?: 0
+        val measurementCount: Int get() = payload.optJSONArray("bodyMeasurements")?.length() ?: 0
         val documentCount: Int get() = payload.optJSONArray("documents")?.length() ?: 0
         val medicationCount: Int get() = payload.optJSONArray("medications")?.length() ?: 0
         val documentNames: List<String> get() = buildList {

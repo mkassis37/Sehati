@@ -7,11 +7,22 @@ import android.util.Base64OutputStream
 import androidx.room.withTransaction
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import java.io.BufferedInputStream
+import java.io.DataInputStream
+import java.io.DataOutputStream
+import java.io.EOFException
+import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
+import java.io.FilterInputStream
 import java.io.FilterOutputStream
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
+import java.io.PushbackInputStream
+import java.security.MessageDigest
 import java.security.SecureRandom
 import javax.crypto.Cipher
 import javax.crypto.CipherOutputStream
@@ -69,13 +80,7 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
         val measurements = rows.measurements
         val payload = JSONObject()
             .put("format", "sehati-backup")
-            .put("version", when {
-                documents.any { it.category != "OTHER" || it.documentDate.isNotBlank() || it.relatedLabResultId != null } -> 6
-                rows.doses.isNotEmpty() || medications.any { it.completed } -> 5
-                rows.appointments.isNotEmpty() -> 4
-                labResults.any { it.qualitativeValue != null } -> 3
-                else -> 2
-            })
+            .put("version", 7)
             .put("createdAt", System.currentTimeMillis())
             .put("members", JSONArray().apply {
                 members.forEach { m -> put(JSONObject()
@@ -149,57 +154,80 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
                     .put("diagnosis", a.diagnosis).put("recommendations", a.recommendations)
                     .put("createdAt", a.createdAt)) }
             })
+            .put("documents", JSONArray().apply {
+                documents.forEach { doc -> put(documentMetadata(doc)) }
+            })
 
-        val salt = ByteArray(16).also(SecureRandom()::nextBytes)
-        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-        cipher.init(Cipher.ENCRYPT_MODE, derive(password, salt))
-        checkNotNull(resolver.openOutputStream(uri, "wt")).buffered().use { destination ->
-            val bounded = BackupLimitOutput(destination)
-            bounded.write(MAGIC)
-            bounded.write(1)
-            bounded.write(salt)
-            bounded.write(cipher.iv)
-            CipherOutputStream(bounded, cipher).use { encrypted ->
-                fun json(text: String) { encrypted.write(text.toByteArray(Charsets.UTF_8)) }
-                json(payload.toString().dropLast(1))
-                json(",\"documents\":[")
-                documents.forEachIndexed { index, doc ->
-                    if (index > 0) json(",")
-                    val metadata = JSONObject().put("id", doc.id).put("memberId", doc.memberId)
-                        .put("displayName", doc.displayName).put("mimeType", doc.mimeType)
-                        .put("sizeBytes", doc.sizeBytes).put("relatedProcedureId", doc.relatedProcedureId ?: JSONObject.NULL)
-                        .put("addedAt", doc.addedAt)
-                        .put("relatedAppointmentId", doc.relatedAppointmentId ?: JSONObject.NULL)
-                        .put("relatedLabResultId", doc.relatedLabResultId ?: JSONObject.NULL)
-                        .put("category", doc.category).put("documentDate", doc.documentDate)
-                    json(metadata.toString().dropLast(1))
-                    json(",\"content\":\"")
-                    Base64OutputStream(encrypted, Base64.NO_WRAP or Base64.NO_CLOSE).use {
-                        documentStore.copyPlaintextTo(doc, it)
-                    }
-                    json("\"}")
-                }
-                json("]}")
-            }
-        }
+        writeVersionTwo(resolver, uri, payload, documents, password)
     }
 
     suspend fun preview(resolver: ContentResolver, uri: Uri, password: CharArray): BackupPreview = withContext(Dispatchers.IO) {
-        val root = try {
-            decrypt(checkNotNull(resolver.openInputStream(uri)), password)
+        var stagedFile: File? = null
+        var stagedKey: ByteArray? = null
+        try {
+            val source = resolver.openInputStream(uri) ?: throw IOException("تعذر فتح ملف النسخة الاحتياطية.")
+            val pushback = PushbackInputStream(source, 5)
+            val prefix = ByteArray(5)
+            readFully(pushback, prefix)
+            pushback.unread(prefix)
+            when (prefix[4].toInt() and 0xff) {
+                LEGACY_CONTAINER_VERSION -> {
+                    val root = decrypt(pushback, password)
+                    require(root.optString("format") == "sehati-backup" && root.optInt("version") in 1..6) {
+                        "Unsupported legacy backup file."
+                    }
+                    createPreview(root)
+                }
+                STREAMING_CONTAINER_VERSION -> {
+                    val archive = documentStore.createBackupPreviewFile()
+                    stagedFile = archive
+                    pushback.use { input ->
+                        FileOutputStream(archive).use { output ->
+                            input.copyTo(BackupLimitOutput(output), STREAM_BUFFER_SIZE)
+                        }
+                    }
+                    val parsed = readVersionTwoManifest(archive, password)
+                    stagedKey = parsed.keyBytes
+                    validateVersionTwoArchiveLength(archive, parsed.root, parsed.manifestCipherLength)
+                    require(parsed.root.optString("format") == "sehati-backup" && parsed.root.optInt("version") == 7) {
+                        "Unsupported streaming backup payload."
+                    }
+                    val result = createPreview(parsed.root).copy(
+                        stagedArchivePath = archive.absolutePath,
+                        archiveKeyBytes = parsed.keyBytes,
+                        manifestDigest = parsed.manifestDigest
+                    )
+                    stagedFile = null
+                    stagedKey = null
+                    result
+                }
+                else -> throw IOException("صيغة ملف النسخة الاحتياطية غير معروفة.")
+            }
+        } catch (error: Exception) {
+            stagedKey?.fill(0)
+            stagedFile?.delete()
+            throw error
         } finally {
             password.fill('\u0000')
         }
-        require(root.optString("format") == "sehati-backup" && root.optInt("version") in 1..6) {
-            "Unsupported backup file."
-        }
+    }
+
+    private fun createPreview(root: JSONObject): BackupPreview {
         val names = buildList {
             val members = root.getJSONArray("members")
             for (i in 0 until members.length()) add(members.getJSONObject(i).optString("fullName"))
         }
-        BackupPreview(names, root.getJSONArray("allergies").length(), root)
+        return BackupPreview(names, root.getJSONArray("allergies").length(), root)
     }
 
+    fun discardPreview(preview: BackupPreview) {
+        preview.archiveKeyBytes?.fill(0)
+        documentStore.deleteBackupPreviewFile(preview.stagedArchivePath)
+    }
+
+    fun clearStalePreviewFiles() {
+        documentStore.clearBackupPreviewFiles()
+    }
     suspend fun restore(preview: BackupPreview) = withContext(Dispatchers.IO) {
         backupLock.withLock { restoreInternal(preview) }
     }
@@ -444,7 +472,14 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
         return try { SecretKeySpec(bytes, "AES") } finally { bytes.fill(0) }
     }
 
-    data class BackupPreview(val memberNames: List<String>, val allergyCount: Int, internal val payload: JSONObject) {
+    data class BackupPreview(
+        val memberNames: List<String>,
+        val allergyCount: Int,
+        internal val payload: JSONObject,
+        internal val stagedArchivePath: String? = null,
+        internal val archiveKeyBytes: ByteArray? = null,
+        internal val manifestDigest: String? = null
+    ) {
         val labResultCount: Int get() = payload.optJSONArray("labResults")?.length() ?: 0
         val conditionCount: Int get() = payload.optJSONArray("chronicConditions")?.length() ?: 0
         val procedureCount: Int get() = payload.optJSONArray("medicalProcedures")?.length() ?: 0

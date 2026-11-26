@@ -49,6 +49,7 @@ import com.mkassis37.sehati.data.BodyMeasurement
 import com.mkassis37.sehati.data.ChronicCondition
 import com.mkassis37.sehati.data.FamilyDiseaseHistory
 import com.mkassis37.sehati.data.FamilyMember
+import com.mkassis37.sehati.data.MedicalAppointment
 import com.mkassis37.sehati.data.MedicalDocument
 import com.mkassis37.sehati.data.displayValue
 import com.mkassis37.sehati.data.MedicalHistoryEvent
@@ -70,6 +71,7 @@ internal fun MedicalHealthScreen(
     allergies: List<AllergyRecord>, medications: List<MedicationRecord>, labResults: List<com.mkassis37.sehati.data.LabResult>, documents: List<MedicalDocument>,
     conditions: List<ChronicCondition>, procedures: List<MedicalProcedure>, history: List<MedicalHistoryEvent>,
     familyHistory: List<FamilyDiseaseHistory>, measurements: List<BodyMeasurement>,
+    appointments: List<MedicalAppointment>,
     onSaveMember: suspend (FamilyMember) -> Unit,
     onAddCondition: suspend (ChronicCondition) -> Unit, onUpdateCondition: suspend (ChronicCondition) -> Unit,
     onDeleteCondition: suspend (Long) -> Unit,
@@ -85,13 +87,14 @@ internal fun MedicalHealthScreen(
     onDeleteDocument: (MedicalDocument) -> Unit,
     onOpenLabResults: () -> Unit,
     onOpenAllergies: () -> Unit,
-    onOpenMedications: () -> Unit
+    onOpenMedications: () -> Unit,
+    onOpenAppointments: () -> Unit
 ) {
     val scope = rememberCoroutineScope()
     var tab by rememberSaveable(member.id, initialTab) { mutableIntStateOf(initialTab) }
     var editor by remember(member.id) { mutableStateOf<EditorState?>(null) }
     var emergencyEditor by remember(member.id) { mutableStateOf(false) }
-    var attachProcedureId by remember { mutableStateOf<Long?>(null) }
+    var attachProcedureId by rememberSaveable(member.id) { mutableStateOf<Long?>(null) }
     var error by remember(member.id) { mutableStateOf("") }
     val attachmentPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         val procedureId = attachProcedureId
@@ -133,8 +136,8 @@ internal fun MedicalHealthScreen(
                 detailOf = { it.notes }, add = { editor = EditorState("measurement", null) }, edit = { editor = EditorState("measurement", it.id) },
                 delete = { row -> scope.launch { onDeleteMeasurement(row.id) } })
             6 -> EmergencyPanel(member, allergies, medications, conditions, onEdit = { emergencyEditor = true })
-            else -> TimelinePanel(buildTimeline(conditions, procedures, history, familyHistory, allergies, medications, labResults, documents, measurements), onOpen = { section ->
-                when (section) { 8 -> onOpenLabResults(); 9 -> onOpenAllergies(); 10 -> onOpenMedications(); else -> tab = section }
+            else -> TimelinePanel(buildTimeline(conditions, procedures, history, familyHistory, allergies, medications, labResults, documents, measurements, appointments), onOpen = { section ->
+                when (section) { 8 -> onOpenLabResults(); 9 -> onOpenAllergies(); 10 -> onOpenMedications(); 11 -> onOpenAppointments(); else -> tab = section }
             })
         }
     }
@@ -338,7 +341,7 @@ private fun TimelinePanel(items: List<MedicalTimelineItem>, onOpen: (Int) -> Uni
     }
 }
 
-private fun buildTimeline(conditions: List<ChronicCondition>, procedures: List<MedicalProcedure>, history: List<MedicalHistoryEvent>, familyHistory: List<FamilyDiseaseHistory>, allergies: List<AllergyRecord>, medications: List<MedicationRecord>, labResults: List<com.mkassis37.sehati.data.LabResult>, documents: List<MedicalDocument>, measurements: List<BodyMeasurement>) = buildList {
+private fun buildTimeline(conditions: List<ChronicCondition>, procedures: List<MedicalProcedure>, history: List<MedicalHistoryEvent>, familyHistory: List<FamilyDiseaseHistory>, allergies: List<AllergyRecord>, medications: List<MedicationRecord>, labResults: List<com.mkassis37.sehati.data.LabResult>, documents: List<MedicalDocument>, measurements: List<BodyMeasurement>, appointments: List<MedicalAppointment>) = buildList {
     conditions.forEach { add(MedicalTimelineItem(it.diagnosedOn, "حالة صحية: ${it.name}", it.status, 1)) }
     procedures.forEach { add(MedicalTimelineItem(it.performedOn, "إجراء طبي: ${it.name}", it.facility, 2)) }
     history.forEach { add(MedicalTimelineItem(it.eventDate, "${it.category}: ${it.title}", it.notes, 3)) }
@@ -348,6 +351,7 @@ private fun buildTimeline(conditions: List<ChronicCondition>, procedures: List<M
     medications.filter { !it.isActive && it.endDate.isNotBlank() }.forEach { add(MedicalTimelineItem(it.endDate, "إيقاف دواء: ${it.name}", it.endDate, 10)) }
     labResults.forEach { add(MedicalTimelineItem(it.performedAt, "فحص: ${it.testName}", it.displayValue, 8)) }
     documents.forEach { add(MedicalTimelineItem(Instant.ofEpochMilli(it.addedAt).atZone(ZoneId.systemDefault()).toLocalDate().toString(), "مرفق: ${it.displayName}", "الوثائق والتحاليل", 8)) }
+    appointments.forEach { add(MedicalTimelineItem(it.date, "موعد: ${it.doctor}", listOf(it.time, it.facility, it.reason).filter(String::isNotBlank).joinToString(" • "), 11)) }
     measurements.forEach { add(MedicalTimelineItem(it.measuredOn, "قياس جسدي", listOfNotNull(it.heightCm?.let { h -> "$h سم" }, it.weightKg?.let { w -> "$w كغ" }).joinToString(" • "), 5)) }
 }.sortedByDescending { it.date }
 

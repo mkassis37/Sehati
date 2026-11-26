@@ -31,7 +31,8 @@ internal fun MedicationScreen(
 ) {
     val scope = rememberCoroutineScope()
     var selectedDoseMedicationId by rememberSaveable(member.id) { mutableStateOf<Long?>(null) }
-    var editing by remember { mutableStateOf<MedicationRecord?>(null) }
+    var editingId by rememberSaveable(member.id) { mutableStateOf<Long?>(null) }
+    val editing = records.firstOrNull { it.id == editingId }
     var showForm by rememberSaveable(member.id) { mutableStateOf(false) }
     var showInactive by rememberSaveable(member.id) { mutableStateOf(false) }
     val active = records.filter { it.isActive && !it.completed && (it.endDate.isEmpty() || it.endDate >= LocalDate.now().toString()) }
@@ -43,7 +44,7 @@ internal fun MedicationScreen(
             Text("العلاجات الحالية: ${active.size}")
             TextButton(onClick = { showInactive = !showInactive }) { Text(if (showInactive) "إخفاء العلاجات السابقة" else "عرض العلاجات السابقة") }
         }
-        Button(onClick = { editing = null; showForm = true }, modifier = Modifier.fillMaxWidth()) { Text("إضافة دواء أو علاج") }
+        Button(onClick = { editingId = null; showForm = true }, modifier = Modifier.fillMaxWidth()) { Text("إضافة دواء أو علاج") }
         if (visible.isEmpty()) {
             Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(if (showInactive) "لا توجد أدوية مسجلة." else "لا توجد علاجات حالية.")
@@ -86,7 +87,7 @@ internal fun MedicationScreen(
                                 }
                             }
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                TextButton(onClick = { editing = record; showForm = true }) { Text("تعديل") }
+                                TextButton(onClick = { editingId = record.id; showForm = true }) { Text("تعديل") }
                                 TextButton(onClick = { scope.launch { deleteMedication(record) } }) { Text("حذف", color = MaterialTheme.colorScheme.error) }
                             }
                         }
@@ -101,11 +102,11 @@ internal fun MedicationScreen(
             onRecordDose, onDismiss = { selectedDoseMedicationId = null }
         )
     }
-    if (showForm) MedicationEditor(member.id, editing, { showForm = false; editing = null }, { record ->
+    if (showForm && (editingId == null || editing != null)) MedicationEditor(member.id, editing, { showForm = false; editingId = null }, { record ->
         scope.launch {
             if (editing == null) addMedication(record) else updateMedication(record)
             showForm = false
-            editing = null
+            editingId = null
         }
     })
 }
@@ -125,17 +126,17 @@ private fun MedicationEditor(
     onDismiss: () -> Unit,
     onSave: (MedicationRecord) -> Unit
 ) {
-    var name by remember(initial?.id) { mutableStateOf(initial?.name.orEmpty()) }
-    var strength by remember(initial?.id) { mutableStateOf(initial?.strength.orEmpty()) }
-    var dosage by remember(initial?.id) { mutableStateOf(initial?.dosage.orEmpty()) }
-    var form by remember(initial?.id) { mutableStateOf(initial?.form.orEmpty()) }
-    var frequency by remember(initial?.id) { mutableStateOf(initial?.frequency.orEmpty()) }
-    var times by remember(initial?.id) { mutableStateOf(initial?.scheduledTimes.orEmpty()) }
-    var start by remember(initial?.id) { mutableStateOf(initial?.startDate ?: LocalDate.now().toString()) }
-    var end by remember(initial?.id) { mutableStateOf(initial?.endDate.orEmpty()) }
-    var doctor by remember(initial?.id) { mutableStateOf(initial?.prescribingDoctor.orEmpty()) }
-    var instructions by remember(initial?.id) { mutableStateOf(initial?.instructions.orEmpty()) }
-    var notes by remember(initial?.id) { mutableStateOf(initial?.notes.orEmpty()) }
+    var name by rememberSaveable(initial?.id) { mutableStateOf(initial?.name.orEmpty()) }
+    var strength by rememberSaveable(initial?.id) { mutableStateOf(initial?.strength.orEmpty()) }
+    var dosage by rememberSaveable(initial?.id) { mutableStateOf(initial?.dosage.orEmpty()) }
+    var form by rememberSaveable(initial?.id) { mutableStateOf(initial?.form.orEmpty()) }
+    var frequency by rememberSaveable(initial?.id) { mutableStateOf(initial?.frequency.orEmpty()) }
+    var times by rememberSaveable(initial?.id) { mutableStateOf(initial?.scheduledTimes.orEmpty()) }
+    var start by rememberSaveable(initial?.id) { mutableStateOf(initial?.startDate ?: LocalDate.now().toString()) }
+    var end by rememberSaveable(initial?.id) { mutableStateOf(initial?.endDate.orEmpty()) }
+    var doctor by rememberSaveable(initial?.id) { mutableStateOf(initial?.prescribingDoctor.orEmpty()) }
+    var instructions by rememberSaveable(initial?.id) { mutableStateOf(initial?.instructions.orEmpty()) }
+    var notes by rememberSaveable(initial?.id) { mutableStateOf(initial?.notes.orEmpty()) }
     var error by remember { mutableStateOf("") }
     AlertDialog(onDismissRequest = onDismiss, title = { Text(if (initial == null) "إضافة دواء أو علاج" else "تعديل العلاج") },
         text = {

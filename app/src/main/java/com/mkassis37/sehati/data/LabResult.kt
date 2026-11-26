@@ -29,3 +29,6 @@ data class LabResult(
 internal val LabResult.displayValue: String
     get() = listOfNotNull(qualitativeValue ?: value?.toString(), unit.takeIf { it.isNotBlank() })
         .joinToString(" ")
+
+internal fun LabResult.hasSameReferenceRange(other: LabResult): Boolean =
+    referenceLow == other.referenceLow && referenceHigh == other.referenceHigh

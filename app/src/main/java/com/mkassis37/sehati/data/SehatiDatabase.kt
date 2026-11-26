@@ -72,6 +72,12 @@ abstract class SehatiDatabase : RoomDatabase() {
         document
     }
 
+    suspend fun updateMemberLabResult(record: LabResult, memberId: Long): Boolean = withTransaction {
+        require(record.memberId == memberId)
+        val dao = medicalDao()
+        dao.ownsLabResult(record.id, memberId) && dao.updateLabResult(record) == 1
+    }
+
     suspend fun deleteLabResultAndUnlinkAttachments(id: Long, memberId: Long) = withTransaction {
         val dao = medicalDao()
         dao.unlinkLabDocuments(id, memberId)

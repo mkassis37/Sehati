@@ -71,8 +71,9 @@ internal fun AppointmentScreen(
     val today = LocalDate.now()
     var selectedDay by rememberSaveable(member.id) { mutableStateOf(today.toString()) }
     var view by rememberSaveable(member.id) { mutableStateOf(CalendarView.MONTH) }
-    var showEditor by remember(member.id) { mutableStateOf(false) }
-    var editing by remember(member.id) { mutableStateOf<MedicalAppointment?>(null) }
+    var showEditor by rememberSaveable(member.id) { mutableStateOf(false) }
+    var editingId by rememberSaveable(member.id) { mutableStateOf<Long?>(null) }
+    val editing = appointments.firstOrNull { it.id == editingId }
     var deleting by remember(member.id) { mutableStateOf<MedicalAppointment?>(null) }
     var deletingNow by remember(member.id) { mutableStateOf(false) }
     var error by remember(member.id) { mutableStateOf("") }
@@ -155,7 +156,7 @@ internal fun AppointmentScreen(
             if (view != CalendarView.HISTORY) {
                 Text(if (view == CalendarView.WEEK) "مواعيد الأسبوع" else day.format(dayTitle))
             }
-            Button(onClick = { editing = null; showEditor = true }, modifier = Modifier.fillMaxWidth()) {
+            Button(onClick = { editingId = null; showEditor = true }, modifier = Modifier.fillMaxWidth()) {
                 Text("إضافة موعد")
             }
             if (error.isNotEmpty()) Text(error, color = MaterialTheme.colorScheme.error)
@@ -167,12 +168,12 @@ internal fun AppointmentScreen(
                 documents.filter { it.relatedAppointmentId == record.id },
                 onAttach = { onAttach(record) },
                 onOpenDocument = onOpenDocument,
-                onEdit = { editing = record; showEditor = true },
+                onEdit = { editingId = record.id; showEditor = true },
                 onDelete = { deleting = record }
             )
         }
     }
-    if (showEditor) AppointmentEditor(member.id, selectedDay, editing, { showEditor = false }) { record ->
+    if (showEditor && (editingId == null || editing != null)) AppointmentEditor(member.id, selectedDay, editing, { showEditor = false }) { record ->
         val saved = onSave(record)
         if (saved && view != CalendarView.HISTORY) selectedDay = record.date
         saved

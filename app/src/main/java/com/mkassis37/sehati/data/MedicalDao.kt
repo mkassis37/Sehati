@@ -176,6 +176,9 @@ interface MedicalDao {
     @Insert
     suspend fun addLabResult(record: LabResult): Long
 
+    @Update
+    suspend fun updateLabResult(record: LabResult): Int
+
     @Query("DELETE FROM lab_results WHERE id = :recordId AND memberId = :memberId")
     suspend fun deleteLabResult(recordId: Long, memberId: Long)
 

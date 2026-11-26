@@ -1,7 +1,6 @@
 package com.mkassis37.sehati
 
 import android.os.Bundle
-import android.content.Intent
 import android.os.Build
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
@@ -10,7 +9,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
-import androidx.core.content.FileProvider
 import androidx.fragment.app.FragmentActivity
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -24,6 +22,9 @@ import com.mkassis37.sehati.reports.MedicalReportScreen
 import com.mkassis37.sehati.reports.rememberMedicalReportActions
 import com.mkassis37.sehati.reports.reportRecords
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import com.mkassis37.sehati.data.EncryptedBackup
 import com.mkassis37.sehati.data.BackupSizeLimitException
 import com.mkassis37.sehati.data.BackupStatusStore
@@ -100,12 +101,13 @@ class MainActivity : FragmentActivity() {
             }
             return
         }
-        window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN or WindowManager.LayoutParams.FLAG_SECURE)
+        window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        if (savedInstanceState == null) window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
         setContent {
             val appearanceStore = remember { AppearanceSettingsStore(applicationContext) }
             val appearance by appearanceStore.settings.collectAsState(initial = AppearanceSettings())
             val appearanceScope = rememberCoroutineScope()
-            var showSplash by rememberSaveable { mutableStateOf(savedInstanceState == null) }
+            var showSplash by remember { mutableStateOf(savedInstanceState == null) }
             SehatiTheme(appearance = appearance) {
                 CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
                     if (showSplash) {
@@ -188,6 +190,7 @@ private fun SehatiApp(
     var backupPassword by remember { mutableStateOf("") }
     var backupUri by remember { mutableStateOf<Uri?>(null) }
     var backupPreview by remember { mutableStateOf<EncryptedBackup.BackupPreview?>(null) }
+    var restoringBackup by remember { mutableStateOf(false) }
     var backupMessage by remember { mutableStateOf("") }
     val driveAuthorization = rememberDriveAuthorization(backup) {
         settingsSection = SettingsSection.DRIVE
@@ -289,6 +292,35 @@ private fun SehatiApp(
         if (selectedId == null || selectedId == memberId) {
             selectedId = memberId
             screen = Screen.DOCUMENTS
+        }
+    }
+
+    suspend fun saveMemberDocument(
+        uri: Uri, memberId: Long, fallbackName: String, category: DocumentCategory,
+        procedureId: Long? = null
+    ) {
+        withContext(Dispatchers.IO + NonCancellable) {
+            val name = context.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)
+                ?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null } ?: fallbackName
+            val document = documentStore.save(uri, memberId, name)
+            try {
+                db.addLinkedDocument(document.copy(category = category.name, relatedProcedureId = procedureId))
+            } catch (error: Exception) {
+                documentStore.delete(document)
+                throw error
+            }
+        }
+    }
+
+    fun deleteMemberDocument(document: MedicalDocument) {
+        scope.launch {
+            try {
+                documentLibrary.delete(document)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                android.widget.Toast.makeText(context, "تعذر حذف المرفق.", android.widget.Toast.LENGTH_LONG).show()
+            }
         }
     }
 
@@ -468,7 +500,7 @@ private fun SehatiApp(
             Screen.HEALTH_RECORDS -> if (selected != null) {
                 MedicalHealthScreen(
                     member = selected, initialTab = healthInitialTab, allergies = allergies, medications = medications, labResults = labResults, documents = medicalDocuments,
-                    conditions = conditions, procedures = procedures, history = historyEvents,
+                    conditions = conditions, procedures = procedures, history = historyEvents, appointments = appointments,
                     familyHistory = familyHistory, measurements = measurements,
                     onSaveMember = { dao.updateMember(it) },
                     onAddCondition = { dao.addCondition(it); Unit }, onUpdateCondition = { dao.updateCondition(it) },
@@ -476,10 +508,7 @@ private fun SehatiApp(
                     onAddProcedure = { dao.addProcedure(it); Unit }, onUpdateProcedure = { dao.updateProcedure(it) },
                     onDeleteProcedure = { db.deleteProcedureAndUnlinkAttachments(it, selected.id) },
                     onAttachProcedure = { procedureId, uri ->
-                        val name = context.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)
-                            ?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null } ?: "مرفق العملية"
-                        dao.addDocument(documentStore.save(uri, selected.id, name).copy(relatedProcedureId = procedureId))
-                        Unit
+                        saveMemberDocument(uri, selected.id, "مرفق العملية", DocumentCategory.PROCEDURE, procedureId)
                     },
                     onAddHistory = { dao.addHistoryEvent(it); Unit }, onUpdateHistory = { dao.updateHistoryEvent(it) },
                     onDeleteHistory = { dao.deleteHistoryEvent(it, selected.id) },
@@ -487,91 +516,54 @@ private fun SehatiApp(
                     onDeleteFamilyHistory = { dao.deleteFamilyDiseaseHistory(it, selected.id) },
                     onAddMeasurement = { dao.addBodyMeasurement(it); Unit }, onUpdateMeasurement = { dao.updateBodyMeasurement(it) },
                     onDeleteMeasurement = { dao.deleteBodyMeasurement(it, selected.id) },
-                    onOpenDocument = { document ->
-                        scope.launch {
-                            try {
-                                val file = documentStore.createTemporaryFile(document)
-                                val uri = FileProvider.getUriForFile(context, context.packageName + ".fileprovider", file)
-                                context.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, document.mimeType).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
-                            } catch (_: Exception) { android.widget.Toast.makeText(context, "تعذر فتح المرفق.", android.widget.Toast.LENGTH_LONG).show() }
-                        }
-                    },
-                    onDeleteDocument = { document ->
-                        scope.launch {
-                            runCatching {
-                                dao.deleteDocument(document.id, selected.id)
-                                documentStore.clearTemporaryDocument(document.id)
-                                documentStore.delete(document)
-                            }.onFailure { android.widget.Toast.makeText(context, "تعذر حذف المرفق وتنظيف الملف المشفر.", android.widget.Toast.LENGTH_LONG).show() }
-                        }
-                    },
+                    onOpenDocument = documentLibrary.open,
+                    onDeleteDocument = ::deleteMemberDocument,
                     onOpenLabResults = { screen = Screen.LAB_RESULTS },
                     onOpenAllergies = { screen = Screen.ALLERGIES },
                     onOpenMedications = { screen = Screen.MEDICATIONS },
+                    onOpenAppointments = { screen = Screen.APPOINTMENTS },
                     modifier = Modifier.padding(padding)
                 )
             }
 
             Screen.FORM -> {
                 val editing = members.firstOrNull { it.id == editingId }
-                MemberFormScreen(editing,
-                    onCancel = { screen = if (editingId == null) Screen.MEMBERS else Screen.DETAILS },
-                    onSave = { name, dob, blood, notes, sex, phone, additionalInfo ->
-                        if (editing == null) {
-                            selectedId = dao.addMember(FamilyMember(
-                                fullName = name, dateOfBirth = dob, bloodGroup = blood,
-                                medicalNotes = notes, sex = sex, phone = phone, additionalInfo = additionalInfo,
-                                updatedAt = System.currentTimeMillis()
-                            ))
-                        } else {
-                            dao.updateMember(editing.copy(
-                                fullName = name, dateOfBirth = dob, bloodGroup = blood,
-                                medicalNotes = notes, sex = sex, phone = phone, additionalInfo = additionalInfo,
-                                updatedAt = System.currentTimeMillis()
-                            ))
-                            selectedId = editing.id
-                        }
-                        screen = Screen.DETAILS
-                    }, Modifier.padding(padding))
+                if (editingId != null && editing == null) {
+                    Text("بيانات الفرد غير متاحة.", Modifier.padding(padding).padding(16.dp))
+                } else {
+                    MemberFormScreen(editing,
+                        onCancel = { screen = if (editingId == null) Screen.MEMBERS else Screen.DETAILS },
+                        onSave = { name, dob, blood, notes, sex, phone, additionalInfo ->
+                            if (editing == null) {
+                                selectedId = dao.addMember(FamilyMember(
+                                    fullName = name, dateOfBirth = dob, bloodGroup = blood,
+                                    medicalNotes = notes, sex = sex, phone = phone, additionalInfo = additionalInfo,
+                                    updatedAt = System.currentTimeMillis()
+                                ))
+                            } else {
+                                dao.updateMember(editing.copy(
+                                    fullName = name, dateOfBirth = dob, bloodGroup = blood,
+                                    medicalNotes = notes, sex = sex, phone = phone, additionalInfo = additionalInfo,
+                                    updatedAt = System.currentTimeMillis()
+                                ))
+                                selectedId = editing.id
+                            }
+                            screen = Screen.DETAILS
+                        }, Modifier.padding(padding))
+                }
             }
 
             Screen.LAB_RESULTS -> if (selected != null) {
                 LabResultsScreen(
                     selected, labResults, medicalDocuments,
-                    addResult = { dao.addLabResult(it) },
+                    saveResult = { record ->
+                        if (record.id == 0L) dao.addLabResult(record) > 0
+                        else db.updateMemberLabResult(record, selected.id)
+                    },
                     deleteResult = { db.deleteLabResultAndUnlinkAttachments(it, selected.id) },
-                    saveDocument = { uri ->
-                        val name = context.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)
-                            ?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
-                            ?: "تقرير طبي.pdf"
-                        val saved = documentStore.save(uri, selected.id, name)
-                        dao.addDocument(saved)
-                        Unit
-                    },
-                    openDocument = { document ->
-                        scope.launch {
-                            try {
-                                val file = documentStore.createTemporaryFile(document)
-                                val contentUri = FileProvider.getUriForFile(context, context.packageName + ".fileprovider", file)
-                                context.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(contentUri, document.mimeType)
-                                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
-                            } catch (_: Exception) {
-                                android.widget.Toast.makeText(context, "تعذر فتح التقرير. تأكد من وجود تطبيق لعرض PDF.", android.widget.Toast.LENGTH_LONG).show()
-                            }
-                        }
-                    },
-                    deleteDocument = { document ->
-                        scope.launch {
-                            try {
-                                dao.deleteDocument(document.id, selected.id)
-                                documentStore.clearTemporaryPdf(document.id)
-                                documentStore.delete(document)
-                            } catch (_: Exception) {
-                                android.widget.Toast.makeText(context, "تعذر تنظيف الملف المشفر بعد حذف سجل المرفق.", android.widget.Toast.LENGTH_LONG).show()
-                            }
-                        }
-                        Unit
-                    },
+                    saveDocument = { uri -> saveMemberDocument(uri, selected.id, "تقرير طبي.pdf", DocumentCategory.LAB) },
+                    openDocument = documentLibrary.open,
+                    deleteDocument = ::deleteMemberDocument,
                     modifier = Modifier.padding(padding)
                 )
             }
@@ -786,7 +778,7 @@ private fun SehatiApp(
 
     backupPreview?.let { preview ->
         AlertDialog(
-            onDismissRequest = { backupPreview = null },
+            onDismissRequest = { if (!restoringBackup) backupPreview = null },
             title = { Text("معاينة النسخة الاحتياطية") },
             text = { Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("عدد الأفراد: ${preview.memberNames.size}")
@@ -805,14 +797,27 @@ private fun SehatiApp(
                 preview.documentNames.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall) }
                 Text("استعادة النسخة ستستبدل البيانات الحالية بالكامل.")
             } },
-            confirmButton = { TextButton(onClick = {
-                scope.launch {
-                    try { backup.restore(preview); backupMessage = "تمت استعادة النسخة الاحتياطية." }
-                    catch (_: Exception) { backupMessage = "فشلت الاستعادة ولم تكتمل." }
-                    finally { backupPreview = null }
+            confirmButton = { TextButton(enabled = !restoringBackup, onClick = {
+                if (!restoringBackup) {
+                    restoringBackup = true
+                    scope.launch {
+                        try {
+                            backup.restore(preview)
+                            selectedId = null
+                            editingId = null
+                            backupMessage = "تمت استعادة النسخة الاحتياطية."
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (_: Exception) {
+                            backupMessage = "فشلت الاستعادة ولم تكتمل."
+                        } finally {
+                            backupPreview = null
+                            restoringBackup = false
+                        }
+                    }
                 }
-            }) { Text("استعادة واستبدال البيانات") } },
-            dismissButton = { TextButton(onClick = { backupPreview = null }) { Text("إلغاء") } }
+            }) { Text(if (restoringBackup) "جارٍ الاستعادة…" else "استعادة واستبدال البيانات") } },
+            dismissButton = { TextButton(enabled = !restoringBackup, onClick = { backupPreview = null }) { Text("إلغاء") } }
         )
     }
 
@@ -1065,14 +1070,15 @@ private fun AllergyScreen(
 ) {
     val scope = rememberCoroutineScope()
     var showDialog by rememberSaveable(member.id) { mutableStateOf(false) }
-    var editingRecord by remember(member.id) { mutableStateOf<AllergyRecord?>(null) }
+    var editingId by rememberSaveable(member.id) { mutableStateOf<Long?>(null) }
+    val recordToEdit = records.firstOrNull { it.id == editingId }
     Column(modifier.fillMaxSize().padding(16.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Column {
                 Text("حساسيات ${member.fullName}", style = MaterialTheme.typography.titleLarge)
                 Text("هذا السجل خاص بهذا الفرد", style = MaterialTheme.typography.bodySmall)
             }
-            Button(onClick = { editingRecord = null; showDialog = true }) { Icon(Icons.Outlined.Add, null); Text("إضافة") }
+            Button(onClick = { editingId = null; showDialog = true }) { Icon(Icons.Outlined.Add, null); Text("إضافة") }
         }
         Spacer(Modifier.height(12.dp))
         if (records.isEmpty()) {
@@ -1093,7 +1099,7 @@ private fun AllergyScreen(
                             Text("الشدة: ${record.severity}")
                             if (record.notes.isNotBlank()) Text(record.notes)
                             Row {
-                                TextButton(onClick = { editingRecord = record; showDialog = true }) { Text("تعديل") }
+                                TextButton(onClick = { editingId = record.id; showDialog = true }) { Text("تعديل") }
                                 TextButton(onClick = { scope.launch { deleteAllergy(record.id) } }) { Text("حذف السجل") }
                             }
                         }
@@ -1102,8 +1108,7 @@ private fun AllergyScreen(
             }
         }
     }
-    if (showDialog) {
-        val recordToEdit = editingRecord
+    if (showDialog && (editingId == null || recordToEdit != null)) {
         AllergyDialog(member.id, initial = recordToEdit, onDismiss = { showDialog = false }, onSave = { record ->
             scope.launch { if (recordToEdit == null) addAllergy(record) else updateAllergy(record) }
             showDialog = false

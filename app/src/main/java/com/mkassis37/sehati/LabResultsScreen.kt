@@ -17,14 +17,18 @@ import com.mkassis37.sehati.data.FamilyMember
 import com.mkassis37.sehati.data.LabResult
 import com.mkassis37.sehati.data.MedicalDocument
 import com.mkassis37.sehati.data.displayValue
+import com.mkassis37.sehati.data.hasSameReferenceRange
 import java.time.LocalDate
 import java.util.Locale
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 @Composable
-internal fun LabResultsScreen(member: FamilyMember, records: List<LabResult>, documents: List<MedicalDocument>, addResult: suspend (LabResult) -> Long, deleteResult: suspend (Long) -> Unit, saveDocument: suspend (Uri) -> Unit, openDocument: (MedicalDocument) -> Unit, deleteDocument: (MedicalDocument) -> Unit, modifier: Modifier = Modifier) {
+internal fun LabResultsScreen(member: FamilyMember, records: List<LabResult>, documents: List<MedicalDocument>, saveResult: suspend (LabResult) -> Boolean, deleteResult: suspend (Long) -> Unit, saveDocument: suspend (Uri) -> Unit, openDocument: (MedicalDocument) -> Unit, deleteDocument: (MedicalDocument) -> Unit, modifier: Modifier = Modifier) {
     val scope = rememberCoroutineScope()
     var showAdd by rememberSaveable(member.id) { mutableStateOf(false) }
+    var editingId by rememberSaveable(member.id) { mutableStateOf<Long?>(null) }
+    val editing = records.firstOrNull { it.id == editingId }
     var reviewCandidate by remember(member.id) { mutableStateOf<LabReportCandidate?>(null) }
     var selectedTest by rememberSaveable(member.id) { mutableStateOf("") }
     var selectedUnit by rememberSaveable(member.id) { mutableStateOf<String?>(null) }
@@ -38,21 +42,23 @@ internal fun LabResultsScreen(member: FamilyMember, records: List<LabResult>, do
     val chronological = filtered.sortedBy { it.performedAt }
     val latest = chronological.lastOrNull()
     val previous = chronological.dropLast(1).lastOrNull()
-    val numericHistory = chronological.filter { it.value != null }
+    val numericHistory = chronological.filter { row ->
+        row.value?.isFinite() == true && latest != null && row.hasSameReferenceRange(latest)
+    }
     val latestValue = latest?.value
     val previousValue = previous?.value
     Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("فحوصات " + member.fullName, style = MaterialTheme.typography.titleLarge)
         Text("تُحفظ كل نتيجة بتاريخها ومجالها المرجعي، وتبقى متاحة للمقارنة لسنوات.", style = MaterialTheme.typography.bodySmall)
-        Button(onClick = { showAdd = true }, modifier = Modifier.fillMaxWidth()) { Text("إضافة نتيجة فحص") }
+        Button(onClick = { editingId = null; reviewCandidate = null; showAdd = true }, modifier = Modifier.fillMaxWidth()) { Text("إضافة نتيجة فحص") }
         LabPdfReader(
             onExtractedText = { /* تتم المعاينة محليًا فقط؛ لا يُحفظ النص الخام */ },
-            onCandidateSelected = { candidate -> reviewCandidate = candidate; showAdd = true },
+            onCandidateSelected = { candidate -> editingId = null; reviewCandidate = candidate; showAdd = true },
             onSavePdf = saveDocument
         )
         Text("التقارير المحفوظة في ملف " + member.fullName, style = MaterialTheme.typography.titleMedium)
         if (documents.isEmpty()) {
-            Text("لم يتم حفظ تقارير PDF لهذا الفرد بعد.", style = MaterialTheme.typography.bodySmall)
+            Text("لم يتم حفظ مستندات لهذا الفرد بعد.", style = MaterialTheme.typography.bodySmall)
         } else {
             documents.forEach { document ->
                 Card(Modifier.fillMaxWidth()) {
@@ -94,6 +100,8 @@ internal fun LabResultsScreen(member: FamilyMember, records: List<LabResult>, do
                 Text("التاريخ: " + latest.performedAt.toDisplayDate())
                 when {
                     previous == null -> Text("لا توجد نتيجة أقدم للمقارنة.")
+                    latestValue != null && previousValue != null && !latest.hasSameReferenceRange(previous) ->
+                        Text("المجال المرجعي مختلف عن النتيجة السابقة. راجع حدود كل نتيجة في السجل.")
                     latestValue != null && previousValue != null ->
                         Text("مقارنة بالسابقة: " + (latestValue - previousValue) + " " + latest.unit + " (" + previous.performedAt.toDisplayDate() + ")")
                     else -> Text("النتيجة الحالية أو السابقة نصية؛ القيم متاحة في سجل النتائج.")
@@ -107,7 +115,7 @@ internal fun LabResultsScreen(member: FamilyMember, records: List<LabResult>, do
             } }
             if (numericHistory.size >= 2) {
                 Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("التغير عبر الزمن", style = MaterialTheme.typography.titleMedium)
+                    Text("التغير عبر الزمن ضمن المجال المرجعي نفسه", style = MaterialTheme.typography.titleMedium)
                     val chartLineColor = MaterialTheme.colorScheme.primary
                     val chartPointColor = MaterialTheme.colorScheme.tertiary
                     Canvas(Modifier.fillMaxWidth().height(150.dp)) {
@@ -124,22 +132,81 @@ internal fun LabResultsScreen(member: FamilyMember, records: List<LabResult>, do
         Text("سجل النتائج (" + filtered.size + ")", style = MaterialTheme.typography.titleMedium)
         if (filtered.isEmpty()) Text("لا توجد نتائج ضمن الاختيار الحالي. أضف أول فحص للبدء.")
         filtered.forEach { row -> Card(Modifier.fillMaxWidth()) { Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) { Text(row.testName, style = MaterialTheme.typography.titleSmall); Text(row.displayValue); Text(row.performedAt.toDisplayDate() + " • " + row.laboratory.ifBlank { "المختبر غير محدد" }, style = MaterialTheme.typography.bodySmall); if (row.value != null) Text("المرجع: " + (row.referenceLow?.toString() ?: "—") + " إلى " + (row.referenceHigh?.toString() ?: "—"), style = MaterialTheme.typography.bodySmall); if (row.notes.isNotBlank()) Text(row.notes, style = MaterialTheme.typography.bodySmall) }
-            TextButton(onClick = { scope.launch { deleteResult(row.id) } }) { Text("حذف") }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(row.testName, style = MaterialTheme.typography.titleSmall)
+                Text(row.displayValue)
+                Text(row.performedAt.toDisplayDate() + " • " + row.laboratory.ifBlank { "المختبر غير محدد" },
+                    style = MaterialTheme.typography.bodySmall)
+                if (row.value != null) {
+                    Text("المرجع: " + (row.referenceLow?.toString() ?: "—") + " إلى " + (row.referenceHigh?.toString() ?: "—"),
+                        style = MaterialTheme.typography.bodySmall)
+                }
+                if (row.notes.isNotBlank()) Text(row.notes, style = MaterialTheme.typography.bodySmall)
+                documents.filter { it.relatedLabResultId == row.id }.forEach { document ->
+                    TextButton(onClick = { openDocument(document) }) { Text(document.displayName) }
+                }
+            }
+            Column {
+                TextButton(onClick = { editingId = row.id; showAdd = true }) { Text("تعديل") }
+                TextButton(onClick = { scope.launch { deleteResult(row.id) } }) { Text("حذف") }
+            }
         } } }
     }
-    if (showAdd) AddLabResultDialog(member.id, { showAdd = false; reviewCandidate = null }, reviewCandidate) { row -> scope.launch { addResult(row) }; showAdd = false; reviewCandidate = null }
+    if (showAdd && (editingId == null || editing != null)) {
+        LabResultEditor(member.id, editing, reviewCandidate, onDismiss = {
+            showAdd = false
+            editingId = null
+            reviewCandidate = null
+        }, onSave = saveResult)
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun AddLabResultDialog(memberId: Long, onDismiss: () -> Unit, initialCandidate: LabReportCandidate? = null, onSave: (LabResult) -> Unit) {
-    var name by rememberSaveable(initialCandidate?.testName) { mutableStateOf(initialCandidate?.testName.orEmpty()) }; var result by rememberSaveable(initialCandidate?.value) { mutableStateOf((initialCandidate?.qualitativeValue ?: initialCandidate?.value?.toString()).orEmpty()) }; var unit by rememberSaveable(initialCandidate?.unit) { mutableStateOf(initialCandidate?.unit.orEmpty()) }; var low by rememberSaveable(initialCandidate?.referenceLow) { mutableStateOf(initialCandidate?.referenceLow?.toString().orEmpty()) }; var high by rememberSaveable(initialCandidate?.referenceHigh) { mutableStateOf(initialCandidate?.referenceHigh?.toString().orEmpty()) }; var date by rememberSaveable(initialCandidate?.performedAt) { mutableStateOf(initialCandidate?.performedAt ?: LocalDate.now().toString()) }; var lab by rememberSaveable(initialCandidate?.testName) { mutableStateOf("") }; var notes by rememberSaveable(initialCandidate?.sourceLine) { mutableStateOf(initialCandidate?.let { "اقتراح مستخرج من PDF. راجع النتيجة والوحدة والمجال والتاريخ مقابل التقرير الأصلي." + if (it.flag.isNotBlank()) " علامة المختبر: " + it.flag else "" }.orEmpty()) }; var error by rememberSaveable { mutableStateOf("") }
-    var qualitative by rememberSaveable(initialCandidate) { mutableStateOf(initialCandidate?.qualitativeValue != null) }
+private fun LabResultEditor(
+    memberId: Long,
+    existing: LabResult?,
+    candidate: LabReportCandidate?,
+    onDismiss: () -> Unit,
+    onSave: suspend (LabResult) -> Boolean
+) {
+    val scope = rememberCoroutineScope()
+    var name by rememberSaveable(existing?.id, candidate?.testName) {
+        mutableStateOf(existing?.testName ?: candidate?.testName.orEmpty())
+    }
+    var result by rememberSaveable(existing?.id, candidate?.sourceLine) {
+        mutableStateOf((existing?.qualitativeValue ?: existing?.value?.toString()
+            ?: candidate?.qualitativeValue ?: candidate?.value?.toString()).orEmpty())
+    }
+    val initialUnit = existing?.unit ?: candidate?.unit.orEmpty()
+    var unit by rememberSaveable(existing?.id, initialUnit) { mutableStateOf(initialUnit) }
+    var low by rememberSaveable(existing?.id, candidate?.referenceLow) {
+        mutableStateOf((existing?.referenceLow ?: candidate?.referenceLow)?.toString().orEmpty())
+    }
+    var high by rememberSaveable(existing?.id, candidate?.referenceHigh) {
+        mutableStateOf((existing?.referenceHigh ?: candidate?.referenceHigh)?.toString().orEmpty())
+    }
+    var date by rememberSaveable(existing?.id, candidate?.performedAt) {
+        mutableStateOf(existing?.performedAt ?: candidate?.performedAt ?: LocalDate.now().toString())
+    }
+    var lab by rememberSaveable(existing?.id) { mutableStateOf(existing?.laboratory.orEmpty()) }
+    var notes by rememberSaveable(existing?.id, candidate?.sourceLine) {
+        mutableStateOf(existing?.notes ?: candidate?.let {
+            "اقتراح مستخرج من PDF. راجع النتيجة والوحدة والمجال والتاريخ مقابل التقرير الأصلي." +
+                if (it.flag.isNotBlank()) " علامة المختبر: " + it.flag else ""
+        }.orEmpty())
+    }
+    var error by rememberSaveable { mutableStateOf("") }
+    var saving by remember { mutableStateOf(false) }
+    var qualitative by rememberSaveable(existing?.id, candidate?.sourceLine) {
+        mutableStateOf(existing?.qualitativeValue != null || candidate?.qualitativeValue != null)
+    }
     var unitMenuExpanded by rememberSaveable { mutableStateOf(false) }
     var testNameMenuExpanded by rememberSaveable { mutableStateOf(false) }
-    var customUnit by rememberSaveable(initialCandidate?.unit) { mutableStateOf(initialCandidate?.unit?.let { it.isNotBlank() && it !in LAB_RESULT_UNITS } == true) }
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("إضافة نتيجة فحص") }, text = { Column(Modifier.fillMaxWidth().heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    var customUnit by rememberSaveable(existing?.id, initialUnit) {
+        mutableStateOf(initialUnit.isNotBlank() && initialUnit !in LAB_RESULT_UNITS)
+    }
+    AlertDialog(onDismissRequest = { if (!saving) onDismiss() }, title = { Text(if (existing == null) "إضافة نتيجة فحص" else "تعديل نتيجة الفحص") }, text = { Column(Modifier.fillMaxWidth().heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         ExposedDropdownMenuBox(expanded = testNameMenuExpanded, onExpandedChange = { testNameMenuExpanded = it }) {
             OutlinedTextField(value = name, onValueChange = { name = it; testNameMenuExpanded = true },
                 label = { Text("اسم الفحص") }, placeholder = { Text("اكتبي الاسم أو اختاري فحصًا شائعًا") },
@@ -187,7 +254,8 @@ private fun AddLabResultDialog(memberId: Long, onDismiss: () -> Unit, initialCan
         OutlinedTextField(notes, { notes = it }, label = { Text("ملاحظات") }, modifier = Modifier.fillMaxWidth())
         if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
     } }, confirmButton = {
-        TextButton(onClick = {
+        TextButton(enabled = !saving, onClick = {
+            if (saving) return@TextButton
             fun String.parseNumber() = trim().replace('٫', '.').replace(',', '.').map {
                 it.digitToIntOrNull()?.digitToChar() ?: it
             }.joinToString("").toDoubleOrNull()?.takeIf { it.isFinite() }
@@ -197,17 +265,32 @@ private fun AddLabResultDialog(memberId: Long, onDismiss: () -> Unit, initialCan
             val validValue = if (qualitative) result.isNotBlank() else number != null
             val validRange = qualitative || ((low.isBlank() || lower != null) &&
                 (high.isBlank() || upper != null) && (lower == null || upper == null || lower <= upper))
-            if (name.isBlank() || !validValue || !validRange) {
-                error = "تحقق من اسم الفحص والنتيجة والمجال المرجعي."
+            if (name.isBlank() || !validValue || !validRange || runCatching { LocalDate.parse(date) }.isFailure) {
+                error = "تحقق من اسم الفحص والنتيجة والتاريخ والمجال المرجعي."
             } else {
-                onSave(LabResult(memberId = memberId, testName = name.trim(), value = number,
+                val record = LabResult(
+                    id = existing?.id ?: 0,
+                    memberId = memberId, testName = name.trim(), value = number,
                     qualitativeValue = result.trim().takeIf { qualitative }, unit = unit.trim(),
                     referenceLow = lower, referenceHigh = upper, performedAt = date,
-                    laboratory = lab.trim(), source = if (initialCandidate != null) "pdf_review" else "manual",
-                    notes = notes.trim()))
+                    laboratory = lab.trim(), source = existing?.source ?: if (candidate != null) "pdf_review" else "manual",
+                    notes = notes.trim(), createdAt = existing?.createdAt ?: System.currentTimeMillis()
+                )
+                saving = true
+                scope.launch {
+                    try {
+                        if (onSave(record)) onDismiss() else error = "تعذر العثور على نتيجة الفحص."
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                        error = "تعذر حفظ نتيجة الفحص."
+                    } finally {
+                        saving = false
+                    }
+                }
             }
-        }) { Text("حفظ النتيجة") }
-    }, dismissButton = { TextButton(onClick = onDismiss) { Text("إلغاء") } })
+        }) { Text(if (saving) "جارٍ الحفظ…" else "حفظ النتيجة") }
+    }, dismissButton = { TextButton(enabled = !saving, onClick = onDismiss) { Text("إلغاء") } })
 }
 
 private val LAB_RESULT_UNITS = listOf(

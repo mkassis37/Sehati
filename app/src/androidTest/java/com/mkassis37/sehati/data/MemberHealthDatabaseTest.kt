@@ -25,6 +25,33 @@ class MemberHealthDatabaseTest {
     )
 
     @Test
+    fun editingLabResultKeepsItsOwnerAndAttachment() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val database = Room.inMemoryDatabaseBuilder(context, SehatiDatabase::class.java).build()
+        try {
+            val dao = database.medicalDao()
+            val owner = dao.addMember(FamilyMember(fullName = "Synthetic owner"))
+            val other = dao.addMember(FamilyMember(fullName = "Synthetic other"))
+            val result = LabResult(memberId = owner, testName = "Synthetic test", value = 7.0,
+                performedAt = "2026-11-01", source = "pdf_review", createdAt = 123)
+            val id = dao.addLabResult(result)
+            val documentId = database.addLinkedDocument(MedicalDocument(memberId = owner,
+                displayName = "Synthetic.pdf", relativePath = "$owner/synthetic.shtd",
+                sizeBytes = 20, relatedLabResultId = id))
+            val corrected = result.copy(id = id, value = 8.0)
+
+            assertFalse(database.updateMemberLabResult(corrected.copy(memberId = other), other))
+            assertEquals(7.0, dao.observeLabResults(owner).first().single().value!!, 0.0)
+            assertTrue(database.updateMemberLabResult(corrected, owner))
+            assertEquals(corrected, dao.observeLabResults(owner).first().single())
+            assertTrue(dao.observeLabResults(other).first().isEmpty())
+            assertEquals(id, dao.findDocument(documentId, owner)?.relatedLabResultId)
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
     fun memberRecordsRemainSeparateAndMemberDeletionRemovesOnlyTheirRows() = runBlocking {
         System.loadLibrary("sqlcipher")
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()

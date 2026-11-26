@@ -62,6 +62,17 @@ object LabReportParser {
 
         fun add(nameRaw: String, resultRaw: String, referenceRaw: String?, unitRaw: String, source: String) {
             val name = nameRaw.trim().trim(':', '-', '•')
+            val normalizedName = name.lowercase(java.util.Locale.ROOT).replace(Regex("\\s+"), " ")
+            // Reject OCR status/reference labels and page furniture as test names.
+            val rejectedName = normalizedName in setOf(
+                "normal", "abnormal", "high", "low", "reference", "reference range",
+                "ref range", "test name", "result", "unit", "comment", "comments",
+                "page", "report page", "normal range", "diabetic", "good control",
+                "fair control", "poor control"
+            ) || normalizedName.contains("normal ") ||
+                normalizedName.matches(Regex("""^(?:page|report page)\\s*[:#-]?\\s*\\d+.*$""")) ||
+                normalizedName.matches(Regex("""^\\d+(?:\\s+\\d+){0,2}$"""))
+            if (rejectedName) return
             val resultText = resultRaw.trim()
             val result = numericResult.matchEntire(resultText)
             val value = result?.groupValues?.get(1)?.let(::numeric)

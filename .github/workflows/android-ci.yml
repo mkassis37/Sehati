@@ -67,7 +67,14 @@ jobs:
           apk="app/build/outputs/apk/debug/app-debug.apk"
           signer="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)"
           test -x "$signer"
-          "$signer" verify "$apk"
+          "$signer" verify --verbose --print-certs "$apk"
+          aapt="$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -n 1)"
+          test -x "$aapt"
+          badging="$("$aapt" dump badging "$apk" | sed -n '1p')"
+          test -n "$badging"
+          source_id="$(git rev-parse HEAD)"
+          grep -RF "SOURCE_COMMIT = \"$source_id\";" app/build/generated/source/buildConfig/debug
+          printf '%s\n' "$badging"
           git archive --format=zip --prefix=Sehati/ -o "$bundle" HEAD
           staging="$(mktemp -d)"
           mkdir -p "$staging/Sehati/test-builds"
@@ -75,6 +82,8 @@ jobs:
           sha="$(sha256sum "$apk" | cut -d ' ' -f 1)"
           printf 'Commit: %s\nAPK: sehati-debug.apk\nBytes: %s\nSHA-256: %s\n' \
             "$(git rev-parse HEAD)" "$(stat -c %s "$apk")" "$sha" > "$staging/Sehati/test-builds/BUILD_INFO.txt"
+          printf '%s\n' "$badging" >> "$staging/Sehati/test-builds/BUILD_INFO.txt"
+          { printf '### Verified Debug APK\n\n'; cat "$staging/Sehati/test-builds/BUILD_INFO.txt"; } >> "$GITHUB_STEP_SUMMARY"
           (cd "$staging" && zip -q "$GITHUB_WORKSPACE/$bundle" Sehati/test-builds/*)
           unzip -tq "$bundle"
 
@@ -84,4 +93,41 @@ jobs:
           name: sehati-project-zip
           path: sehati-project.zip
           if-no-files-found: error
+          retention-days: 14
+
+  instrumentation:
+    name: Android device tests (API 35)
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+      - name: Enable emulator acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Run instrumentation on an Android emulator
+        uses: reactivecircus/android-emulator-runner@4c44018e59b437e86cdfc41da381398f93ed8808
+        with:
+          api-level: 35
+          arch: x86_64
+          disable-animations: true
+          script: gradle --no-daemon connectedDebugAndroidTest
+      - name: Upload instrumentation reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sehati-instrumentation-results
+          path: |
+            app/build/outputs/androidTest-results/connected/
+            app/build/reports/androidTests/connected/
+          if-no-files-found: warn
           retention-days: 14

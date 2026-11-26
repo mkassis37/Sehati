@@ -240,6 +240,7 @@ private fun SehatiApp(
     var searchText by rememberSaveable { mutableStateOf("") }
     var searchMemberId by rememberSaveable { mutableStateOf<Long?>(null) }
     var focusedRecordId by rememberSaveable { mutableStateOf<Long?>(null) }
+    var focusFromTimeline by rememberSaveable { mutableStateOf(false) }
     var focusedRecordKind by rememberSaveable { mutableStateOf<String?>(null) }
     var quickAddLab by rememberSaveable { mutableStateOf(false) }
     var quickDoseId by rememberSaveable { mutableStateOf<Long?>(null) }
@@ -342,6 +343,30 @@ private fun SehatiApp(
         return if (wanted == null || focusedRecordKind != kind) records else records.filter { recordId(it) == wanted }
     }
 
+    fun openRecord(kind: String, id: Long, fromTimeline: Boolean) {
+        focusedRecordId = id
+        focusedRecordKind = kind
+        focusFromTimeline = fromTimeline
+        screen = when (kind) {
+            "ALLERGY" -> Screen.ALLERGIES
+            "LAB" -> Screen.LAB_RESULTS
+            "MEDICATION" -> Screen.MEDICATIONS
+            "VISIT" -> Screen.APPOINTMENTS
+            "DOCUMENT" -> Screen.DOCUMENTS
+            "CONDITION", "PROCEDURE", "HISTORY", "FAMILY_HISTORY", "MEASUREMENT" -> {
+                healthInitialTab = when (kind) {
+                    "CONDITION" -> 1
+                    "PROCEDURE" -> 2
+                    "HISTORY" -> 3
+                    "FAMILY_HISTORY" -> 4
+                    else -> 5
+                }
+                Screen.HEALTH_RECORDS
+            }
+            else -> Screen.DETAILS
+        }
+    }
+
     val title = when (screen) {
         Screen.MEMBERS -> "أفراد العائلة"
         Screen.DETAILS -> selected?.fullName ?: "الملف الطبي"
@@ -366,7 +391,11 @@ private fun SehatiApp(
         if (focusedRecordId != null) {
             focusedRecordId = null
             focusedRecordKind = null
-            screen = Screen.SEARCH
+            if (focusFromTimeline) {
+                healthInitialTab = 7
+                screen = Screen.HEALTH_RECORDS
+            } else screen = Screen.SEARCH
+            focusFromTimeline = false
         } else screen = when (screen) {
             Screen.FORM -> if (editingId == null) Screen.MEMBERS else Screen.DETAILS
             Screen.DETAILS -> Screen.MEMBERS
@@ -470,25 +499,7 @@ private fun SehatiApp(
                 search = dao::searchMedicalRecords,
                 open = { result ->
                     selectedId = result.memberId
-                    focusedRecordId = result.recordId
-                    focusedRecordKind = result.kind
-                    screen = when (result.kind) {
-                        "ALLERGY" -> Screen.ALLERGIES
-                        "LAB" -> Screen.LAB_RESULTS
-                        "MEDICATION" -> Screen.MEDICATIONS
-                        "VISIT" -> Screen.APPOINTMENTS
-                        "DOCUMENT" -> Screen.DOCUMENTS
-                        "PROCEDURE", "HISTORY", "CONDITION", "FAMILY_HISTORY" -> {
-                            healthInitialTab = when (result.kind) {
-                                "CONDITION" -> 1
-                                "PROCEDURE" -> 2
-                                "HISTORY" -> 3
-                                else -> 4
-                            }
-                            Screen.HEALTH_RECORDS
-                        }
-                        else -> Screen.DETAILS
-                    }
+                    openRecord(result.kind, result.recordId, fromTimeline = false)
                 },
                 modifier = Modifier.padding(padding)
             )
@@ -521,12 +532,12 @@ private fun SehatiApp(
                                 val removedDocuments = db.deleteMemberAndRecords(selected.id)
                                 selectedId = null
                                 screen = Screen.MEMBERS
-                                val cleanupFailed = removedDocuments.any { document ->
+                                val cleanupFailed = removedDocuments.map { document ->
                                     runCatching {
                                         documentStore.clearTemporaryPdf(document.id)
                                         documentStore.delete(document)
                                     }.isFailure
-                                }
+                                }.any { it }
                                 val message = if (cleanupFailed) "حُذف الملف وسجلاته، لكن تعذر تنظيف مرفق مشفر واحد على الأقل." else "تم حذف الملف الطبي وبياناته المرتبطة."
                                 android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_LONG).show()
                             } catch (_: Exception) {
@@ -546,7 +557,8 @@ private fun SehatiApp(
                     procedures = matchingRecords("PROCEDURE", procedures) { it.id },
                     history = matchingRecords("HISTORY", historyEvents) { it.id },
                     appointments = appointments,
-                    familyHistory = matchingRecords("FAMILY_HISTORY", familyHistory) { it.id }, measurements = measurements,
+                    familyHistory = matchingRecords("FAMILY_HISTORY", familyHistory) { it.id },
+                    measurements = matchingRecords("MEASUREMENT", measurements) { it.id },
                     onSaveMember = { dao.updateMember(it) },
                     onAddCondition = { dao.addCondition(it); Unit }, onUpdateCondition = { dao.updateCondition(it) },
                     onDeleteCondition = { dao.deleteCondition(it, selected.id) },
@@ -563,10 +575,7 @@ private fun SehatiApp(
                     onDeleteMeasurement = { dao.deleteBodyMeasurement(it, selected.id) },
                     onOpenDocument = documentLibrary.open,
                     onDeleteDocument = ::deleteMemberDocument,
-                    onOpenLabResults = { screen = Screen.LAB_RESULTS },
-                    onOpenAllergies = { screen = Screen.ALLERGIES },
-                    onOpenMedications = { screen = Screen.MEDICATIONS },
-                    onOpenAppointments = { screen = Screen.APPOINTMENTS },
+                    onOpenTimelineRecord = { kind, id -> openRecord(kind, id, fromTimeline = true) },
                     modifier = Modifier.padding(padding)
                 )
             }
@@ -727,7 +736,7 @@ private fun SehatiApp(
                 focusedId = focusedRecordId.takeIf { focusedRecordKind == "VISIT" },
                 documents = medicalDocuments,
                 onAttach = appointmentAttachments.attach,
-                onOpenDocument = appointmentAttachments.open,
+                onOpenDocument = documentLibrary.open,
                 onSave = { db.saveAppointment(it, selected.id) },
                 onDelete = { db.deleteAppointment(it.id, selected.id) },
                 modifier = Modifier.padding(padding)

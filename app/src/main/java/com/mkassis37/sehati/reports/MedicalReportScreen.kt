@@ -24,10 +24,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
+import com.mkassis37.sehati.data.medicalShareDirectory
 import com.mkassis37.sehati.DatePickerField
 import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -67,9 +71,10 @@ internal fun rememberMedicalReportActions(): MedicalReportActions {
         },
         share = { draft ->
             scope.launch {
+                var unsharedFile: File? = null
                 try {
-                    val file = withContext(Dispatchers.IO) {
-                        val target = File.createTempFile("sehati-report-", ".pdf", context.cacheDir)
+                    val file = withContext(NonCancellable) { withContext(Dispatchers.IO) {
+                        val target = File.createTempFile("sehati-report-", ".pdf", medicalShareDirectory(context))
                         try {
                             target.outputStream().use { writeMedicalReportPdf(draft, it) }
                             target
@@ -77,15 +82,20 @@ internal fun rememberMedicalReportActions(): MedicalReportActions {
                             target.delete()
                             throw error
                         }
-                    }
+                    } }
+                    unsharedFile = file
+                    currentCoroutineContext().ensureActive()
                     val uri = FileProvider.getUriForFile(context, context.packageName + ".fileprovider", file)
                     val send = Intent(Intent.ACTION_SEND).setType("application/pdf")
                         .putExtra(Intent.EXTRA_STREAM, uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                     context.startActivity(Intent.createChooser(send, "مشاركة التقرير الطبي"))
+                    unsharedFile = null
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (_: Exception) {
                     notice("تعذرت مشاركة تقرير PDF.")
+                } finally {
+                    unsharedFile?.delete()
                 }
             }
         },

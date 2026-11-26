@@ -8,16 +8,16 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.FileProvider
 import com.mkassis37.sehati.data.MedicalDocument
 import com.mkassis37.sehati.data.SecureMedicalDocumentStore
+import com.mkassis37.sehati.data.medicalShareDirectory
 import com.mkassis37.sehati.data.SehatiDatabase
 import java.io.File
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
@@ -46,25 +46,25 @@ internal fun rememberDocumentLibrary(
     var owner by rememberSaveable { mutableStateOf<Long?>(null) }
     var uri by rememberSaveable { mutableStateOf<Uri?>(null) }
     var cameraPath by rememberSaveable { mutableStateOf<String?>(null) }
+    var openingPreview by remember { mutableStateOf(false) }
     var openedTemporaryPath by rememberSaveable { mutableStateOf<String?>(null) }
-    val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) {
-                openedTemporaryPath?.let { name ->
-                    val file = File(context.cacheDir, name)
-                    if (file.parentFile?.canonicalFile == context.cacheDir.canonicalFile && file.name.startsWith("sehati-")) {
-                        file.delete()
-                    }
-                    openedTemporaryPath = null
-                }
+    fun clearOpenedPreview() {
+        openedTemporaryPath?.takeIf { it == File(it).name && it.startsWith("sehati-preview-") }?.let { name ->
+            val file = File(medicalShareDirectory(context), name)
+            try {
+                val uri = FileProvider.getUriForFile(context, context.packageName + ".fileprovider", file)
+                context.revokeUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            } finally {
+                file.delete()
             }
         }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+        openedTemporaryPath = null
+    }
+    val viewer = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        clearOpenedPreview()
     }
     fun clear() {
-        cameraPath?.let { File(context.cacheDir, it).delete() }
+        cameraPath?.let { File(medicalShareDirectory(context), it).delete() }
         cameraPath = null
         owner = null
         uri = null
@@ -76,7 +76,7 @@ internal fun rememberDocumentLibrary(
     }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument(), ::complete)
     val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { success ->
-        val file = cameraPath?.let { File(context.cacheDir, it) }
+        val file = cameraPath?.let { File(medicalShareDirectory(context), it) }
         complete(if (success && file != null) FileProvider.getUriForFile(context, context.packageName + ".fileprovider", file) else null)
     }
     val pending = owner?.let { memberId -> uri?.let { PendingDocument(memberId, it) } }
@@ -96,7 +96,7 @@ internal fun rememberDocumentLibrary(
         capture = { memberId ->
             if (owner == null) {
                 try {
-                    val photo = File.createTempFile("sehati-camera-", ".jpg", context.cacheDir)
+                    val photo = File.createTempFile("sehati-camera-", ".jpg", medicalShareDirectory(context))
                     cameraPath = photo.name
                     owner = memberId
                     camera.launch(FileProvider.getUriForFile(context, context.packageName + ".fileprovider", photo))
@@ -130,20 +130,26 @@ internal fun rememberDocumentLibrary(
             clear()
         },
         open = { document ->
-            scope.launch {
+            if (!openingPreview && openedTemporaryPath == null) scope.launch {
+                openingPreview = true
+                var pendingFile: File? = null
                 try {
-                    val file = store.createTemporaryFile(document)
+                    val file = withContext(NonCancellable) { store.createTemporaryFile(document) }
+                    pendingFile = file
+                    currentCoroutineContext().ensureActive()
                     openedTemporaryPath = file.name
                     val content = FileProvider.getUriForFile(context, context.packageName + ".fileprovider", file)
-                    context.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(content, document.mimeType)
+                    viewer.launch(Intent(Intent.ACTION_VIEW).setDataAndType(content, document.mimeType)
                         .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
+                    pendingFile = null
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (_: Exception) {
-                    openedTemporaryPath?.let { File(context.cacheDir, it).delete() }
-                    openedTemporaryPath = null
-                    store.clearTemporaryDocument(document.id)
+                    clearOpenedPreview()
                     Toast.makeText(context, "تعذر معاينة الملف.", Toast.LENGTH_SHORT).show()
+                } finally {
+                    pendingFile?.delete()
+                    openingPreview = false
                 }
             }
         },

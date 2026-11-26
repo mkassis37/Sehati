@@ -39,8 +39,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.toMutableStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -60,7 +60,7 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 
-private data class MedicalTimelineItem(val date: String, val title: String, val summary: String, val tab: Int)
+private data class MedicalTimelineItem(val date: String, val title: String, val summary: String, val kind: String, val recordId: Long)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -85,15 +85,12 @@ internal fun MedicalHealthScreen(
     onDeleteMeasurement: suspend (Long) -> Unit,
     onOpenDocument: (MedicalDocument) -> Unit,
     onDeleteDocument: (MedicalDocument) -> Unit,
-    onOpenLabResults: () -> Unit,
-    onOpenAllergies: () -> Unit,
-    onOpenMedications: () -> Unit,
-    onOpenAppointments: () -> Unit
+    onOpenTimelineRecord: (String, Long) -> Unit
 ) {
     val scope = rememberCoroutineScope()
     var tab by rememberSaveable(member.id, initialTab) { mutableIntStateOf(initialTab) }
-    var editor by remember(member.id) { mutableStateOf<EditorState?>(null) }
-    var emergencyEditor by remember(member.id) { mutableStateOf(false) }
+    var editor by rememberSaveable(member.id, stateSaver = editorStateSaver) { mutableStateOf<EditorState?>(null) }
+    var emergencyEditor by rememberSaveable(member.id) { mutableStateOf(false) }
     var attachProcedureId by rememberSaveable(member.id) { mutableStateOf<Long?>(null) }
     var error by remember(member.id) { mutableStateOf("") }
     val attachmentPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -136,12 +133,20 @@ internal fun MedicalHealthScreen(
                 detailOf = { it.notes }, add = { editor = EditorState("measurement", null) }, edit = { editor = EditorState("measurement", it.id) },
                 delete = { row -> scope.launch { onDeleteMeasurement(row.id) } })
             6 -> EmergencyPanel(member, allergies, medications, conditions, onEdit = { emergencyEditor = true })
-            else -> TimelinePanel(buildTimeline(conditions, procedures, history, familyHistory, allergies, medications, labResults, documents, measurements, appointments), onOpen = { section ->
-                when (section) { 8 -> onOpenLabResults(); 9 -> onOpenAllergies(); 10 -> onOpenMedications(); 11 -> onOpenAppointments(); else -> tab = section }
-            })
+            else -> TimelinePanel(buildTimeline(conditions, procedures, history, familyHistory, allergies, medications, labResults, documents, measurements, appointments), onOpen = onOpenTimelineRecord)
         }
     }
-    editor?.let { request ->
+    editor?.takeIf { request ->
+        val id = request.id
+        id == null || when (request.kind) {
+            "condition" -> conditions.any { it.id == id }
+            "procedure" -> procedures.any { it.id == id }
+            "history" -> history.any { it.id == id }
+            "family" -> familyHistory.any { it.id == id }
+            "measurement" -> measurements.any { it.id == id }
+            else -> false
+        }
+    }?.let { request ->
         val initial = editorFields(request, conditions, procedures, history, familyHistory, measurements, member.id)
         MedicalRecordDialog(request.kind, initial.first, initial.second, initial.third,
             onDismiss = { editor = null }, onSave = { values ->
@@ -340,13 +345,13 @@ private fun EmergencyPanel(member: FamilyMember, allergies: List<AllergyRecord>,
 }
 
 @Composable
-private fun TimelinePanel(items: List<MedicalTimelineItem>, onOpen: (Int) -> Unit) {
+private fun TimelinePanel(items: List<MedicalTimelineItem>, onOpen: (String, Long) -> Unit) {
     Column(Modifier.fillMaxSize().padding(16.dp)) {
         Text("السجل الزمني الصحي", style = MaterialTheme.typography.headlineSmall)
         Text("الأحداث معروضة من سجلاتها الأصلية؛ لا تُنشأ نسخة إضافية منها.", style = MaterialTheme.typography.bodySmall)
         if (items.isEmpty()) Text("ستظهر هنا الأحداث الصحية عند إضافتها.", modifier = Modifier.padding(12.dp))
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(items) { item -> Card(Modifier.fillMaxWidth().clickable { onOpen(item.tab) }) {
+            items(items) { item -> Card(Modifier.fillMaxWidth().clickable { onOpen(item.kind, item.recordId) }) {
                 Column(Modifier.padding(14.dp)) {
                     Text(item.title, style = MaterialTheme.typography.titleMedium)
                     Text(item.date.toDisplayDate().ifBlank { "التاريخ غير محدد" })
@@ -359,20 +364,25 @@ private fun TimelinePanel(items: List<MedicalTimelineItem>, onOpen: (Int) -> Uni
 }
 
 private fun buildTimeline(conditions: List<ChronicCondition>, procedures: List<MedicalProcedure>, history: List<MedicalHistoryEvent>, familyHistory: List<FamilyDiseaseHistory>, allergies: List<AllergyRecord>, medications: List<MedicationRecord>, labResults: List<com.mkassis37.sehati.data.LabResult>, documents: List<MedicalDocument>, measurements: List<BodyMeasurement>, appointments: List<MedicalAppointment>) = buildList {
-    conditions.forEach { add(MedicalTimelineItem(it.diagnosedOn, "حالة صحية: ${it.name}", it.status, 1)) }
-    procedures.forEach { add(MedicalTimelineItem(it.performedOn, "إجراء طبي: ${it.name}", it.facility, 2)) }
-    history.forEach { add(MedicalTimelineItem(it.eventDate, "${it.category}: ${it.title}", it.notes, 3)) }
-    familyHistory.forEach { add(MedicalTimelineItem("", "تاريخ عائلي — ليس تشخيصًا: ${it.disease}", "${it.relative} • ${it.notes}", 4)) }
-    allergies.forEach { add(MedicalTimelineItem(Instant.ofEpochMilli(it.createdAt).atZone(ZoneId.systemDefault()).toLocalDate().toString(), "حساسية: ${it.substance.ifBlank { it.commercialName }}", it.severity, 9)) }
-    medications.forEach { add(MedicalTimelineItem(it.startDate, "دواء: ${it.name}", if (it.isActive) "نشط" else "متوقف", 10)) }
-    medications.filter { !it.isActive && it.endDate.isNotBlank() }.forEach { add(MedicalTimelineItem(it.endDate, "إيقاف دواء: ${it.name}", it.endDate, 10)) }
-    labResults.forEach { add(MedicalTimelineItem(it.performedAt, "فحص: ${it.testName}", it.displayValue, 8)) }
-    documents.forEach { add(MedicalTimelineItem(Instant.ofEpochMilli(it.addedAt).atZone(ZoneId.systemDefault()).toLocalDate().toString(), "مرفق: ${it.displayName}", "الوثائق والتحاليل", 8)) }
-    appointments.forEach { add(MedicalTimelineItem(it.date, "موعد: ${it.doctor}", listOf(it.time, it.facility, it.reason).filter(String::isNotBlank).joinToString(" • "), 11)) }
-    measurements.forEach { add(MedicalTimelineItem(it.measuredOn, "قياس جسدي", listOfNotNull(it.heightCm?.let { h -> "$h سم" }, it.weightKg?.let { w -> "$w كغ" }).joinToString(" • "), 5)) }
+    conditions.forEach { add(MedicalTimelineItem(it.diagnosedOn, "حالة صحية: ${it.name}", it.status, "CONDITION", it.id)) }
+    procedures.forEach { add(MedicalTimelineItem(it.performedOn, "إجراء طبي: ${it.name}", it.facility, "PROCEDURE", it.id)) }
+    history.forEach { add(MedicalTimelineItem(it.eventDate, "${it.category}: ${it.title}", it.notes, "HISTORY", it.id)) }
+    familyHistory.forEach { add(MedicalTimelineItem("", "تاريخ عائلي — ليس تشخيصًا: ${it.disease}", "${it.relative} • ${it.notes}", "FAMILY_HISTORY", it.id)) }
+    allergies.forEach { add(MedicalTimelineItem(Instant.ofEpochMilli(it.createdAt).atZone(ZoneId.systemDefault()).toLocalDate().toString(), "حساسية: ${it.substance.ifBlank { it.commercialName }}", it.severity, "ALLERGY", it.id)) }
+    medications.forEach { add(MedicalTimelineItem(it.startDate, "دواء: ${it.name}", if (it.isActive) "نشط" else "متوقف", "MEDICATION", it.id)) }
+    medications.filter { !it.isActive && it.endDate.isNotBlank() }.forEach { add(MedicalTimelineItem(it.endDate, "إيقاف دواء: ${it.name}", it.endDate, "MEDICATION", it.id)) }
+    labResults.forEach { add(MedicalTimelineItem(it.performedAt, "فحص: ${it.testName}", it.displayValue, "LAB", it.id)) }
+    documents.forEach { add(MedicalTimelineItem(Instant.ofEpochMilli(it.addedAt).atZone(ZoneId.systemDefault()).toLocalDate().toString(), "مرفق: ${it.displayName}", "الوثائق والتحاليل", "DOCUMENT", it.id)) }
+    appointments.forEach { add(MedicalTimelineItem(it.date, "موعد: ${it.doctor}", listOf(it.time, it.facility, it.reason).filter(String::isNotBlank).joinToString(" • "), "VISIT", it.id)) }
+    measurements.forEach { add(MedicalTimelineItem(it.measuredOn, "قياس جسدي", listOfNotNull(it.heightCm?.let { h -> "$h سم" }, it.weightKg?.let { w -> "$w كغ" }).joinToString(" • "), "MEASUREMENT", it.id)) }
 }.sortedByDescending { it.date }
 
 private data class EditorState(val kind: String, val id: Long?)
+
+private val editorStateSaver = listSaver<EditorState?, Any>(
+    save = { state -> if (state == null) emptyList() else listOf(state.kind, state.id ?: 0L) },
+    restore = { values -> if (values.isEmpty()) null else EditorState(values[0] as String, (values[1] as Long).takeIf { it != 0L }) }
+)
 
 private fun editorFields(request: EditorState, conditions: List<ChronicCondition>, procedures: List<MedicalProcedure>, history: List<MedicalHistoryEvent>, family: List<FamilyDiseaseHistory>, measurements: List<BodyMeasurement>, memberId: Long): Triple<String, List<String>, List<String>> = when (request.kind) {
     "condition" -> conditions.firstOrNull { it.id == request.id }?.let { Triple("حالة مزمنة", listOf("اسم المرض أو الحالة", "تاريخ التشخيص", "الطبيب المشخّص", "الحالة", "العلاج", "ملاحظات"), listOf(it.name, it.diagnosedOn, it.diagnosingDoctor, it.status, it.treatment, it.notes)) }
@@ -390,7 +400,10 @@ private fun editorFields(request: EditorState, conditions: List<ChronicCondition
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
 private fun MedicalRecordDialog(kind: String, title: String, labels: List<String>, initial: List<String>, onDismiss: () -> Unit, onSave: suspend (List<String>) -> Unit) {
-    val values = remember(kind, initial) { initial.toMutableStateList() }
+    var values by rememberSaveable(kind, initial) { mutableStateOf(ArrayList(initial)) }
+    fun updateValue(index: Int, value: String) {
+        values = ArrayList(values).apply { this[index] = value }
+    }
     val dateIndices = when (kind) { "condition" -> setOf(1); "procedure" -> setOf(1); "history" -> setOf(2); "measurement" -> setOf(0); else -> emptySet() }
     var validation by remember(kind, initial) { mutableStateOf("") }
     var expandedIndex by remember(kind, initial) { mutableIntStateOf(-1) }
@@ -410,17 +423,17 @@ private fun MedicalRecordDialog(kind: String, title: String, labels: List<String
     AlertDialog(onDismissRequest = onDismiss, title = { Text(title) },
         text = { Column(Modifier.fillMaxWidth().heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             labels.forEachIndexed { index, label ->
-                if (dateIndices.contains(index)) DatePickerField(label, values[index], { values[index] = it }, Modifier.fillMaxWidth())
+                if (dateIndices.contains(index)) DatePickerField(label, values[index], { updateValue(index, it) }, Modifier.fillMaxWidth())
                 else if (choices[index] != null) {
                     ExposedDropdownMenuBox(expanded = expandedIndex == index, onExpandedChange = { expandedIndex = if (it) index else -1 }) {
                         OutlinedTextField(value = values[index], onValueChange = {}, readOnly = true, label = { Text(label) },
                             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedIndex == index) },
                             modifier = Modifier.fillMaxWidth().menuAnchor(), singleLine = true)
                         ExposedDropdownMenu(expanded = expandedIndex == index, onDismissRequest = { expandedIndex = -1 }) {
-                            choices.getValue(index).forEach { option -> DropdownMenuItem(text = { Text(option) }, onClick = { values[index] = option; expandedIndex = -1 }) }
+                            choices.getValue(index).forEach { option -> DropdownMenuItem(text = { Text(option) }, onClick = { updateValue(index, option); expandedIndex = -1 }) }
                         }
                     }
-                } else OutlinedTextField(value = values[index], onValueChange = { values[index] = it }, label = { Text(label) }, modifier = Modifier.fillMaxWidth(), singleLine = label != "ملاحظات")
+                } else OutlinedTextField(value = values[index], onValueChange = { updateValue(index, it) }, label = { Text(label) }, modifier = Modifier.fillMaxWidth(), singleLine = label != "ملاحظات")
             }
             if (validation.isNotBlank()) Text(validation, color = MaterialTheme.colorScheme.error)
         } },

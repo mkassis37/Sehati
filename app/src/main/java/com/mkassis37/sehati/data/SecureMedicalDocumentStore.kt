@@ -95,28 +95,40 @@ class SecureMedicalDocumentStore(private val context: Context) {
             "image/webp" -> "webp"
             else -> throw IllegalArgumentException("نوع مرفق غير مدعوم.")
         }
-        val output = File(context.cacheDir, "sehati-${document.id}.$extension")
-        decryptFile(resolve(document.relativePath)).use { input ->
-            FileOutputStream(output).use { input.copyTo(it) }
+        val output = File.createTempFile("sehati-preview-${document.id}-", ".$extension", medicalShareDirectory(context))
+        try {
+            decryptFile(resolve(document.relativePath)).use { input ->
+                FileOutputStream(output).use { input.copyTo(it) }
+            }
+            output
+        } catch (error: Exception) {
+            output.delete()
+            throw error
         }
-        output
     }
 
-    fun delete(document: MedicalDocument) { resolve(document.relativePath).delete() }
+    fun delete(document: MedicalDocument) {
+        val file = resolve(document.relativePath)
+        if (!file.delete() && file.exists()) throw java.io.IOException("تعذر تنظيف المرفق المشفر.")
+    }
+
     fun deleteAll() { directory.deleteRecursively() }
 
     fun clearTemporaryPdfs() {
+        // Older builds stored these files directly in cache.
         context.cacheDir.listFiles()?.filter {
-            val staleCapture = !it.name.startsWith("sehati-camera-") || System.currentTimeMillis() - it.lastModified() > 3_600_000
-            it.isFile && staleCapture && it.name.startsWith("sehati-") && it.extension.lowercase() in setOf("pdf", "jpg", "png", "webp")
+            it.isFile && it.name.startsWith("sehati-") && it.extension.lowercase() in setOf("pdf", "jpg", "png", "webp")
+        }?.forEach { it.delete() }
+        medicalShareDirectory(context).listFiles()?.filter {
+            it.isFile && System.currentTimeMillis() - it.lastModified() > 3_600_000
         }?.forEach { it.delete() }
     }
 
     fun clearTemporaryPdf(documentId: Long) = clearTemporaryDocument(documentId)
 
     fun clearTemporaryDocument(documentId: Long) {
-        context.cacheDir.listFiles()?.filter {
-            it.isFile && it.nameWithoutExtension == "sehati-$documentId" && it.extension.lowercase() in setOf("pdf", "jpg", "png", "webp")
+        medicalShareDirectory(context).listFiles()?.filter {
+            it.isFile && it.name.startsWith("sehati-preview-$documentId-")
         }?.forEach { it.delete() }
     }
 
@@ -191,4 +203,8 @@ class SecureMedicalDocumentStore(private val context: Context) {
         private const val MAX_DOCUMENT_BYTES = 25L * 1024L * 1024L
         private val MAGIC = byteArrayOf(0x53, 0x48, 0x44, 0x46)
     }
+}
+
+internal fun medicalShareDirectory(context: Context): File = File(context.cacheDir, "medical-share").apply {
+    if (!isDirectory && !mkdirs() && !isDirectory) throw java.io.IOException("تعذر تجهيز المعاينة الطبية.")
 }

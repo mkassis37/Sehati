@@ -695,7 +695,7 @@ private fun SehatiApp(
                     biometricEnabled = lockStore.isBiometricEnabled(),
                     biometricAvailable = biometricAvailable,
                     onLockNow = {
-                        backupPreview = null
+                        discardCurrentBackupPreview()
                         backupPassword = ""
                         showBackupPassword = false
                         locked = true
@@ -847,6 +847,7 @@ private fun SehatiApp(
                             lastBackupAt = savedAt
                             lastBackupSizeBytes = savedSize
                         } else {
+                            discardCurrentBackupPreview()
                             backupPreview = backup.preview(context.contentResolver, uri, pass)
                             backupMessage = ""
                         }
@@ -899,7 +900,8 @@ private fun SehatiApp(
                         } catch (_: Exception) {
                             backupMessage = "فشلت الاستعادة ولم تكتمل."
                         } finally {
-                            backupPreview = null
+                            backup.discardPreview(preview)
+                            if (backupPreview === preview) backupPreview = null
                             restoringBackup = false
                         }
                     }

@@ -105,7 +105,7 @@ class MainActivity : FragmentActivity() {
             val appearanceStore = remember { AppearanceSettingsStore(applicationContext) }
             val appearance by appearanceStore.settings.collectAsState(initial = AppearanceSettings())
             val appearanceScope = rememberCoroutineScope()
-            var showSplash by remember { mutableStateOf(true) }
+            var showSplash by rememberSaveable { mutableStateOf(savedInstanceState == null) }
             SehatiTheme(appearance = appearance) {
                 CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
                     if (showSplash) {

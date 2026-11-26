@@ -17,6 +17,8 @@ import java.time.Instant
 import java.time.format.DateTimeFormatter
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.resume
@@ -64,20 +66,33 @@ internal class DriveBackupClient(context: Context, private val backup: Encrypted
             .appendQueryParameter("q", "trashed = false and name contains 'sehati-backup-'")
             .appendQueryParameter("orderBy", "createdTime desc")
             .appendQueryParameter("pageSize", "100")
-            .appendQueryParameter("fields", "files(id,name,createdTime,size,sha256Checksum,appProperties)")
-            .build().toString()
-        request(query, token) { connection ->
-            connection.requireSuccess()
-            val body = JSONObject(connection.inputStream.use { it.readBytes() }.toString(Charsets.UTF_8))
-            val items = body.optJSONArray("files") ?: JSONArray()
-            (0 until items.length()).map { index ->
-                val file = items.getJSONObject(index)
-                DriveFile(file.getString("id"), file.getString("name"), file.optString("createdTime"),
-                    file.optLong("size"), file.optString("sha256Checksum"),
-                    file.optJSONObject("appProperties")?.optString(UPLOAD_SHA256).orEmpty())
+            .appendQueryParameter("fields", "nextPageToken,files(id,name,createdTime,size,sha256Checksum,appProperties)")
+            .build()
+        val files = linkedMapOf<String, DriveFile>()
+        val seenTokens = mutableSetOf<String>()
+        var pageToken: String? = null
+        do {
+            currentCoroutineContext().ensureActive()
+            val address = pageToken?.let { query.buildUpon().appendQueryParameter("pageToken", it).build() } ?: query
+            pageToken = request(address.toString(), token) { connection ->
+                connection.requireSuccess()
+                val body = JSONObject(connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() })
+                val items = body.optJSONArray("files") ?: JSONArray()
+                for (index in 0 until items.length()) {
+                    val file = items.getJSONObject(index).toDriveFile()
+                    files.putIfAbsent(file.id, file)
+                }
+                body.optString("nextPageToken").takeIf(String::isNotBlank)
             }
-        }
+            if (pageToken != null && !seenTokens.add(pageToken)) throw IOException("Drive repeated a backup page")
+        } while (pageToken != null)
+        files.values.toList()
     }
+
+    private fun JSONObject.toDriveFile() = DriveFile(
+        getString("id"), getString("name"), optString("createdTime"), optLong("size"),
+        optString("sha256Checksum"), optJSONObject("appProperties")?.optString(UPLOAD_SHA256).orEmpty()
+    )
 
     suspend fun upload(token: String, password: CharArray, name: String): DriveFile = withContext(Dispatchers.IO) {
         val encrypted = File.createTempFile("sehati-drive-", ".shtb", app.cacheDir)
@@ -106,10 +121,17 @@ internal class DriveBackupClient(context: Context, private val backup: Encrypted
                 verifyDriveBackup(stored.optLong("size", -1), stored.optString("sha256Checksum"), size, sha256)
                 stored.getString("id")
             }
-            // Verify that the encrypted object is actually listed in the app's Drive folder.
-            val verified = list(token).firstOrNull { it.id == uploadedId }
-                ?: throw IOException("Uploaded backup was not found in appDataFolder.")
-            if (verified.size != size || !verified.uploadedSha256.equals(sha256, ignoreCase = true)) {
+            val verifiedUrl = Uri.parse(DRIVE_FILES).buildUpon().appendPath(uploadedId)
+                .appendQueryParameter("fields", "id,name,createdTime,size,sha256Checksum,appProperties,trashed")
+                .build().toString()
+            val verified = request(verifiedUrl, token) { connection ->
+                connection.requireSuccess()
+                val file = JSONObject(connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() })
+                if (file.optBoolean("trashed")) throw IOException("Drive backup is in the trash")
+                file.toDriveFile()
+            }
+            verifyDriveBackup(verified.size, verified.sha256, size, sha256)
+            if (verified.id != uploadedId || !verified.uploadedSha256.equals(sha256, ignoreCase = true)) {
                 throw IOException("Uploaded backup metadata does not match the encrypted source.")
             }
             verified

@@ -111,11 +111,11 @@ object LabReportParser {
         // OCR commonly returns a laboratory table row as one line:
         // Test | Result | Unit | Reference (or Test | Result | Reference | Unit).
         val resultUnitReference = Regex(
-            """^(.+?)\\s+([+-]?(?:\\d+(?:[.,]\\d*)?|[.,]\\d+))\\s*([LH*])?\\s+([A-Za-zµμ/%0-9'._/-]+)\\s+((?:(?:[+-]?(?:\\d+(?:[.,]\\d*)?|[.,]\\d+)\\s*[-–]\\s*[+-]?(?:\\d+(?:[.,]\\d*)?|[.,]\\d+))|(?:<=?|>=?)\\s*[+-]?(?:\\d+(?:[.,]\\d*)?|[.,]\\d+)))$""",
+            """^(.+?)\s+([+-]?(?:\d+(?:[.,]\d*)?|[.,]\d+))\s*([LH*])?\s+([A-Za-zµμ/%0-9'._/-]+)\s+((?:(?:[+-]?(?:\d+(?:[.,]\d*)?|[.,]\d+)\s*[-–]\s*[+-]?(?:\d+(?:[.,]\d*)?|[.,]\d+))|(?:<=?|>=?)\s*[+-]?(?:\d+(?:[.,]\d*)?|[.,]\d+)))$""",
             RegexOption.IGNORE_CASE
         )
         val qualitativeRow = Regex(
-            """^(.+?)\\s+(Positive|Negative|Nil|Hazy|Trace|إيجابي|سلبي|عكر|آثار)\\s+(.+?)$""",
+            """^(.+?)\s+(Positive|Negative|Nil|Hazy|Trace|إيجابي|سلبي|عكر|آثار)\s+(.+?)$""",
             RegexOption.IGNORE_CASE
         )
         lines.forEach { line ->

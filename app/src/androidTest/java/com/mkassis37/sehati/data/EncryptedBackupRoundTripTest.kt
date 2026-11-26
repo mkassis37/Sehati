@@ -11,6 +11,7 @@ import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -25,7 +26,9 @@ class EncryptedBackupRoundTripTest {
         val store = SecureMedicalDocumentStore(context)
         val input = File.createTempFile("sehati-fixture-", ".pdf", context.cacheDir)
         val archive = File.createTempFile("sehati-fixture-", ".shtb", context.cacheDir)
-        val fixture = "%PDF-1.4\nSynthetic attachment fixture\n".toByteArray()
+        val fixture = ByteArray(6 * 1024 * 1024) { (it % 251).toByte() }.also {
+            "%PDF-1.7\nSynthetic streamed attachment\n".toByteArray().copyInto(it)
+        }
         val password = "synthetic-password-for-test"
         try {
             val owner = source.medicalDao().addMember(FamilyMember(fullName = "Synthetic owner"))
@@ -41,6 +44,25 @@ class EncryptedBackupRoundTripTest {
             val proof = restore.preview(context.contentResolver, uri, password.toCharArray())
             assertEquals(listOf("Synthetic owner"), proof.memberNames)
             assertEquals(1, proof.documentCount)
+            assertFalse(proof.payload.getJSONArray("documents").getJSONObject(0).has("content"))
+            archive.inputStream().use { input ->
+                val header = ByteArray(5)
+                input.readFully(header)
+                assertEquals(2, header[4].toInt() and 0xff)
+            }
+
+            val tampered = restore.preview(context.contentResolver, uri, password.toCharArray())
+            val tamperedArchive = File(checkNotNull(tampered.stagedArchivePath))
+            java.io.RandomAccessFile(tamperedArchive, "rw").use { file ->
+                val offset = file.length() - 1
+                file.seek(offset)
+                val value = file.readByte()
+                file.seek(offset)
+                file.writeByte(value.toInt() xor 0x01)
+            }
+            assertTrue(runCatching { restore.restore(tampered) }.isFailure)
+            assertEquals("Synthetic original", target.medicalDao().getAllMembers().single().fullName)
+            restore.discardPreview(tampered)
 
             val invalidPayload = JSONObject(proof.payload.toString())
             val documents = invalidPayload.getJSONArray("documents")
@@ -57,6 +79,10 @@ class EncryptedBackupRoundTripTest {
             assertEquals("2026-11-25", restored.documentDate)
             val bytes = ByteArrayOutputStream().also { store.copyPlaintextTo(restored, it) }.toByteArray()
             assertArrayEquals(fixture, bytes)
+            val stagedPreview = File(checkNotNull(proof.stagedArchivePath))
+            assertTrue(stagedPreview.exists())
+            restore.discardPreview(proof)
+            assertFalse(stagedPreview.exists())
         } finally {
             source.medicalDao().getAllDocuments().forEach(store::delete)
             target.medicalDao().getAllDocuments().forEach(store::delete)

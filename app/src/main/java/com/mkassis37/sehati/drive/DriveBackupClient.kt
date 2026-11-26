@@ -79,7 +79,7 @@ internal class DriveBackupClient(context: Context, private val backup: Encrypted
         }
     }
 
-    suspend fun upload(token: String, password: CharArray, name: String) = withContext(Dispatchers.IO) {
+    suspend fun upload(token: String, password: CharArray, name: String): DriveFile = withContext(Dispatchers.IO) {
         val encrypted = File.createTempFile("sehati-drive-", ".shtb", app.cacheDir)
         try {
             backup.write(app.contentResolver, Uri.fromFile(encrypted), password)
@@ -91,7 +91,7 @@ internal class DriveBackupClient(context: Context, private val backup: Encrypted
                 .put("appProperties", JSONObject().put(UPLOAD_SHA256, sha256))
             val header = "--$boundary\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n$metadata\r\n--$boundary\r\nContent-Type: application/octet-stream\r\n\r\n".toByteArray(Charsets.UTF_8)
             val end = "\r\n--$boundary--\r\n".toByteArray(Charsets.UTF_8)
-            request("$DRIVE_UPLOAD?uploadType=multipart&fields=id,size,sha256Checksum", token) { connection ->
+            val uploadedId = request("$DRIVE_UPLOAD?uploadType=multipart&fields=id,size,sha256Checksum", token) { connection ->
                 connection.requestMethod = "POST"
                 connection.doOutput = true
                 connection.setRequestProperty("Content-Type", "multipart/related; boundary=$boundary")
@@ -104,7 +104,15 @@ internal class DriveBackupClient(context: Context, private val backup: Encrypted
                 connection.requireSuccess()
                 val stored = JSONObject(connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() })
                 verifyDriveBackup(stored.optLong("size", -1), stored.optString("sha256Checksum"), size, sha256)
+                stored.getString("id")
             }
+            // Verify that the encrypted object is actually listed in the app's Drive folder.
+            val verified = list(token).firstOrNull { it.id == uploadedId }
+                ?: throw IOException("Uploaded backup was not found in appDataFolder.")
+            if (verified.size != size || !verified.uploadedSha256.equals(sha256, ignoreCase = true)) {
+                throw IOException("Uploaded backup metadata does not match the encrypted source.")
+            }
+            verified
         } finally {
             password.fill('\u0000')
             encrypted.delete()

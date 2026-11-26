@@ -195,17 +195,34 @@ internal fun MedicalHealthScreen(
 }
 
 @Composable
+private fun ProfileInfoLine(label: String, value: String) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+        Text(value, style = MaterialTheme.typography.bodyLarge)
+    }
+}
+
+@Composable
 private fun SummaryPanel(member: FamilyMember, conditions: List<ChronicCondition>, allergies: List<AllergyRecord>, measurements: List<BodyMeasurement>, onEditEmergency: () -> Unit, onGo: (Int) -> Unit) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("الملف الصحي لـ ${member.fullName}", style = MaterialTheme.typography.headlineSmall)
-        Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("المعلومات الأساسية", style = MaterialTheme.typography.titleMedium)
-            Text("الميلاد: ${member.dateOfBirth.toDisplayDate().ifBlank { "غير مسجل" }} • الجنس: ${member.sex.ifBlank { "غير مسجل" }}")
-            Text("فصيلة الدم: ${member.bloodGroup.ifBlank { "غير مسجلة" }} • التواصل: ${member.phone.ifBlank { "غير مسجل" }}")
-            measurements.firstOrNull()?.let { Text("آخر قياس (${it.measuredOn.toDisplayDate()}): ${it.heightCm?.let { v -> "$v سم" } ?: "—"}، ${it.weightKg?.let { v -> "$v كغ" } ?: "—"}") }
-            if (member.additionalInfo.isNotBlank()) Text(member.additionalInfo)
-            if (member.medicalNotes.isNotBlank()) Text(member.medicalNotes)
-        } }
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("المعلومات الأساسية", style = MaterialTheme.typography.titleMedium)
+                ProfileInfoLine("تاريخ الميلاد", member.dateOfBirth.toDisplayDate().ifBlank { "غير مسجل" })
+                ProfileInfoLine("الجنس", member.sex.ifBlank { "غير مسجل" })
+                ProfileInfoLine("فصيلة الدم", member.bloodGroup.ifBlank { "غير مسجلة" })
+                ProfileInfoLine("رقم التواصل", member.phone.ifBlank { "غير مسجل" })
+                measurements.firstOrNull()?.let { measurement ->
+                    ProfileInfoLine(
+                        "آخر قياس · ${measurement.measuredOn.toDisplayDate()}",
+                        "الطول: ${measurement.heightCm?.let { value -> "$value سم" } ?: "غير مسجل"}  •  الوزن: ${measurement.weightKg?.let { value -> "$value كغ" } ?: "غير مسجل"}"
+                    )
+                }
+                if (member.additionalInfo.isNotBlank()) ProfileInfoLine("معلومات إضافية", member.additionalInfo)
+                if (member.medicalNotes.isNotBlank()) ProfileInfoLine("ملاحظات طبية", member.medicalNotes)
+            }
+        }
         val severe = allergies.filter { it.severity.contains("شديد") || it.severity.contains("high", true) }
         if (severe.isNotEmpty()) Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp)) {
             Text("حساسيات شديدة مسجلة", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.titleMedium)

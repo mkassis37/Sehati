@@ -130,7 +130,28 @@ internal class DriveBackupClient(context: Context, private val backup: Encrypted
                 if (file.optBoolean("trashed")) throw IOException("Drive backup is in the trash")
                 file.toDriveFile()
             }
-            verifyDriveBackup(verified.size, verified.sha256, size, sha256)
+            val verifiedSha256 = verified.sha256.ifBlank {
+                val download = Uri.parse(DRIVE_FILES).buildUpon().appendPath(uploadedId)
+                    .appendQueryParameter("alt", "media").build().toString()
+                request(download, token) { connection ->
+                    connection.requireSuccess()
+                    val digest = MessageDigest.getInstance("SHA-256")
+                    var downloaded = 0L
+                    connection.inputStream.use { input ->
+                        val buffer = ByteArray(32 * 1024)
+                        while (true) {
+                            val count = input.read(buffer)
+                            if (count < 0) break
+                            downloaded += count
+                            if (downloaded > size) throw IOException("Drive returned more encrypted data than expected")
+                            digest.update(buffer, 0, count)
+                        }
+                    }
+                    verifyDriveBackup(downloaded, digest.digest().toHex(), size, sha256)
+                    sha256
+                }
+            }
+            verifyDriveBackup(verified.size, verifiedSha256, size, sha256)
             if (verified.id != uploadedId || !verified.uploadedSha256.equals(sha256, ignoreCase = true)) {
                 throw IOException("Uploaded backup metadata does not match the encrypted source.")
             }
@@ -227,5 +248,7 @@ private fun File.sha256(): String {
             digest.update(buffer, 0, count)
         }
     }
-    return digest.digest().joinToString("") { "%02x".format(it) }
+    return digest.digest().toHex()
 }
+
+private fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it) }

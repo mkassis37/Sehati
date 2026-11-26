@@ -139,8 +139,14 @@ fun LabPdfReader(onExtractedText: (String) -> Unit, onCandidateSelected: (LabRep
                                             if (it is CancellationException) throw it
                                             ""
                                         }
-                                        text.append("\n").append(arabic.take(MAX_LAB_PAGE_TEXT))
-                                            .append("\n").append(latin.take(MAX_LAB_PAGE_TEXT))
+                                        // ML Kit Latin OCR is primary for English names, values and units.
+// Tesseract is configured for Arabic; keep only Arabic-script lines from it
+// to avoid Latin hallucinations such as "Normal 18" beside English rows.
+val arabicLines = arabic.lineSequence()
+.filter { line -> line.any { it in '\u0600'..'\u06FF' } }
+.joinToString("\n")
+text.append("\n").append(latin.take(MAX_LAB_PAGE_TEXT))
+.append("\n").append(arabicLines.take(MAX_LAB_PAGE_TEXT))
                                     } finally {
                                         bitmap.recycle()
                                     }

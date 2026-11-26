@@ -164,8 +164,11 @@ internal fun DriveSettings(
                                 DrivePasswordMode.UPLOAD -> {
                                     prefs.recordAttempt()
                                     try {
-                                        drive.upload(drive.grant(state.first), pass, driveBackupName())
-                                        prefs.recordStatus("تم رفع النسخة المشفرة.", success = true)
+                                        val uploaded = drive.upload(drive.grant(state.first), pass, driveBackupName())
+                                        prefs.recordStatus(
+                                            "تم رفع النسخة المشفرة والتحقق من وجودها في Drive (${uploaded.size} بايت).",
+                                            success = true
+                                        )
                                         status = prefs.status
                                     } catch (error: Exception) {
                                         prefs.recordStatus("فشلت محاولة رفع النسخة.")

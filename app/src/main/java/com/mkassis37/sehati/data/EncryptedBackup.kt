@@ -723,7 +723,7 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
                 cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(keyBytes, "AES"), GCMParameterSpec(128, iv))
                 cipher.updateAAD(documentAad(documentIndex, document, chunkIndex, expectedLength))
                 iv.fill(0)
-                val limited = LimitedInputStream(input, expectedLength + GCM_TAG_BYTES)
+                val limited = LimitedInputStream(input, expectedLength.toLong() + GCM_TAG_BYTES)
                 currentLimit = limited
                 current = AuthenticatedRecordInputStream(limited, cipher)
             }

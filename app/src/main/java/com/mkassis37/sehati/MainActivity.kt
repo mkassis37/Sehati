@@ -105,7 +105,7 @@ class MainActivity : FragmentActivity() {
             val appearanceStore = remember { AppearanceSettingsStore(applicationContext) }
             val appearance by appearanceStore.settings.collectAsState(initial = AppearanceSettings())
             val appearanceScope = rememberCoroutineScope()
-            var showSplash by remember { mutableStateOf(true) }
+            var showSplash by rememberSaveable { mutableStateOf(savedInstanceState == null) }
             SehatiTheme(appearance = appearance) {
                 CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
                     if (showSplash) {
@@ -239,22 +239,14 @@ private fun SehatiApp(
         while (lockStore.isEnabled() && appInForeground && !locked) {
             delay(1_000)
             if (System.currentTimeMillis() - lastInteractionAt >= lockStore.timeoutMinutes() * 60_000L) {
-                screen = Screen.MEMBERS
-                selectedId = null
-                editingId = null
+                // Lock without discarding the current section or selected person.
                 locked = true
                 break
             }
         }
     }
-    LaunchedEffect(appInForeground) {
-        if (!appInForeground) {
-            // Hide an open medical record when the app leaves the foreground.
-            screen = Screen.MEMBERS
-            selectedId = null
-            editingId = null
-        }
-    }
+    // Keep navigation state while Android pauses/recreates the Activity (rotation,
+    // document picker, or another app). The lock screen protects private data on return.
     val selected = members.firstOrNull { it.id == selectedId }
     val allergyFlow = remember(selectedId) {
         selectedId?.let { dao.observeAllergies(it) } ?: flowOf(emptyList())

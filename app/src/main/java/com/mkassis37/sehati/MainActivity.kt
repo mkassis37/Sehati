@@ -233,6 +233,11 @@ private fun SehatiApp(
     LaunchedEffect(Unit) {
         documentStore.clearTemporaryPdfs()
         backup.clearStalePreviewFiles()
+        runCatching {
+            documentStore.cleanupOrphanedDocuments(
+                dao.getAllDocuments().map { it.relativePath }.toSet()
+            )
+        }
     }
     LaunchedEffect(locked) {
         if (locked) discardCurrentBackupPreview()

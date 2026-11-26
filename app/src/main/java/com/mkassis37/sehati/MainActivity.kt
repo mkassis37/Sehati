@@ -848,6 +848,7 @@ private fun SehatiApp(
                             lastBackupSizeBytes = savedSize
                         } else {
                             discardCurrentBackupPreview()
+                            discardCurrentBackupPreview()
                             backupPreview = backup.preview(context.contentResolver, uri, pass)
                             backupMessage = ""
                         }

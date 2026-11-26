@@ -65,7 +65,7 @@ class LabReportParserTest {
     fun keepsEnglishTestNamesAndRejectsNormalReferenceLabels() {
         val rows = LabReportParser.parse(
             "Hemoglobin Level 13.8 g/dl (11.7 - 15.5)\n" +
-            "Normal 80 - 137 mg/dL\\n" +
+            "Normal 80 - 137 mg/dL\n" +
             "Report page 4 4 0"
         )
         assertTrue(rows.any { it.testName == "Hemoglobin Level" && it.value == 13.8 })

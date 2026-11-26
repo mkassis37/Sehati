@@ -432,6 +432,269 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
         }
     }
 
+
+    private data class V2Manifest(val root: JSONObject, val keyBytes: ByteArray, val manifestDigest: String, val manifestCipherLength: Int)
+
+    private fun writeVersionTwo(resolver: ContentResolver, uri: Uri, payload: JSONObject, documents: List<MedicalDocument>, password: CharArray) {
+        require(password.size >= 10)
+        val manifest = payload.toString().toByteArray(Charsets.UTF_8)
+        require(manifest.size <= MAX_MANIFEST_BYTES)
+        val staging = documentStore.createBackupPreviewFile()
+        val salt = ByteArray(16).also(SecureRandom()::nextBytes)
+        val keyBytes = deriveBytes(password, salt)
+        try {
+            FileOutputStream(staging).use { file ->
+                val output = DataOutputStream(BackupLimitOutput(file))
+                output.write(MAGIC)
+                output.writeByte(STREAMING_CONTAINER_VERSION)
+                output.write(salt)
+                val manifestIv = ByteArray(12).also(SecureRandom()::nextBytes)
+                val manifestCipher = Cipher.getInstance("AES/GCM/NoPadding")
+                manifestCipher.init(Cipher.ENCRYPT_MODE, SecretKeySpec(keyBytes, "AES"), GCMParameterSpec(128, manifestIv))
+                manifestCipher.updateAAD(MANIFEST_AAD)
+                val encryptedManifest = manifestCipher.doFinal(manifest)
+                output.writeInt(encryptedManifest.size)
+                output.write(manifestIv)
+                output.write(encryptedManifest)
+                encryptedManifest.fill(0)
+                manifestIv.fill(0)
+                documents.forEachIndexed { index, document ->
+                    require(document.sizeBytes in 1..MAX_DOCUMENT_BYTES)
+                    val iv = ByteArray(12).also(SecureRandom()::nextBytes)
+                    val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+                    cipher.init(Cipher.ENCRYPT_MODE, SecretKeySpec(keyBytes, "AES"), GCMParameterSpec(128, iv))
+                    cipher.updateAAD(documentAad(index, document))
+                    output.write(iv)
+                    val encryptedOutput = CipherOutputStream(NonClosingOutputStream(output), cipher)
+                    val counted = CountingOutputStream(encryptedOutput)
+                    try {
+                        documentStore.copyPlaintextTo(document, counted)
+                        counted.flush()
+                        require(counted.count == document.sizeBytes) { "Attachment size changed during backup." }
+                    } finally {
+                        encryptedOutput.close()
+                        iv.fill(0)
+                    }
+                }
+                output.flush()
+            }
+            if (staging.length() > MAX_BACKUP_BYTES) throw BackupSizeLimitException()
+            checkNotNull(resolver.openOutputStream(uri, "wt")).buffered().use { destination ->
+                FileInputStream(staging).use { it.copyTo(BackupLimitOutput(destination), STREAM_BUFFER_SIZE) }
+            }
+        } finally {
+            keyBytes.fill(0)
+            salt.fill(0)
+            manifest.fill(0)
+            staging.delete()
+        }
+    }
+
+    private fun readVersionTwoManifest(file: File, password: CharArray): V2Manifest {
+        val input = DataInputStream(BufferedInputStream(FileInputStream(file)))
+        val salt = ByteArray(16)
+        val iv = ByteArray(12)
+        var keyBytes: ByteArray? = null
+        var encryptedManifest: ByteArray? = null
+        try {
+            val magic = ByteArray(MAGIC.size)
+            input.readFully(magic)
+            require(magic.contentEquals(MAGIC) && input.readUnsignedByte() == STREAMING_CONTAINER_VERSION)
+            input.readFully(salt)
+            val cipherLength = input.readInt()
+            require(cipherLength in (GCM_TAG_BYTES + 1)..(MAX_MANIFEST_BYTES + GCM_TAG_BYTES))
+            input.readFully(iv)
+            encryptedManifest = ByteArray(cipherLength)
+            input.readFully(encryptedManifest)
+            val derivedKey = deriveBytes(password, salt)
+            keyBytes = derivedKey
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+            cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(derivedKey, "AES"), GCMParameterSpec(128, iv))
+            cipher.updateAAD(MANIFEST_AAD)
+            val plain = cipher.doFinal(encryptedManifest)
+            try {
+                val root = JSONObject(String(plain, Charsets.UTF_8))
+                val digest = sha256(plain)
+                keyBytes = null
+                return V2Manifest(root, derivedKey, digest, cipherLength)
+            } finally { plain.fill(0) }
+        } catch (error: Exception) {
+            throw IOException("تعذر التحقق من النسخة الاحتياطية أو كلمة المرور.", error)
+        } finally {
+            runCatching { input.close() }
+            salt.fill(0)
+            iv.fill(0)
+            encryptedManifest?.fill(0)
+            keyBytes?.fill(0)
+        }
+    }
+
+    private fun validateVersionTwoArchiveLength(file: File, root: JSONObject, manifestCipherLength: Int) {
+        val documents = root.optJSONArray("documents") ?: JSONArray()
+        var expected = (4 + 1 + 16 + 4 + 12 + manifestCipherLength).toLong()
+        for (index in 0 until documents.length()) {
+            val row = documents.getJSONObject(index)
+            val size = row.getLong("sizeBytes")
+            require(size in 1..MAX_DOCUMENT_BYTES)
+            require(row.getString("mimeType") in SUPPORTED_DOCUMENT_MIME_TYPES)
+            expected += 12L + size + GCM_TAG_BYTES
+            if (expected > MAX_BACKUP_BYTES) throw BackupSizeLimitException()
+        }
+        require(expected == file.length()) { "Backup is truncated or contains trailing bytes." }
+    }
+
+    private suspend fun restoreVersionTwoDocuments(preview: BackupPreview, documentRows: List<MedicalDocument>, createdFiles: MutableList<MedicalDocument>) {
+        val archive = File(checkNotNull(preview.stagedArchivePath)).canonicalFile
+        val keyBytes = checkNotNull(preview.archiveKeyBytes)
+        require(keyBytes.size == 32 && archive.name.startsWith("sehati-backup-preview-") &&
+            archive.parentFile?.name == BACKUP_PREVIEW_DIRECTORY)
+        DataInputStream(BufferedInputStream(FileInputStream(archive))).use { input ->
+            val magic = ByteArray(MAGIC.size)
+            input.readFully(magic)
+            require(magic.contentEquals(MAGIC) && input.readUnsignedByte() == STREAMING_CONTAINER_VERSION)
+            val salt = ByteArray(16)
+            input.readFully(salt)
+            val manifestLength = input.readInt()
+            require(manifestLength in (GCM_TAG_BYTES + 1)..(MAX_MANIFEST_BYTES + GCM_TAG_BYTES))
+            val manifestIv = ByteArray(12)
+            input.readFully(manifestIv)
+            val encryptedManifest = ByteArray(manifestLength)
+            input.readFully(encryptedManifest)
+            val manifestCipher = Cipher.getInstance("AES/GCM/NoPadding")
+            manifestCipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(keyBytes, "AES"), GCMParameterSpec(128, manifestIv))
+            manifestCipher.updateAAD(MANIFEST_AAD)
+            val manifest = manifestCipher.doFinal(encryptedManifest)
+            try {
+                require(sha256(manifest) == preview.manifestDigest)
+                val verifiedRoot = JSONObject(String(manifest, Charsets.UTF_8))
+                require(verifiedRoot.toString() == preview.payload.toString())
+                validateVersionTwoArchiveLength(archive, verifiedRoot, manifestLength)
+            } finally {
+                salt.fill(0); manifestIv.fill(0); encryptedManifest.fill(0); manifest.fill(0)
+            }
+            require(documentRows.size == preview.documentCount)
+            documentRows.forEachIndexed { index, document ->
+                currentCoroutineContext().ensureActive()
+                val iv = ByteArray(12)
+                input.readFully(iv)
+                val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+                cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(keyBytes, "AES"), GCMParameterSpec(128, iv))
+                cipher.updateAAD(documentAad(index, document))
+                val limited = LimitedInputStream(input, document.sizeBytes + GCM_TAG_BYTES)
+                val decrypted = AuthenticatedRecordInputStream(limited, cipher)
+                try {
+                    val restored = documentStore.restore(document, decrypted, document.sizeBytes)
+                    require(decrypted.isAuthenticated && limited.remaining == 0L)
+                    createdFiles += restored
+                } finally {
+                    iv.fill(0)
+                    decrypted.close()
+                }
+            }
+            require(input.read() == -1) { "Backup contains unexpected trailing data." }
+        }
+    }
+
+    private fun documentMetadata(doc: MedicalDocument): JSONObject = JSONObject()
+        .put("id", doc.id).put("memberId", doc.memberId).put("displayName", doc.displayName)
+        .put("mimeType", doc.mimeType).put("sizeBytes", doc.sizeBytes)
+        .put("relatedProcedureId", doc.relatedProcedureId ?: JSONObject.NULL).put("addedAt", doc.addedAt)
+        .put("relatedAppointmentId", doc.relatedAppointmentId ?: JSONObject.NULL)
+        .put("relatedLabResultId", doc.relatedLabResultId ?: JSONObject.NULL)
+        .put("category", doc.category).put("documentDate", doc.documentDate)
+
+    private fun documentAad(index: Int, document: MedicalDocument): ByteArray =
+        "sehati:shtb:v2:document:$index:${document.id}:${document.memberId}:${document.mimeType}:${document.sizeBytes}"
+            .toByteArray(Charsets.UTF_8)
+
+    private fun deriveBytes(password: CharArray, salt: ByteArray): ByteArray {
+        val spec = PBEKeySpec(password, salt, PBKDF2_ITERATIONS, 256)
+        return try { SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).encoded }
+        finally { spec.clearPassword() }
+    }
+
+    private fun sha256(bytes: ByteArray): String =
+        MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+
+    private class NonClosingOutputStream(output: OutputStream) : FilterOutputStream(output) {
+        override fun close() { flush() }
+    }
+
+    private class CountingOutputStream(output: OutputStream) : FilterOutputStream(output) {
+        var count: Long = 0
+            private set
+        override fun write(value: Int) { out.write(value); count++ }
+        override fun write(buffer: ByteArray, offset: Int, length: Int) { out.write(buffer, offset, length); count += length }
+    }
+
+    private class LimitedInputStream(input: InputStream, length: Long) : FilterInputStream(input) {
+        var remaining: Long = length
+            private set
+        override fun read(): Int {
+            if (remaining == 0L) return -1
+            val value = super.read()
+            if (value < 0) throw EOFException("Truncated encrypted attachment.")
+            remaining--
+            return value
+        }
+        override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
+            if (remaining == 0L) return -1
+            val count = super.read(buffer, offset, minOf(length.toLong(), remaining).toInt())
+            if (count < 0) throw EOFException("Truncated encrypted attachment.")
+            if (count > 0) remaining -= count
+            return count
+        }
+        override fun close() = Unit
+    }
+
+    private class AuthenticatedRecordInputStream(
+        private val source: LimitedInputStream,
+        private val cipher: Cipher
+    ) : InputStream() {
+        private var encryptedRemaining = source.remaining
+        private var pending = ByteArray(0)
+        private var pendingOffset = 0
+        private var finalized = false
+        var isAuthenticated: Boolean = false
+            private set
+        override fun read(): Int {
+            val one = ByteArray(1)
+            val count = read(one, 0, 1)
+            return if (count < 0) -1 else one[0].toInt() and 0xff
+        }
+        override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
+            if (length == 0) return 0
+            while (pendingOffset >= pending.size) {
+                if (encryptedRemaining > 0) {
+                    val encrypted = ByteArray(minOf(STREAM_BUFFER_SIZE.toLong(), encryptedRemaining).toInt())
+                    val count = source.read(encrypted)
+                    if (count < 0) throw EOFException("Truncated encrypted attachment.")
+                    if (count == 0) continue
+                    encryptedRemaining -= count
+                    val output = cipher.update(encrypted, 0, count)
+                    encrypted.fill(0)
+                    if (output != null && output.isNotEmpty()) { pending = output; pendingOffset = 0 }
+                } else if (!finalized) {
+                    finalized = true
+                    try {
+                        pending = cipher.doFinal()
+                        pendingOffset = 0
+                        isAuthenticated = true
+                    } catch (error: Exception) {
+                        throw IOException("Encrypted attachment authentication failed.", error)
+                    }
+                    if (pending.isEmpty()) return -1
+                } else return -1
+            }
+            val count = minOf(length, pending.size - pendingOffset)
+            System.arraycopy(pending, pendingOffset, buffer, offset, count)
+            pendingOffset += count
+            if (pendingOffset == pending.size) { pending.fill(0); pending = ByteArray(0); pendingOffset = 0 }
+            return count
+        }
+        override fun close() { pending.fill(0); pending = ByteArray(0); source.close() }
+    }
+
     private fun decrypt(input: InputStream, password: CharArray): JSONObject {
         val plain = readAuthenticatedBackup(input, password)
         return try { JSONObject(String(plain, Charsets.UTF_8)) } finally { plain.fill(0) }

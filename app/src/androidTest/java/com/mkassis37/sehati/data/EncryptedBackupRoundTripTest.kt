@@ -6,6 +6,7 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import java.io.File
+import java.io.DataInputStream
 import java.io.ByteArrayOutputStream
 import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
@@ -45,9 +46,9 @@ class EncryptedBackupRoundTripTest {
             assertEquals(listOf("Synthetic owner"), proof.memberNames)
             assertEquals(1, proof.documentCount)
             assertFalse(proof.payload.getJSONArray("documents").getJSONObject(0).has("content"))
-            archive.inputStream().use { input ->
+            archive.inputStream().use { stream ->
                 val header = ByteArray(5)
-                input.readFully(header)
+                DataInputStream(stream).readFully(header)
                 assertEquals(2, header[4].toInt() and 0xff)
             }
 

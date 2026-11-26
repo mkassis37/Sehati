@@ -151,6 +151,25 @@ class SecureMedicalDocumentStore(private val context: Context) {
 
     fun deleteAll() { directory.deleteRecursively() }
 
+    /**
+     * Removes encrypted attachment files left behind by an interrupted restore.
+     * Only .shtd files not referenced by Room are eligible; live records are retained.
+     */
+    suspend fun cleanupOrphanedDocuments(referencedRelativePaths: Set<String>) = withContext(Dispatchers.IO) {
+        val base = directory.canonicalFile
+        if (!base.isDirectory) return@withContext
+        base.walkTopDown().filter { it.isFile && it.extension.equals("shtd", ignoreCase = true) }.forEach { candidate ->
+            val file = candidate.canonicalFile
+            if (!file.path.startsWith(base.path + File.separator)) return@forEach
+            val relative = file.relativeTo(base).invariantSeparatorsPath
+            if (relative !in referencedRelativePaths && !file.delete() && file.exists()) {
+                throw java.io.IOException("تعذر تنظيف ملف مرفق مرحلي.")
+            }
+        }
+        base.walkBottomUp().filter { it.isDirectory && it != base && it.list().isNullOrEmpty() }
+            .forEach { it.delete() }
+    }
+
     internal fun createBackupPreviewFile(): File {
         val directory = backupPreviewDirectory()
         return File.createTempFile("sehati-backup-preview-", ".shtb", directory)

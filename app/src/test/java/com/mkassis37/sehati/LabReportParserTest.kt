@@ -60,4 +60,16 @@ class LabReportParserTest {
         assertEquals(22.3, rows.first { it.testName == "فيتامين د" }.value!!, 0.0001)
     }
 
+
+    @Test
+    fun keepsEnglishTestNamesAndRejectsNormalReferenceLabels() {
+        val rows = LabReportParser.parse(
+            "Hemoglobin Level 13.8 g/dl (11.7 - 15.5)\\n" +
+            "Normal 80 - 137 mg/dL\\n" +
+            "Report page 4 4 0"
+        )
+        assertTrue(rows.any { it.testName == "Hemoglobin Level" && it.value == 13.8 })
+        assertTrue(rows.none { it.testName.contains("Normal", ignoreCase = true) })
+        assertTrue(rows.none { it.testName.contains("Report page", ignoreCase = true) })
+    }
 }

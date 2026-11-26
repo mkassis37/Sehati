@@ -194,6 +194,10 @@ private fun SehatiApp(
     var backupPreview by remember { mutableStateOf<EncryptedBackup.BackupPreview?>(null) }
     var restoringBackup by remember { mutableStateOf(false) }
     var backupMessage by remember { mutableStateOf("") }
+    fun discardCurrentBackupPreview() {
+        backupPreview?.let(backup::discardPreview)
+        backupPreview = null
+    }
     val driveAuthorization = rememberDriveAuthorization(backup) {
         settingsSection = SettingsSection.DRIVE
         screen = Screen.SETTINGS
@@ -226,7 +230,13 @@ private fun SehatiApp(
         ProcessLifecycleOwner.get().lifecycle.addObserver(observer)
         onDispose { ProcessLifecycleOwner.get().lifecycle.removeObserver(observer) }
     }
-    LaunchedEffect(Unit) { documentStore.clearTemporaryPdfs() }
+    LaunchedEffect(Unit) {
+        documentStore.clearTemporaryPdfs()
+        backup.clearStalePreviewFiles()
+    }
+    LaunchedEffect(locked) {
+        if (locked) discardCurrentBackupPreview()
+    }
     LaunchedEffect(Unit) {
         if (!BuildConfig.DEBUG) {
             updateStatus = "جارٍ فحص الإصدارات..."
@@ -674,7 +684,10 @@ private fun SehatiApp(
                     reminders = reminders,
                     backup = backup,
                     driveAuthorization = driveAuthorization,
-                    onDrivePreview = { backupPreview = it },
+                    onDrivePreview = {
+                        discardCurrentBackupPreview()
+                        backupPreview = it
+                    },
                     onPaletteSelected = onPaletteSelected,
                     onThemeModeSelected = onThemeModeSelected,
                     onResetAppearance = onResetAppearance,
@@ -853,7 +866,7 @@ private fun SehatiApp(
 
     backupPreview?.let { preview ->
         AlertDialog(
-            onDismissRequest = { if (!restoringBackup) backupPreview = null },
+            onDismissRequest = { if (!restoringBackup) discardCurrentBackupPreview() },
             title = { Text("معاينة النسخة الاحتياطية") },
             text = { Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("عدد الأفراد: ${preview.memberNames.size}")
@@ -892,7 +905,7 @@ private fun SehatiApp(
                     }
                 }
             }) { Text(if (restoringBackup) "جارٍ الاستعادة…" else "استعادة واستبدال البيانات") } },
-            dismissButton = { TextButton(enabled = !restoringBackup, onClick = { backupPreview = null }) { Text("إلغاء") } }
+            dismissButton = { TextButton(enabled = !restoringBackup, onClick = { discardCurrentBackupPreview() }) { Text("إلغاء") } }
         )
     }
 

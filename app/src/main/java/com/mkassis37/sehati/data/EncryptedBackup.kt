@@ -601,10 +601,6 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
         .put("relatedLabResultId", doc.relatedLabResultId ?: JSONObject.NULL)
         .put("category", doc.category).put("documentDate", doc.documentDate)
 
-    private fun documentAad(index: Int, document: MedicalDocument, chunkIndex: Int, plainLength: Int): ByteArray =
-        "sehati:shtb:v2:document:$index:${document.id}:${document.memberId}:${document.mimeType}:${document.sizeBytes}:chunk:$chunkIndex:$plainLength"
-            .toByteArray(Charsets.UTF_8)
-
     private class ChunkedGcmOutputStream(
         private val output: DataOutputStream,
         private val keyBytes: ByteArray,
@@ -644,7 +640,7 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
             val iv = ByteArray(12).also(SecureRandom()::nextBytes)
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
             cipher.init(Cipher.ENCRYPT_MODE, SecretKeySpec(keyBytes, "AES"), GCMParameterSpec(128, iv))
-            cipher.updateAAD(documentAad(documentIndex, document, chunkIndex, buffered))
+            cipher.updateAAD(backupDocumentAad(documentIndex, document, chunkIndex, buffered))
             val encrypted = cipher.doFinal(buffer, 0, buffered)
             try {
                 output.writeInt(buffered)
@@ -721,7 +717,7 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
                 input.readFully(iv)
                 val cipher = Cipher.getInstance("AES/GCM/NoPadding")
                 cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(keyBytes, "AES"), GCMParameterSpec(128, iv))
-                cipher.updateAAD(documentAad(documentIndex, document, chunkIndex, expectedLength))
+                cipher.updateAAD(backupDocumentAad(documentIndex, document, chunkIndex, expectedLength))
                 iv.fill(0)
                 val limited = LimitedInputStream(input, expectedLength.toLong() + GCM_TAG_BYTES)
                 currentLimit = limited
@@ -938,5 +934,15 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
         private val backupLock = Mutex()
     }
 }
+
+private fun backupDocumentAad(
+    index: Int,
+    document: MedicalDocument,
+    chunkIndex: Int,
+    plainLength: Int
+): ByteArray =
+    "sehati:shtb:v2:document:$index:${document.id}:${document.memberId}:${document.mimeType}:${document.sizeBytes}:chunk:$chunkIndex:$plainLength"
+        .toByteArray(Charsets.UTF_8)
+
 
 class BackupSizeLimitException : IOException("Backup exceeds the 64 MiB limit.")

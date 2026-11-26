@@ -32,7 +32,8 @@ internal fun DocumentLibraryScreen(
     documents: List<MedicalDocument>,
     links: List<DocumentLink>,
     actions: DocumentLibraryActions,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    focused: Boolean = false
 ) {
     val scope = rememberCoroutineScope()
     var query by rememberSaveable(member.id) { mutableStateOf("") }
@@ -42,7 +43,7 @@ internal fun DocumentLibraryScreen(
     var deleting by remember(member.id) { mutableStateOf(false) }
     var error by remember(member.id) { mutableStateOf("") }
     val zone = ZoneId.systemDefault()
-    val visible = documents.filter { document ->
+    val visible = if (focused) documents else documents.filter { document ->
         val day = document.documentDate.ifBlank { Instant.ofEpochMilli(document.addedAt).atZone(zone).toLocalDate().toString() }
         document.displayName.contains(query.trim(), true) &&
             (category == null || document.category == category?.name) &&
@@ -51,19 +52,21 @@ internal fun DocumentLibraryScreen(
     LazyColumn(modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
             Text("الملفات الطبية · ${member.fullName}", style = MaterialTheme.typography.titleLarge)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { actions.pick(member.id) }) { Text("اختيار ملف") }
-                OutlinedButton(onClick = { actions.capture(member.id) }) { Text("التقاط صورة") }
-            }
-            OutlinedTextField(query, { query = it }, label = { Text("البحث باسم الملف") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                FilterChip(category == null, { category = null }, label = { Text("كل الأنواع") })
-                DocumentCategory.entries.forEach { option ->
-                    FilterChip(category == option, { category = option }, label = { Text(option.label) })
+            if (!focused) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = { actions.pick(member.id) }) { Text("اختيار ملف") }
+                    OutlinedButton(onClick = { actions.capture(member.id) }) { Text("التقاط صورة") }
                 }
+                OutlinedTextField(query, { query = it }, label = { Text("البحث باسم الملف") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    FilterChip(category == null, { category = null }, label = { Text("كل الأنواع") })
+                    DocumentCategory.entries.forEach { option ->
+                        FilterChip(category == option, { category = option }, label = { Text(option.label) })
+                    }
+                }
+                DatePickerField("تصفية حسب التاريخ", date, { date = it }, Modifier.fillMaxWidth())
+                if (date.isNotBlank()) TextButton(onClick = { date = "" }) { Text("كل التواريخ") }
             }
-            DatePickerField("تصفية حسب التاريخ", date, { date = it }, Modifier.fillMaxWidth())
-            if (date.isNotBlank()) TextButton(onClick = { date = "" }) { Text("كل التواريخ") }
             if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
         }
         if (visible.isEmpty()) item { Text("لا توجد ملفات ضمن الاختيار الحالي.") }

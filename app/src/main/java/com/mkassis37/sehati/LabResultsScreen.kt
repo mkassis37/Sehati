@@ -24,7 +24,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 @Composable
-internal fun LabResultsScreen(member: FamilyMember, records: List<LabResult>, documents: List<MedicalDocument>, saveResult: suspend (LabResult, Uri?) -> Boolean, deleteResult: suspend (Long) -> Unit, saveDocument: suspend (Uri) -> Unit, openDocument: (MedicalDocument) -> Unit, deleteDocument: (MedicalDocument) -> Unit, modifier: Modifier = Modifier, initiallyAdd: Boolean = false) {
+internal fun LabResultsScreen(member: FamilyMember, records: List<LabResult>, documents: List<MedicalDocument>, saveResult: suspend (LabResult, Uri?) -> Boolean, deleteResult: suspend (Long) -> Unit, saveDocument: suspend (Uri) -> Unit, openDocument: (MedicalDocument) -> Unit, deleteDocument: (MedicalDocument) -> Unit, modifier: Modifier = Modifier, initiallyAdd: Boolean = false, focused: Boolean = false) {
     val scope = rememberCoroutineScope()
     var showAdd by rememberSaveable(member.id) { mutableStateOf(initiallyAdd) }
     var editingId by rememberSaveable(member.id) { mutableStateOf<Long?>(null) }
@@ -38,7 +38,7 @@ internal fun LabResultsScreen(member: FamilyMember, records: List<LabResult>, do
     val units = records.filter { it.testName == selectedTest }.map { it.unit }.distinct().sorted()
     val latestUnit = records.filter { it.testName == selectedTest }.maxByOrNull { it.performedAt }?.unit.orEmpty()
     val activeUnit = selectedUnit ?: latestUnit
-    val filtered = records.filter { selectedTest.isBlank() || (it.testName == selectedTest && it.unit == activeUnit) }
+    val filtered = if (focused) records else records.filter { selectedTest.isBlank() || (it.testName == selectedTest && it.unit == activeUnit) }
         .filter { row -> years == 0 || runCatching { LocalDate.parse(row.performedAt).isAfter(LocalDate.now().minusYears(years.toLong()).minusDays(1)) }.getOrDefault(false) }
     val chronological = filtered.sortedBy { it.performedAt }
     val latest = chronological.lastOrNull()
@@ -51,101 +51,103 @@ internal fun LabResultsScreen(member: FamilyMember, records: List<LabResult>, do
     val previousValue = previous?.value
     Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("فحوصات " + member.fullName, style = MaterialTheme.typography.titleLarge)
-        Text("تُحفظ كل نتيجة بتاريخها ومجالها المرجعي، وتبقى متاحة للمقارنة لسنوات.", style = MaterialTheme.typography.bodySmall)
-        Button(onClick = { editingId = null; reviewCandidate = null; sourceUri = null; showAdd = true }, modifier = Modifier.fillMaxWidth()) { Text("إضافة نتيجة فحص") }
-        LabPdfReader(
-            onExtractedText = { /* تتم المعاينة محليًا فقط؛ لا يُحفظ النص الخام */ },
-            onCandidateSelected = { candidate, uri -> editingId = null; reviewCandidate = candidate; sourceUri = uri; showAdd = true },
-            onSavePdf = saveDocument
-        )
-        Text("التقارير المحفوظة في ملف " + member.fullName, style = MaterialTheme.typography.titleMedium)
-        if (documents.isEmpty()) {
-            Text("لم يتم حفظ مستندات لهذا الفرد بعد.", style = MaterialTheme.typography.bodySmall)
-        } else {
-            documents.forEach { document ->
-                Card(Modifier.fillMaxWidth()) {
-                    Row(Modifier.fillMaxWidth().padding(10.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                            Text(document.displayName, style = MaterialTheme.typography.titleSmall)
-                            Text(String.format(Locale.getDefault(), "%.1f KB", document.sizeBytes / 1024.0), style = MaterialTheme.typography.bodySmall)
-                            Text(document.addedAt.toString(), style = MaterialTheme.typography.labelSmall)
+        if (!focused) {
+            Text("تُحفظ كل نتيجة بتاريخها ومجالها المرجعي، وتبقى متاحة للمقارنة لسنوات.", style = MaterialTheme.typography.bodySmall)
+            Button(onClick = { editingId = null; reviewCandidate = null; sourceUri = null; showAdd = true }, modifier = Modifier.fillMaxWidth()) { Text("إضافة نتيجة فحص") }
+            LabPdfReader(
+                onExtractedText = { /* تتم المعاينة محليًا فقط؛ لا يُحفظ النص الخام */ },
+                onCandidateSelected = { candidate, uri -> editingId = null; reviewCandidate = candidate; sourceUri = uri; showAdd = true },
+                onSavePdf = saveDocument
+            )
+            Text("التقارير المحفوظة في ملف " + member.fullName, style = MaterialTheme.typography.titleMedium)
+            if (documents.isEmpty()) {
+                Text("لم يتم حفظ مستندات لهذا الفرد بعد.", style = MaterialTheme.typography.bodySmall)
+            } else {
+                documents.forEach { document ->
+                    Card(Modifier.fillMaxWidth()) {
+                        Row(Modifier.fillMaxWidth().padding(10.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                Text(document.displayName, style = MaterialTheme.typography.titleSmall)
+                                Text(String.format(Locale.getDefault(), "%.1f KB", document.sizeBytes / 1024.0), style = MaterialTheme.typography.bodySmall)
+                                Text(document.addedAt.toString(), style = MaterialTheme.typography.labelSmall)
+                            }
+                            TextButton(onClick = { openDocument(document) }) { Text("فتح") }
+                            TextButton(onClick = { deleteDocument(document) }) { Text("حذف") }
                         }
-                        TextButton(onClick = { openDocument(document) }) { Text("فتح") }
-                        TextButton(onClick = { deleteDocument(document) }) { Text("حذف") }
                     }
                 }
             }
-        }
-        Text("أو أدخل النتيجة يدويًا", style = MaterialTheme.typography.titleSmall)
-        if (tests.isNotEmpty()) {
-            Text("الفحص")
-            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                FilterChip(selected = selectedTest.isBlank(), onClick = { selectedTest = ""; selectedUnit = null }, label = { Text("الكل") })
-                tests.forEach { name -> FilterChip(selected = selectedTest == name, onClick = { selectedTest = name; selectedUnit = null }, label = { Text(name) }) }
-            }
-            if (selectedTest.isNotBlank() && units.size > 1) {
-                Text("الوحدة")
+            Text("أو أدخل النتيجة يدويًا", style = MaterialTheme.typography.titleSmall)
+            if (tests.isNotEmpty()) {
+                Text("الفحص")
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    units.forEach { unit -> FilterChip(selected = activeUnit == unit, onClick = { selectedUnit = unit }, label = { Text(unit.ifBlank { "بدون وحدة" }) }) }
+                    FilterChip(selected = selectedTest.isBlank(), onClick = { selectedTest = ""; selectedUnit = null }, label = { Text("الكل") })
+                    tests.forEach { name -> FilterChip(selected = selectedTest == name, onClick = { selectedTest = name; selectedUnit = null }, label = { Text(name) }) }
                 }
-                Text("يتم فصل المقارنة حسب الوحدة حتى لا نقارن قيماً غير متجانسة.", style = MaterialTheme.typography.bodySmall)
-            }
-            Text("الفترة الزمنية")
-            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                listOf(0, 1, 3, 5).forEach { count -> FilterChip(selected = years == count, onClick = { years = count }, label = { Text(if (count == 0) "كل السنوات" else count.toString() + " سنوات") }) }
-            }
-        }
-        if (latest != null && selectedTest.isNotBlank()) {
-            Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                Text("أحدث نتيجة: " + latest.testName, style = MaterialTheme.typography.titleMedium)
-                Text(latest.displayValue, style = MaterialTheme.typography.headlineSmall)
-                Text("التاريخ: " + latest.performedAt.toDisplayDate())
-                when {
-                    previous == null -> Text("لا توجد نتيجة أقدم للمقارنة.")
-                    latestValue != null && previousValue != null && !latest.hasSameReferenceRange(previous) ->
-                        Text("المجال المرجعي مختلف عن النتيجة السابقة. راجع حدود كل نتيجة في السجل.")
-                    latestValue != null && previousValue != null ->
-                        Text("مقارنة بالسابقة: " + (latestValue - previousValue) + " " + latest.unit + " (" + previous.performedAt.toDisplayDate() + ")")
-                    else -> Text("النتيجة الحالية أو السابقة نصية؛ القيم متاحة في سجل النتائج.")
-                }
-                val low = latest.referenceLow; val high = latest.referenceHigh
-                if (latestValue != null && (low != null || high != null)) {
-                    val status = when { low != null && latestValue < low -> "أقل من المجال المرجعي المسجل"; high != null && latestValue > high -> "أعلى من المجال المرجعي المسجل"; else -> "ضمن المجال المرجعي المسجل" }
-                    Text(status, color = if (status.startsWith("ضمن")) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
-                    Text("المجال: " + (low?.toString() ?: "—") + " إلى " + (high?.toString() ?: "—") + " " + latest.unit)
-                }
-            } }
-            if (numericHistory.size >= 2) {
-                Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("التغير عبر الزمن ضمن المجال المرجعي نفسه", style = MaterialTheme.typography.titleMedium)
-                    val chartLineColor = MaterialTheme.colorScheme.primary
-                    val chartPointColor = MaterialTheme.colorScheme.tertiary
-                    val dates = numericHistory.map { LocalDate.parse(it.performedAt).toEpochDay() }
-                    val firstDay = dates.first()
-                    val duration = dates.last() - firstDay
-                    var selectedPoint by remember(numericHistory) { mutableIntStateOf(numericHistory.lastIndex) }
-                    Canvas(Modifier.fillMaxWidth().height(150.dp)) {
-                        val values = numericHistory.mapNotNull { it.value }; val min = values.minOrNull() ?: 0.0; val max = values.maxOrNull() ?: 1.0; val range = (max - min).takeIf { it > 0.0 } ?: 1.0
-                        val points = values.mapIndexed { index, value -> androidx.compose.ui.geometry.Offset(if (duration == 0L) size.width / 2 else size.width * ((dates[index] - firstDay).toDouble() / duration).toFloat(), size.height - ((value - min) / range).toFloat() * (size.height - 16.dp.toPx()) - 8.dp.toPx()) }
-                        points.zipWithNext().forEach { pair -> drawLine(chartLineColor, pair.first, pair.second, strokeWidth = 4f) }
-                        points.forEachIndexed { index, point -> drawCircle(chartPointColor, if (index == selectedPoint) 8f else 5f, point) }
-                    }
+                if (selectedTest.isNotBlank() && units.size > 1) {
+                    Text("الوحدة")
                     Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        numericHistory.forEachIndexed { index, point ->
-                            FilterChip(selected = selectedPoint == index, onClick = { selectedPoint = index },
-                                label = { Text(point.performedAt.toDisplayDate()) })
-                        }
+                        units.forEach { unit -> FilterChip(selected = activeUnit == unit, onClick = { selectedUnit = unit }, label = { Text(unit.ifBlank { "بدون وحدة" }) }) }
                     }
-                    val point = numericHistory[selectedPoint]
-                    Text(point.displayValue + " · " + point.performedAt.toDisplayDate(), style = MaterialTheme.typography.titleSmall)
-                    if (point.referenceLow != null || point.referenceHigh != null) {
-                        Text("المجال المرجعي: ${point.referenceLow ?: "—"} إلى ${point.referenceHigh ?: "—"} ${point.unit}",
-                            style = MaterialTheme.typography.bodySmall)
+                    Text("يتم فصل المقارنة حسب الوحدة حتى لا نقارن قيماً غير متجانسة.", style = MaterialTheme.typography.bodySmall)
+                }
+                Text("الفترة الزمنية")
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf(0, 1, 3, 5).forEach { count -> FilterChip(selected = years == count, onClick = { years = count }, label = { Text(if (count == 0) "كل السنوات" else count.toString() + " سنوات") }) }
+                }
+            }
+            if (latest != null && selectedTest.isNotBlank()) {
+                Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Text("أحدث نتيجة: " + latest.testName, style = MaterialTheme.typography.titleMedium)
+                    Text(latest.displayValue, style = MaterialTheme.typography.headlineSmall)
+                    Text("التاريخ: " + latest.performedAt.toDisplayDate())
+                    when {
+                        previous == null -> Text("لا توجد نتيجة أقدم للمقارنة.")
+                        latestValue != null && previousValue != null && !latest.hasSameReferenceRange(previous) ->
+                            Text("المجال المرجعي مختلف عن النتيجة السابقة. راجع حدود كل نتيجة في السجل.")
+                        latestValue != null && previousValue != null ->
+                            Text("مقارنة بالسابقة: " + (latestValue - previousValue) + " " + latest.unit + " (" + previous.performedAt.toDisplayDate() + ")")
+                        else -> Text("النتيجة الحالية أو السابقة نصية؛ القيم متاحة في سجل النتائج.")
+                    }
+                    val low = latest.referenceLow; val high = latest.referenceHigh
+                    if (latestValue != null && (low != null || high != null)) {
+                        val status = when { low != null && latestValue < low -> "أقل من المجال المرجعي المسجل"; high != null && latestValue > high -> "أعلى من المجال المرجعي المسجل"; else -> "ضمن المجال المرجعي المسجل" }
+                        Text(status, color = if (status.startsWith("ضمن")) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
+                        Text("المجال: " + (low?.toString() ?: "—") + " إلى " + (high?.toString() ?: "—") + " " + latest.unit)
                     }
                 } }
+                if (numericHistory.size >= 2) {
+                    Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("التغير عبر الزمن ضمن المجال المرجعي نفسه", style = MaterialTheme.typography.titleMedium)
+                        val chartLineColor = MaterialTheme.colorScheme.primary
+                        val chartPointColor = MaterialTheme.colorScheme.tertiary
+                        val dates = numericHistory.map { LocalDate.parse(it.performedAt).toEpochDay() }
+                        val firstDay = dates.first()
+                        val duration = dates.last() - firstDay
+                        var selectedPoint by remember(numericHistory) { mutableIntStateOf(numericHistory.lastIndex) }
+                        Canvas(Modifier.fillMaxWidth().height(150.dp)) {
+                            val values = numericHistory.mapNotNull { it.value }; val min = values.minOrNull() ?: 0.0; val max = values.maxOrNull() ?: 1.0; val range = (max - min).takeIf { it > 0.0 } ?: 1.0
+                            val points = values.mapIndexed { index, value -> androidx.compose.ui.geometry.Offset(if (duration == 0L) size.width / 2 else size.width * ((dates[index] - firstDay).toDouble() / duration).toFloat(), size.height - ((value - min) / range).toFloat() * (size.height - 16.dp.toPx()) - 8.dp.toPx()) }
+                            points.zipWithNext().forEach { pair -> drawLine(chartLineColor, pair.first, pair.second, strokeWidth = 4f) }
+                            points.forEachIndexed { index, point -> drawCircle(chartPointColor, if (index == selectedPoint) 8f else 5f, point) }
+                        }
+                        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            numericHistory.forEachIndexed { index, point ->
+                                FilterChip(selected = selectedPoint == index, onClick = { selectedPoint = index },
+                                    label = { Text(point.performedAt.toDisplayDate()) })
+                            }
+                        }
+                        val point = numericHistory[selectedPoint]
+                        Text(point.displayValue + " · " + point.performedAt.toDisplayDate(), style = MaterialTheme.typography.titleSmall)
+                        if (point.referenceLow != null || point.referenceHigh != null) {
+                            Text("المجال المرجعي: ${point.referenceLow ?: "—"} إلى ${point.referenceHigh ?: "—"} ${point.unit}",
+                                style = MaterialTheme.typography.bodySmall)
+                        }
+                    } }
+                }
             }
+            if (selectedTest.isBlank() && tests.isNotEmpty()) Text("اختاري فحصًا محددًا لعرض المقارنة والرسم البياني؛ لا نقارن فحوصات مختلفة أو بوحدات مختلفة.")
         }
-        if (selectedTest.isBlank() && tests.isNotEmpty()) Text("اختاري فحصًا محددًا لعرض المقارنة والرسم البياني؛ لا نقارن فحوصات مختلفة أو بوحدات مختلفة.")
         Text("سجل النتائج (" + filtered.size + ")", style = MaterialTheme.typography.titleMedium)
         if (filtered.isEmpty()) Text("لا توجد نتائج ضمن الاختيار الحالي. أضف أول فحص للبدء.")
         filtered.forEach { row -> Card(Modifier.fillMaxWidth()) { Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.SpaceBetween) {

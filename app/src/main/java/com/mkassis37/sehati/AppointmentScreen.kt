@@ -104,64 +104,66 @@ internal fun AppointmentScreen(
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        item {
-            Text("مواعيد ${member.fullName}", style = MaterialTheme.typography.titleLarge)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                CalendarView.entries.take(3).forEach { option ->
-                    FilterChip(view == option, { view = option }, label = { Text(option.label) })
+        item { Text("مواعيد ${member.fullName}", style = MaterialTheme.typography.titleLarge) }
+        if (focusedId == null) {
+            item {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    CalendarView.entries.take(3).forEach { option ->
+                        FilterChip(view == option, { view = option }, label = { Text(option.label) })
+                    }
+                }
+                FilterChip(
+                    view == CalendarView.HISTORY,
+                    { view = if (view == CalendarView.HISTORY) CalendarView.MONTH else CalendarView.HISTORY },
+                    label = { Text(CalendarView.HISTORY.label) }
+                )
+            }
+            if (view != CalendarView.HISTORY) {
+                item {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        TextButton(onClick = { move(-1) }) { Text("السابق") }
+                        Text(day.format(monthTitle), style = MaterialTheme.typography.titleMedium)
+                        TextButton(onClick = { move(1) }) { Text("التالي") }
+                    }
+                    DatePickerField("الانتقال إلى تاريخ", selectedDay, { selectedDay = it }, Modifier.fillMaxWidth())
                 }
             }
-            FilterChip(
-                view == CalendarView.HISTORY,
-                { view = if (view == CalendarView.HISTORY) CalendarView.MONTH else CalendarView.HISTORY },
-                label = { Text(CalendarView.HISTORY.label) }
-            )
-        }
-        if (view != CalendarView.HISTORY) {
-            item {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(onClick = { move(-1) }) { Text("السابق") }
-                    Text(day.format(monthTitle), style = MaterialTheme.typography.titleMedium)
-                    TextButton(onClick = { move(1) }) { Text("التالي") }
+            if (view == CalendarView.MONTH || view == CalendarView.WEEK) {
+                val start = if (view == CalendarView.MONTH) monthGridStart else weekStart
+                val days = if (view == CalendarView.MONTH) {
+                    val untilEnd = java.time.temporal.ChronoUnit.DAYS.between(start, monthStart.plusMonths(1))
+                    ((untilEnd + 6) / 7 * 7).toInt()
+                } else 7
+                item {
+                    Row(Modifier.fillMaxWidth()) {
+                        repeat(7) { offset ->
+                            val label = start.plusDays(offset.toLong()).format(DateTimeFormatter.ofPattern("EEE", arabicLocale))
+                            Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(label, style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
+                    }
                 }
-                DatePickerField("الانتقال إلى تاريخ", selectedDay, { selectedDay = it }, Modifier.fillMaxWidth())
-            }
-        }
-        if (view == CalendarView.MONTH || view == CalendarView.WEEK) {
-            val start = if (view == CalendarView.MONTH) monthGridStart else weekStart
-            val days = if (view == CalendarView.MONTH) {
-                val untilEnd = java.time.temporal.ChronoUnit.DAYS.between(start, monthStart.plusMonths(1))
-                ((untilEnd + 6) / 7 * 7).toInt()
-            } else 7
-            item {
-                Row(Modifier.fillMaxWidth()) {
-                    repeat(7) { offset ->
-                        val label = start.plusDays(offset.toLong()).format(DateTimeFormatter.ofPattern("EEE", arabicLocale))
-                        Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(label, style = MaterialTheme.typography.labelSmall)
+                items(days / 7) { week ->
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                        repeat(7) { offset ->
+                            val date = start.plusDays((week * 7 + offset).toLong())
+                            val count = groups[date.toString()].orEmpty().size
+                            CalendarDay(date, count, day == date, { selectedDay = date.toString() }, Modifier.weight(1f))
                         }
                     }
                 }
             }
-            items(days / 7) { week ->
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                    repeat(7) { offset ->
-                        val date = start.plusDays((week * 7 + offset).toLong())
-                        val count = groups[date.toString()].orEmpty().size
-                        CalendarDay(date, count, day == date, { selectedDay = date.toString() }, Modifier.weight(1f))
-                    }
+            item {
+                if (view != CalendarView.HISTORY) {
+                    Text(if (view == CalendarView.WEEK) "مواعيد الأسبوع" else day.format(dayTitle))
+                }
+                Button(onClick = { editingId = null; showEditor = true }, modifier = Modifier.fillMaxWidth()) {
+                    Text("إضافة موعد")
                 }
             }
         }
-        item {
-            if (view != CalendarView.HISTORY) {
-                Text(if (view == CalendarView.WEEK) "مواعيد الأسبوع" else day.format(dayTitle))
-            }
-            Button(onClick = { editingId = null; showEditor = true }, modifier = Modifier.fillMaxWidth()) {
-                Text("إضافة موعد")
-            }
-            if (error.isNotEmpty()) Text(error, color = MaterialTheme.colorScheme.error)
-        }
+        if (error.isNotEmpty()) item { Text(error, color = MaterialTheme.colorScheme.error) }
         if (visible.isEmpty()) item { Text("لا توجد مواعيد في هذا العرض.") }
         items(visible, key = { it.id }) { record ->
             AppointmentCard(

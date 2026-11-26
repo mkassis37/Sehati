@@ -603,6 +603,7 @@ private fun SehatiApp(
                     selected, matchingRecords("LAB", labResults) { it.id },
                     if (focusedRecordKind == "LAB") medicalDocuments.filter { it.relatedLabResultId == focusedRecordId } else medicalDocuments,
                     initiallyAdd = quickAddLab,
+                    focused = focusedRecordKind == "LAB",
                     saveResult = { record, source ->
                         when {
                             record.id != 0L -> db.updateMemberLabResult(record, selected.id)
@@ -734,6 +735,7 @@ private fun SehatiApp(
             Screen.DOCUMENTS -> if (selected != null) DocumentLibraryScreen(
                 member = selected,
                 documents = matchingRecords("DOCUMENT", medicalDocuments) { it.id },
+                focused = focusedRecordKind == "DOCUMENT",
                 links = buildList {
                     appointments.forEach { add(DocumentLink("appointment", it.id, "موعد · ${it.doctor} · ${it.date.toDisplayDate()}")) }
                     labResults.forEach { add(DocumentLink("lab", it.id, "فحص · ${it.testName} · ${it.performedAt.toDisplayDate()}")) }
@@ -963,6 +965,7 @@ private fun MemberDetailsScreen(
     onDelete: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    var showPersonalDetails by rememberSaveable(member.id) { mutableStateOf(false) }
     var showDeleteConfirmation by rememberSaveable(member.id) { mutableStateOf(false) }
     Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(18.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -987,14 +990,18 @@ private fun MemberDetailsScreen(
         }
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(member.fullName, style = MaterialTheme.typography.headlineSmall)
-                DetailLine("تاريخ الميلاد", member.dateOfBirth.toDisplayDate().ifBlank { "غير مسجل" })
-                member.dateOfBirth.ageOnDate()?.let { DetailLine("العمر", "$it سنة") }
-                DetailLine("الجنس", member.sex.ifBlank { "غير مسجل" })
-                DetailLine("فصيلة الدم", member.bloodGroup.ifBlank { "غير مسجلة" })
-                DetailLine("رقم التواصل", member.phone.ifBlank { "غير مسجل" })
-                if (member.additionalInfo.isNotBlank()) DetailLine("معلومات إضافية", member.additionalInfo)
-                DetailLine("التاريخ والملاحظات الطبية", member.medicalNotes.ifBlank { "لا توجد ملاحظات" })
+                TextButton(onClick = { showPersonalDetails = !showPersonalDetails }) {
+                    Text(if (showPersonalDetails) "إخفاء البيانات الشخصية" else "عرض البيانات الشخصية")
+                }
+                if (showPersonalDetails) {
+                    DetailLine("تاريخ الميلاد", member.dateOfBirth.toDisplayDate().ifBlank { "غير مسجل" })
+                    member.dateOfBirth.ageOnDate()?.let { DetailLine("العمر", "$it سنة") }
+                    DetailLine("الجنس", member.sex.ifBlank { "غير مسجل" })
+                    DetailLine("فصيلة الدم", member.bloodGroup.ifBlank { "غير مسجلة" })
+                    DetailLine("رقم التواصل", member.phone.ifBlank { "غير مسجل" })
+                    if (member.additionalInfo.isNotBlank()) DetailLine("معلومات إضافية", member.additionalInfo)
+                    DetailLine("التاريخ والملاحظات الطبية", member.medicalNotes.ifBlank { "لا توجد ملاحظات" })
+                }
                 Button(onClick = onEdit, Modifier.fillMaxWidth()) {
                     Icon(Icons.Outlined.Edit, null); Text("تعديل بيانات الفرد")
                 }

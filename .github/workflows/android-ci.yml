@@ -68,11 +68,12 @@ jobs:
           signer="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)"
           test -x "$signer"
           "$signer" verify --verbose --print-certs "$apk"
-          aapt="$(dirname "$signer")/aapt"
+          aapt="$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -n 1)"
+          test -x "$aapt"
           badging="$("$aapt" dump badging "$apk" | sed -n '1p')"
           test -n "$badging"
           source_id="$(git rev-parse HEAD)"
-          rg -F "SOURCE_COMMIT = \"$source_id\";" app/build/generated/source/buildConfig/debug
+          grep -RF "SOURCE_COMMIT = \"$source_id\";" app/build/generated/source/buildConfig/debug
           printf '%s\n' "$badging"
           git archive --format=zip --prefix=Sehati/ -o "$bundle" HEAD
           staging="$(mktemp -d)"

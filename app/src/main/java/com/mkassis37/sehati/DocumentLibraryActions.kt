@@ -8,6 +8,9 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.FileProvider
 import com.mkassis37.sehati.data.MedicalDocument
@@ -43,6 +46,23 @@ internal fun rememberDocumentLibrary(
     var owner by rememberSaveable { mutableStateOf<Long?>(null) }
     var uri by rememberSaveable { mutableStateOf<Uri?>(null) }
     var cameraPath by rememberSaveable { mutableStateOf<String?>(null) }
+    var openedTemporaryPath by rememberSaveable { mutableStateOf<String?>(null) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                openedTemporaryPath?.let { name ->
+                    val file = File(context.cacheDir, name)
+                    if (file.parentFile?.canonicalFile == context.cacheDir.canonicalFile && file.name.startsWith("sehati-")) {
+                        file.delete()
+                    }
+                    openedTemporaryPath = null
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
     fun clear() {
         cameraPath?.let { File(context.cacheDir, it).delete() }
         cameraPath = null
@@ -113,12 +133,15 @@ internal fun rememberDocumentLibrary(
             scope.launch {
                 try {
                     val file = store.createTemporaryFile(document)
+                    openedTemporaryPath = file.name
                     val content = FileProvider.getUriForFile(context, context.packageName + ".fileprovider", file)
                     context.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(content, document.mimeType)
                         .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (_: Exception) {
+                    openedTemporaryPath?.let { File(context.cacheDir, it).delete() }
+                    openedTemporaryPath = null
                     store.clearTemporaryDocument(document.id)
                     Toast.makeText(context, "تعذر معاينة الملف.", Toast.LENGTH_SHORT).show()
                 }

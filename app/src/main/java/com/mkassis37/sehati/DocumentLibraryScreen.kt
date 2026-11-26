@@ -74,7 +74,7 @@ internal fun DocumentLibraryScreen(
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                     Text(document.displayName, style = MaterialTheme.typography.titleMedium)
-                    val label = DocumentCategory.entries.firstOrNull { it.name == document.category }?.label.orEmpty()
+                    val label = DocumentCategory.entries.firstOrNull { it.name == document.category }?.label ?: DocumentCategory.OTHER.label
                     val day = document.documentDate.ifBlank { Instant.ofEpochMilli(document.addedAt).atZone(zone).toLocalDate().toString() }
                     Text("$label · ${day.toDisplayDate()}", style = MaterialTheme.typography.bodySmall)
                     val linkLabel = links.firstOrNull { link ->
@@ -95,7 +95,7 @@ internal fun DocumentLibraryScreen(
         }
     }
     actions.pending?.takeIf { it.memberId == member.id }?.let {
-        DocumentImportDialog(links, actions.cancel, actions.save)
+        DocumentImportDialog(it.uri.toString(), links, actions.cancel, actions.save)
     }
     delete?.let { document ->
         AlertDialog(
@@ -128,14 +128,15 @@ internal fun DocumentLibraryScreen(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun DocumentImportDialog(
+    importKey: String,
     links: List<DocumentLink>,
     onCancel: () -> Unit,
     onSave: suspend (DocumentCategory, String, DocumentLink?) -> Unit
 ) {
     val scope = rememberCoroutineScope()
-    var category by rememberSaveable { mutableStateOf(DocumentCategory.OTHER) }
-    var date by rememberSaveable { mutableStateOf(LocalDate.now().toString()) }
-    var activeLink by rememberSaveable { mutableStateOf<String?>(null) }
+    var category by rememberSaveable(importKey) { mutableStateOf(DocumentCategory.OTHER) }
+    var date by rememberSaveable(importKey) { mutableStateOf(LocalDate.now().toString()) }
+    var activeLink by rememberSaveable(importKey) { mutableStateOf<String?>(null) }
     var showLinks by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
@@ -156,7 +157,7 @@ private fun DocumentImportDialog(
                 ExposedDropdownMenuBox(expanded = showLinks, onExpandedChange = { showLinks = it }) {
                     OutlinedTextField(selected?.label ?: "بدون ربط", {}, readOnly = true,
                         label = { Text("الربط بسجل طبي") }, modifier = Modifier.fillMaxWidth().menuAnchor())
-                    ExposedDropdownMenu(showLinks, { showLinks = false }) {
+                    ExposedDropdownMenu(expanded = showLinks, onDismissRequest = { showLinks = false }, modifier = Modifier.heightIn(max = 240.dp)) {
                         DropdownMenuItem({ Text("بدون ربط") }, { activeLink = null; showLinks = false })
                         links.forEach { link ->
                             DropdownMenuItem({ Text(link.label) }, { activeLink = "${link.kind}/${link.id}"; showLinks = false })

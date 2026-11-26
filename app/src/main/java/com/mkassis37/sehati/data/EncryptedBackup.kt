@@ -809,17 +809,6 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
     private fun sha256(bytes: ByteArray): String =
         MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
 
-    private class NonClosingOutputStream(output: OutputStream) : FilterOutputStream(output) {
-        override fun close() { flush() }
-    }
-
-    private class CountingOutputStream(output: OutputStream) : FilterOutputStream(output) {
-        var count: Long = 0
-            private set
-        override fun write(value: Int) { out.write(value); count++ }
-        override fun write(buffer: ByteArray, offset: Int, length: Int) { out.write(buffer, offset, length); count += length }
-    }
-
     private class LimitedInputStream(input: InputStream, length: Long) : FilterInputStream(input) {
         var remaining: Long = length
             private set
@@ -838,54 +827,6 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
             return count
         }
         override fun close() = Unit
-    }
-
-    private class AuthenticatedRecordInputStream(
-        private val source: LimitedInputStream,
-        private val cipher: Cipher
-    ) : InputStream() {
-        private var encryptedRemaining = source.remaining
-        private var pending = ByteArray(0)
-        private var pendingOffset = 0
-        private var finalized = false
-        var isAuthenticated: Boolean = false
-            private set
-        override fun read(): Int {
-            val one = ByteArray(1)
-            val count = read(one, 0, 1)
-            return if (count < 0) -1 else one[0].toInt() and 0xff
-        }
-        override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
-            if (length == 0) return 0
-            while (pendingOffset >= pending.size) {
-                if (encryptedRemaining > 0) {
-                    val encrypted = ByteArray(minOf(STREAM_BUFFER_SIZE.toLong(), encryptedRemaining).toInt())
-                    val count = source.read(encrypted)
-                    if (count < 0) throw EOFException("Truncated encrypted attachment.")
-                    if (count == 0) continue
-                    encryptedRemaining -= count
-                    val output = cipher.update(encrypted, 0, count)
-                    encrypted.fill(0)
-                    if (output != null && output.isNotEmpty()) { pending = output; pendingOffset = 0 }
-                } else if (!finalized) {
-                    finalized = true
-                    try {
-                        pending = cipher.doFinal()
-                        pendingOffset = 0
-                        isAuthenticated = true
-                    } catch (error: Exception) {
-                        throw IOException("Encrypted attachment authentication failed.", error)
-                    }
-                    if (pending.isEmpty()) return -1
-                } else return -1
-            }
-            val count = minOf(length, pending.size - pendingOffset)
-            System.arraycopy(pending, pendingOffset, buffer, offset, count)
-            pendingOffset += count
-            if (pendingOffset == pending.size) { pending.fill(0); pending = ByteArray(0); pendingOffset = 0 }
-            return count
-        }
-        override fun close() { pending.fill(0); pending = ByteArray(0); source.close() }
     }
 
     private fun decrypt(input: InputStream, password: CharArray): JSONObject {

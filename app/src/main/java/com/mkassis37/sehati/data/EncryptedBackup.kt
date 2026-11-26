@@ -20,6 +20,9 @@ import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.PBEKeySpec
 import javax.crypto.spec.SecretKeySpec
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -349,48 +352,56 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
             documentRows.all { row -> row.relatedProcedureId == null || procedureRows.any { it.id == row.relatedProcedureId && it.memberId == row.memberId } }) {
             "Backup contains records without a matching family member."
         }
-        val createdFiles = mutableListOf<MedicalDocument>()
-        var databaseCommitted = false
-        val oldDocuments = database.medicalDao().getAllDocuments()
-        try {
-            documentRows.forEachIndexed { index, row ->
-                val encoded = documentArray.getJSONObject(index).getString("content")
-                val plain = Base64.decode(encoded, Base64.DEFAULT)
-                try { createdFiles += documentStore.restore(row, plain) }
-                finally { plain.fill(0) }
-            }
+        currentCoroutineContext().ensureActive()
+        // Once staging starts, finish commit or rollback before honoring cancellation.
+        // Room can commit before a cancelled caller receives the transaction result.
+        withContext(NonCancellable) {
+            val createdFiles = mutableListOf<MedicalDocument>()
             val dao = database.medicalDao()
-            database.withTransaction {
-                dao.clearAllergies()
-                dao.clearConditions()
-                dao.clearProcedures()
-                dao.clearHistoryEvents()
-                dao.clearFamilyDiseaseHistory()
-                dao.clearBodyMeasurements()
-                dao.clearLabResults()
-                dao.clearDocuments()
-                dao.clearMedications()
-                dao.clearMembers()
-                dao.insertMembers(memberRows)
-                dao.insertAllergies(allergyRows)
-                dao.insertAppointments(appointmentRows)
-                dao.insertLabResults(labRows)
-                dao.insertMedications(medicationRows)
-                dao.insertDoseLogs(doseRows)
-                dao.insertConditions(conditionRows)
-                dao.insertProcedures(procedureRows)
-                dao.insertHistoryEvents(historyRows)
-                dao.insertFamilyDiseaseHistory(familyHistoryRows)
-                dao.insertBodyMeasurements(measurementRows)
-                dao.insertDocuments(createdFiles)
+            val oldDocuments = try {
+                documentRows.forEachIndexed { index, row ->
+                    val encoded = documentArray.getJSONObject(index).getString("content")
+                    val plain = Base64.decode(encoded, Base64.DEFAULT)
+                    try { createdFiles += documentStore.restore(row, plain) }
+                    finally { plain.fill(0) }
+                }
+                database.withTransaction {
+                    val replacedDocuments = dao.getAllDocuments()
+                    dao.clearAllergies()
+                    dao.clearConditions()
+                    dao.clearProcedures()
+                    dao.clearHistoryEvents()
+                    dao.clearFamilyDiseaseHistory()
+                    dao.clearBodyMeasurements()
+                    dao.clearLabResults()
+                    dao.clearDocuments()
+                    dao.clearMedications()
+                    dao.clearMembers()
+                    dao.insertMembers(memberRows)
+                    dao.insertAllergies(allergyRows)
+                    dao.insertAppointments(appointmentRows)
+                    dao.insertLabResults(labRows)
+                    dao.insertMedications(medicationRows)
+                    dao.insertDoseLogs(doseRows)
+                    dao.insertConditions(conditionRows)
+                    dao.insertProcedures(procedureRows)
+                    dao.insertHistoryEvents(historyRows)
+                    dao.insertFamilyDiseaseHistory(familyHistoryRows)
+                    dao.insertBodyMeasurements(measurementRows)
+                    dao.insertDocuments(createdFiles)
+                    replacedDocuments
+                }
+            } catch (error: Exception) {
+                createdFiles.forEach { runCatching { documentStore.delete(it) } }
+                throw error
             }
-            databaseCommitted = true
-        } catch (error: Exception) {
-            if (!databaseCommitted) createdFiles.forEach { runCatching { documentStore.delete(it) } }
-            throw error
+            oldDocuments.forEach {
+                runCatching {
+                    documentStore.clearTemporaryDocument(it.id)
+                    documentStore.delete(it)
+                }
+            }
         }
-        // File cleanup after the DB commit is best effort; never delete newly restored files on cleanup failure.
-        oldDocuments.forEach { runCatching { documentStore.delete(it) } }
     }
 
     private fun decrypt(input: InputStream, password: CharArray): JSONObject {

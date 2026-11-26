@@ -12,6 +12,7 @@ import java.io.File
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
+import java.security.MessageDigest
 import java.time.Instant
 import java.time.format.DateTimeFormatter
 import java.util.UUID
@@ -23,7 +24,18 @@ import kotlin.coroutines.resumeWithException
 import org.json.JSONArray
 import org.json.JSONObject
 
-internal data class DriveFile(val id: String, val name: String, val created: String, val size: Long)
+internal data class DriveFile(
+    val id: String,
+    val name: String,
+    val created: String,
+    val size: Long,
+    val sha256: String,
+    val uploadedSha256: String
+) {
+    val hasVerifiedUpload: Boolean
+        get() = size in 1..MAX_DRIVE_BYTES && sha256.isNotBlank() &&
+            sha256.equals(uploadedSha256, ignoreCase = true)
+}
 
 internal class DriveNeedsConsent : Exception()
 internal class DriveRequestFailed(val status: Int) : IOException("Google Drive request failed")
@@ -52,7 +64,7 @@ internal class DriveBackupClient(context: Context, private val backup: Encrypted
             .appendQueryParameter("q", "trashed = false and name contains 'sehati-backup-'")
             .appendQueryParameter("orderBy", "createdTime desc")
             .appendQueryParameter("pageSize", "100")
-            .appendQueryParameter("fields", "files(id,name,createdTime,size)")
+            .appendQueryParameter("fields", "files(id,name,createdTime,size,sha256Checksum,appProperties)")
             .build().toString()
         request(query, token) { connection ->
             connection.requireSuccess()
@@ -60,7 +72,9 @@ internal class DriveBackupClient(context: Context, private val backup: Encrypted
             val items = body.optJSONArray("files") ?: JSONArray()
             (0 until items.length()).map { index ->
                 val file = items.getJSONObject(index)
-                DriveFile(file.getString("id"), file.getString("name"), file.optString("createdTime"), file.optLong("size"))
+                DriveFile(file.getString("id"), file.getString("name"), file.optString("createdTime"),
+                    file.optLong("size"), file.optString("sha256Checksum"),
+                    file.optJSONObject("appProperties")?.optString(UPLOAD_SHA256).orEmpty())
             }
         }
     }
@@ -69,22 +83,27 @@ internal class DriveBackupClient(context: Context, private val backup: Encrypted
         val encrypted = File.createTempFile("sehati-drive-", ".shtb", app.cacheDir)
         try {
             backup.write(app.contentResolver, Uri.fromFile(encrypted), password)
-            require(encrypted.length() in 1..MAX_DRIVE_BYTES)
+            val size = encrypted.length()
+            require(size in 1..MAX_DRIVE_BYTES)
+            val sha256 = encrypted.sha256()
             val boundary = UUID.randomUUID().toString()
             val metadata = JSONObject().put("name", name).put("parents", JSONArray().put("appDataFolder"))
+                .put("appProperties", JSONObject().put(UPLOAD_SHA256, sha256))
             val header = "--$boundary\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n$metadata\r\n--$boundary\r\nContent-Type: application/octet-stream\r\n\r\n".toByteArray(Charsets.UTF_8)
             val end = "\r\n--$boundary--\r\n".toByteArray(Charsets.UTF_8)
-            request("$DRIVE_UPLOAD?uploadType=multipart&fields=id", token) { connection ->
+            request("$DRIVE_UPLOAD?uploadType=multipart&fields=id,size,sha256Checksum", token) { connection ->
                 connection.requestMethod = "POST"
                 connection.doOutput = true
                 connection.setRequestProperty("Content-Type", "multipart/related; boundary=$boundary")
-                connection.setFixedLengthStreamingMode(header.size + encrypted.length() + end.size)
+                connection.setFixedLengthStreamingMode(header.size + size + end.size)
                 connection.outputStream.use { out ->
                     out.write(header)
                     encrypted.inputStream().use { it.copyTo(out) }
                     out.write(end)
                 }
                 connection.requireSuccess()
+                val stored = JSONObject(connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() })
+                verifyDriveBackup(stored.optLong("size", -1), stored.optString("sha256Checksum"), size, sha256)
             }
         } finally {
             password.fill('\u0000')
@@ -114,6 +133,12 @@ internal class DriveBackupClient(context: Context, private val backup: Encrypted
                             }
                         }
                     }
+                }
+                if (cloud.size > 0 && encrypted.length() != cloud.size) {
+                    throw IOException("Drive backup download size differs from metadata")
+                }
+                if (cloud.sha256.isNotBlank()) {
+                    verifyDriveBackup(cloud.size, cloud.sha256, encrypted.length(), encrypted.sha256())
                 }
                 backup.preview(app.contentResolver, Uri.fromFile(encrypted), password)
             } finally {
@@ -160,3 +185,17 @@ internal fun driveBackupName(): String = "sehati-backup-" + DateTimeFormatter.IS
 private const val DRIVE_FILES = "https://www.googleapis.com/drive/v3/files"
 private const val DRIVE_UPLOAD = "https://www.googleapis.com/upload/drive/v3/files"
 private const val MAX_DRIVE_BYTES = 64L * 1024 * 1024
+private const val UPLOAD_SHA256 = "sehatiSha256"
+
+private fun File.sha256(): String {
+    val digest = MessageDigest.getInstance("SHA-256")
+    inputStream().use { stream ->
+        val buffer = ByteArray(32 * 1024)
+        while (true) {
+            val count = stream.read(buffer)
+            if (count < 0) break
+            digest.update(buffer, 0, count)
+        }
+    }
+    return digest.digest().joinToString("") { "%02x".format(it) }
+}

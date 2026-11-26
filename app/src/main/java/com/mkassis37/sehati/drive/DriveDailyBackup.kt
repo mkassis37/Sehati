@@ -58,7 +58,7 @@ class DriveDailyBackup(app: Context, parameters: WorkerParameters) : CoroutineWo
             ))
             val token = client.grant(email)
             val name = "sehati-backup-daily-$scheduledDate.shtb"
-            if (client.list(token).none { it.name == name }) {
+            if (client.list(token).none { it.name == name && it.hasVerifiedUpload }) {
                 if (prefs.generation != generation || prefs.account != email) return Result.success()
                 client.upload(token, prefs.backupPassword(), name)
             }

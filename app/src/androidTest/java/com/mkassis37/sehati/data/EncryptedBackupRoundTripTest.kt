@@ -8,6 +8,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import java.io.File
 import java.io.ByteArrayOutputStream
 import kotlinx.coroutines.runBlocking
+import org.json.JSONObject
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -40,6 +41,16 @@ class EncryptedBackupRoundTripTest {
             val proof = restore.preview(context.contentResolver, uri, password.toCharArray())
             assertEquals(listOf("Synthetic owner"), proof.memberNames)
             assertEquals(1, proof.documentCount)
+
+            val invalidPayload = JSONObject(proof.payload.toString())
+            val documents = invalidPayload.getJSONArray("documents")
+            documents.put(JSONObject(documents.getJSONObject(0).toString())
+                .put("id", Long.MAX_VALUE)
+                .put("content", "aW52YWxpZA=="))
+            assertTrue(runCatching { restore.restore(proof.copy(payload = invalidPayload)) }.isFailure)
+            assertEquals("Synthetic original", target.medicalDao().getAllMembers().single().fullName)
+            assertTrue(target.medicalDao().getAllDocuments().isEmpty())
+
             restore.restore(proof)
             val restored = target.medicalDao().getAllDocuments().single()
             assertEquals("LAB", restored.category)

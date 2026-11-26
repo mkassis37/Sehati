@@ -18,6 +18,8 @@ import javax.crypto.CipherOutputStream
 import javax.crypto.KeyGenerator
 import javax.crypto.spec.GCMParameterSpec
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 
 /** App-private PDF storage encrypted with an Android Keystore key. */
@@ -92,6 +94,7 @@ class SecureMedicalDocumentStore(private val context: Context) {
             var copied = 0L
             try {
                 source.use { input ->
+                    val coroutineContext = currentCoroutineContext()
                     val cipher = Cipher.getInstance("AES/GCM/NoPadding")
                     cipher.init(Cipher.ENCRYPT_MODE, getKey())
                     FileOutputStream(target).use { file ->
@@ -100,6 +103,7 @@ class SecureMedicalDocumentStore(private val context: Context) {
                         CipherOutputStream(file, cipher).use { encrypted ->
                             val buffer = ByteArray(32 * 1024)
                             while (true) {
+                                coroutineContext.ensureActive()
                                 val count = input.read(buffer)
                                 if (count < 0) break
                                 if (count == 0) continue

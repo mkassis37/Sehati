@@ -45,5 +45,29 @@ class MedicalPreviewSecurityTest {
         } finally {
             source.delete()
         }
+    @Test
+    fun orphanCleanupKeepsReferencedEncryptedDocuments() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val store = SecureMedicalDocumentStore(context)
+        val source = File.createTempFile("synthetic-orphan-", ".pdf", context.cacheDir)
+        val plaintext = "%PDF-1.7\nOrphan cleanup fixture\n".toByteArray()
+        try {
+            source.writeBytes(plaintext)
+            val retained = store.save(Uri.fromFile(source), 71, "Retained.pdf")
+            val orphan = store.save(Uri.fromFile(source), 72, "Orphan.pdf")
+            val retainedFile = File(context.filesDir, "medical_documents/" + retained.relativePath)
+            val orphanFile = File(context.filesDir, "medical_documents/" + orphan.relativePath)
+            assertTrue(retainedFile.exists())
+            assertTrue(orphanFile.exists())
+
+            store.cleanupOrphanedDocuments(setOf(retained.relativePath))
+
+            assertTrue(retainedFile.exists())
+            assertFalse(orphanFile.exists())
+            store.delete(retained)
+        } finally {
+            source.delete()
+        }
+    }
     }
 }

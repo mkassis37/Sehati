@@ -381,20 +381,25 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
             "Backup contains records without a matching family member."
         }
         currentCoroutineContext().ensureActive()
-        // Once staging starts, finish commit or rollback before honoring cancellation.
-        // Room can commit before a cancelled caller receives the transaction result.
-        withContext(NonCancellable) {
-            val createdFiles = mutableListOf<MedicalDocument>()
-            val dao = database.medicalDao()
-            val oldDocuments = try {
+        val createdFiles = mutableListOf<MedicalDocument>()
+        var databaseCommitted = false
+        try {
+            if (preview.stagedArchivePath != null) {
+                restoreVersionTwoDocuments(preview, documentRows, createdFiles)
+            } else {
                 documentRows.forEachIndexed { index, row ->
+                    currentCoroutineContext().ensureActive()
                     val encoded = documentArray.getJSONObject(index).getString("content")
                     val plain = Base64.decode(encoded, Base64.DEFAULT)
                     try { createdFiles += documentStore.restore(row, plain) }
                     finally { plain.fill(0) }
                 }
-                database.withTransaction {
-                    val replacedDocuments = dao.getAllDocuments()
+            }
+            currentCoroutineContext().ensureActive()
+            withContext(NonCancellable) {
+                val dao = database.medicalDao()
+                val replacedDocuments = database.withTransaction {
+                    val old = dao.getAllDocuments()
                     dao.clearAllergies()
                     dao.clearConditions()
                     dao.clearProcedures()
@@ -417,21 +422,21 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
                     dao.insertFamilyDiseaseHistory(familyHistoryRows)
                     dao.insertBodyMeasurements(measurementRows)
                     dao.insertDocuments(createdFiles)
-                    replacedDocuments
+                    old
                 }
-            } catch (error: Exception) {
-                createdFiles.forEach { runCatching { documentStore.delete(it) } }
-                throw error
-            }
-            oldDocuments.forEach {
-                runCatching {
-                    documentStore.clearTemporaryDocument(it.id)
-                    documentStore.delete(it)
+                databaseCommitted = true
+                replacedDocuments.forEach { old ->
+                    runCatching {
+                        documentStore.clearTemporaryDocument(old.id)
+                        documentStore.delete(old)
+                    }
                 }
             }
+        } catch (error: Exception) {
+            if (!databaseCommitted) createdFiles.forEach { runCatching { documentStore.delete(it) } }
+            throw error
         }
     }
-
 
     private data class V2Manifest(val root: JSONObject, val keyBytes: ByteArray, val manifestDigest: String, val manifestCipherLength: Int)
 
@@ -728,6 +733,16 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
         }
     }
 
+    private fun readFully(input: InputStream, bytes: ByteArray) {
+        var offset = 0
+        while (offset < bytes.size) {
+            val count = input.read(bytes, offset, bytes.size - offset)
+            if (count < 0) throw EOFException("Unexpected end of backup file.")
+            if (count == 0) continue
+            offset += count
+        }
+    }
+
     private fun derive(password: CharArray, salt: ByteArray): SecretKeySpec {
         val spec = PBEKeySpec(password, salt, 310_000, 256)
         val bytes = try { SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).encoded }
@@ -779,6 +794,16 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
 
     companion object {
         const val MAX_BACKUP_BYTES = 64L * 1024 * 1024
+        private const val MAX_DOCUMENT_BYTES = 25L * 1024 * 1024
+        private const val MAX_MANIFEST_BYTES = 8 * 1024 * 1024
+        private const val GCM_TAG_BYTES = 16
+        private const val STREAM_BUFFER_SIZE = 32 * 1024
+        private const val PBKDF2_ITERATIONS = 310_000
+        private const val LEGACY_CONTAINER_VERSION = 1
+        private const val STREAMING_CONTAINER_VERSION = 2
+        private const val BACKUP_PREVIEW_DIRECTORY = "sehati-backup-previews"
+        private val MANIFEST_AAD = "sehati:shtb:v2:manifest".toByteArray(Charsets.UTF_8)
+        private val SUPPORTED_DOCUMENT_MIME_TYPES = setOf("application/pdf", "image/jpeg", "image/png", "image/webp")
         private val MAGIC = byteArrayOf(0x53, 0x48, 0x54, 0x42)
         private val backupLock = Mutex()
     }

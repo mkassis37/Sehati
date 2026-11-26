@@ -23,8 +23,8 @@ android {
         applicationId = "com.mkassis37.sehati"
         minSdk = 26
         targetSdk = 35
-        versionCode = 5
-        versionName = "0.4.1"
+        versionCode = 6
+        versionName = "0.4.2"
         buildConfigField("String", "SOURCE_COMMIT", "\"${sourceCommit.get()}\"")
         buildConfigField("boolean", "GOOGLE_DRIVE_ENABLED", googleDriveEnabled.get().toString())
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

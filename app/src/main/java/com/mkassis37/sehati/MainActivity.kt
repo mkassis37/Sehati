@@ -239,22 +239,17 @@ private fun SehatiApp(
         while (lockStore.isEnabled() && appInForeground && !locked) {
             delay(1_000)
             if (System.currentTimeMillis() - lastInteractionAt >= lockStore.timeoutMinutes() * 60_000L) {
-                screen = Screen.MEMBERS
-                selectedId = null
-                editingId = null
+                // Keep the current member and destination behind the lock screen.
+                // After authentication, return to the same medical section.
                 locked = true
                 break
             }
         }
     }
-    LaunchedEffect(appInForeground) {
-        if (!appInForeground) {
-            // Hide an open medical record when the app leaves the foreground.
-            screen = Screen.MEMBERS
-            selectedId = null
-            editingId = null
-        }
-    }
+    // Keep the current medical section and selected family member when the app
+    // temporarily leaves the foreground (for example, to open a PDF picker).
+    // FLAG_SECURE remains enabled, and the configured app lock still covers the UI
+    // after its timeout; unlocking restores this same destination.
     val selected = members.firstOrNull { it.id == selectedId }
     val allergyFlow = remember(selectedId) {
         selectedId?.let { dao.observeAllergies(it) } ?: flowOf(emptyList())

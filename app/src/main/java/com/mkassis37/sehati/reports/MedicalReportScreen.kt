@@ -24,6 +24,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
+import com.mkassis37.sehati.data.medicalShareDirectory
 import com.mkassis37.sehati.DatePickerField
 import java.io.File
 import kotlinx.coroutines.CancellationException
@@ -69,7 +70,7 @@ internal fun rememberMedicalReportActions(): MedicalReportActions {
             scope.launch {
                 try {
                     val file = withContext(Dispatchers.IO) {
-                        val target = File.createTempFile("sehati-report-", ".pdf", context.cacheDir)
+                        val target = File.createTempFile("sehati-report-", ".pdf", medicalShareDirectory(context))
                         try {
                             target.outputStream().use { writeMedicalReportPdf(draft, it) }
                             target

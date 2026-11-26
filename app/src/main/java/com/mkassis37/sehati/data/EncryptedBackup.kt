@@ -405,23 +405,36 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
     }
 
     private fun decrypt(input: InputStream, password: CharArray): JSONObject {
-        val bytes = input.use { source ->
-            val result = ByteArrayOutputStream()
-            val bounded = BackupLimitOutput(result)
-            source.copyTo(bounded)
-            result.toByteArray()
-        }
-        require(bytes.size > 45 && bytes.copyOfRange(0, 4).contentEquals(MAGIC) && bytes[4].toInt() == 1) {
-            "Invalid backup file."
-        }
-        val salt = bytes.copyOfRange(5, 21)
-        val iv = bytes.copyOfRange(21, 33)
-        val key = derive(password, salt)
-        password.fill('\u0000')
-        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-        cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(128, iv))
-        val plain = cipher.doFinal(bytes, 33, bytes.size - 33)
+        val plain = readAuthenticatedBackup(input, password)
         return try { JSONObject(String(plain, Charsets.UTF_8)) } finally { plain.fill(0) }
+    }
+
+    private fun readAuthenticatedBackup(input: InputStream, password: CharArray): ByteArray {
+        val encrypted = BackupCiphertext()
+        return try {
+            input.use { it.copyTo(BackupLimitOutput(encrypted)) }
+            encrypted.authenticate(password)
+        } finally {
+            encrypted.wipe()
+        }
+    }
+
+    private inner class BackupCiphertext : ByteArrayOutputStream() {
+        fun authenticate(password: CharArray): ByteArray {
+            require(count > 45 && MAGIC.indices.all { buf[it] == MAGIC[it] } && buf[4].toInt() == 1) {
+                "Invalid backup file."
+            }
+            val key = derive(password, buf.copyOfRange(5, 21))
+            password.fill('\u0000')
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+            cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(128, buf, 21, 12))
+            return cipher.doFinal(buf, 33, count - 33)
+        }
+
+        fun wipe() {
+            buf.fill(0)
+            reset()
+        }
     }
 
     private fun derive(password: CharArray, salt: ByteArray): SecretKeySpec {

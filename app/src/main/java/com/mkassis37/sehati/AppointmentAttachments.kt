@@ -1,6 +1,5 @@
 package com.mkassis37.sehati
 
-import android.content.Intent
 import android.provider.OpenableColumns
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -12,9 +11,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
-import androidx.core.content.FileProvider
 import com.mkassis37.sehati.data.MedicalAppointment
-import com.mkassis37.sehati.data.MedicalDocument
 import com.mkassis37.sehati.data.SecureMedicalDocumentStore
 import com.mkassis37.sehati.data.SehatiDatabase
 import kotlinx.coroutines.CancellationException
@@ -24,8 +21,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 internal data class AppointmentAttachmentActions(
-    val attach: (MedicalAppointment) -> Unit,
-    val open: (MedicalDocument) -> Unit
+    val attach: (MedicalAppointment) -> Unit
 )
 
 @Composable
@@ -77,21 +73,6 @@ internal fun rememberAppointmentAttachments(
                 pendingAppointmentId = appointment.id
                 pendingMemberId = appointment.memberId
                 picker.launch(arrayOf("application/pdf", "image/jpeg", "image/png", "image/webp"))
-            }
-        },
-        open = { document ->
-            scope.launch {
-                try {
-                    val file = documents.createTemporaryFile(document)
-                    val uri = FileProvider.getUriForFile(context, context.packageName + ".fileprovider", file)
-                    context.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, document.mimeType)
-                        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
-                } catch (cancelled: CancellationException) {
-                    throw cancelled
-                } catch (_: Exception) {
-                    documents.clearTemporaryDocument(document.id)
-                    Toast.makeText(context, "تعذر عرض المرفق.", Toast.LENGTH_LONG).show()
-                }
             }
         }
     )

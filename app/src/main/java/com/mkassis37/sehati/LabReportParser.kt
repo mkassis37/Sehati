@@ -70,8 +70,8 @@ object LabReportParser {
                 "page", "report page", "normal range", "diabetic", "good control",
                 "fair control", "poor control"
             ) || normalizedName.contains("normal ") ||
-                normalizedName.matches(Regex("""^(?:page|report page)\\s*[:#-]?\\s*\\d+.*$""")) ||
-                normalizedName.matches(Regex("""^\\d+(?:\\s+\\d+){0,2}$"""))
+                normalizedName.matches(Regex("""^(?:page|report page)\s*[:#-]?\s*\d+.*$""")) ||
+                normalizedName.matches(Regex("""^\d+(?:\s+\d+){0,2}$"""))
             if (rejectedName) return
             val resultText = resultRaw.trim()
             val result = numericResult.matchEntire(resultText)

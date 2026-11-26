@@ -24,11 +24,12 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 @Composable
-internal fun LabResultsScreen(member: FamilyMember, records: List<LabResult>, documents: List<MedicalDocument>, saveResult: suspend (LabResult) -> Boolean, deleteResult: suspend (Long) -> Unit, saveDocument: suspend (Uri) -> Unit, openDocument: (MedicalDocument) -> Unit, deleteDocument: (MedicalDocument) -> Unit, modifier: Modifier = Modifier) {
+internal fun LabResultsScreen(member: FamilyMember, records: List<LabResult>, documents: List<MedicalDocument>, saveResult: suspend (LabResult, Uri?) -> Boolean, deleteResult: suspend (Long) -> Unit, saveDocument: suspend (Uri) -> Unit, openDocument: (MedicalDocument) -> Unit, deleteDocument: (MedicalDocument) -> Unit, modifier: Modifier = Modifier, initiallyAdd: Boolean = false) {
     val scope = rememberCoroutineScope()
-    var showAdd by rememberSaveable(member.id) { mutableStateOf(false) }
+    var showAdd by rememberSaveable(member.id) { mutableStateOf(initiallyAdd) }
     var editingId by rememberSaveable(member.id) { mutableStateOf<Long?>(null) }
     val editing = records.firstOrNull { it.id == editingId }
+    var sourceUri by rememberSaveable(member.id) { mutableStateOf<Uri?>(null) }
     var reviewCandidate by remember(member.id) { mutableStateOf<LabReportCandidate?>(null) }
     var selectedTest by rememberSaveable(member.id) { mutableStateOf("") }
     var selectedUnit by rememberSaveable(member.id) { mutableStateOf<String?>(null) }
@@ -43,17 +44,18 @@ internal fun LabResultsScreen(member: FamilyMember, records: List<LabResult>, do
     val latest = chronological.lastOrNull()
     val previous = chronological.dropLast(1).lastOrNull()
     val numericHistory = chronological.filter { row ->
-        row.value?.isFinite() == true && latest != null && row.hasSameReferenceRange(latest)
+        row.value?.isFinite() == true && latest != null && row.hasSameReferenceRange(latest) &&
+            runCatching { LocalDate.parse(row.performedAt) }.isSuccess
     }
     val latestValue = latest?.value
     val previousValue = previous?.value
     Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("فحوصات " + member.fullName, style = MaterialTheme.typography.titleLarge)
         Text("تُحفظ كل نتيجة بتاريخها ومجالها المرجعي، وتبقى متاحة للمقارنة لسنوات.", style = MaterialTheme.typography.bodySmall)
-        Button(onClick = { editingId = null; reviewCandidate = null; showAdd = true }, modifier = Modifier.fillMaxWidth()) { Text("إضافة نتيجة فحص") }
+        Button(onClick = { editingId = null; reviewCandidate = null; sourceUri = null; showAdd = true }, modifier = Modifier.fillMaxWidth()) { Text("إضافة نتيجة فحص") }
         LabPdfReader(
             onExtractedText = { /* تتم المعاينة محليًا فقط؛ لا يُحفظ النص الخام */ },
-            onCandidateSelected = { candidate -> editingId = null; reviewCandidate = candidate; showAdd = true },
+            onCandidateSelected = { candidate, uri -> editingId = null; reviewCandidate = candidate; sourceUri = uri; showAdd = true },
             onSavePdf = saveDocument
         )
         Text("التقارير المحفوظة في ملف " + member.fullName, style = MaterialTheme.typography.titleMedium)
@@ -118,13 +120,28 @@ internal fun LabResultsScreen(member: FamilyMember, records: List<LabResult>, do
                     Text("التغير عبر الزمن ضمن المجال المرجعي نفسه", style = MaterialTheme.typography.titleMedium)
                     val chartLineColor = MaterialTheme.colorScheme.primary
                     val chartPointColor = MaterialTheme.colorScheme.tertiary
+                    val dates = numericHistory.map { LocalDate.parse(it.performedAt).toEpochDay() }
+                    val firstDay = dates.first()
+                    val duration = dates.last() - firstDay
+                    var selectedPoint by remember(numericHistory) { mutableIntStateOf(numericHistory.lastIndex) }
                     Canvas(Modifier.fillMaxWidth().height(150.dp)) {
                         val values = numericHistory.mapNotNull { it.value }; val min = values.minOrNull() ?: 0.0; val max = values.maxOrNull() ?: 1.0; val range = (max - min).takeIf { it > 0.0 } ?: 1.0
-                        val points = values.mapIndexed { index, value -> androidx.compose.ui.geometry.Offset(if (values.size == 1) size.width / 2 else size.width * index / (values.size - 1), size.height - ((value - min) / range).toFloat() * (size.height - 16.dp.toPx()) - 8.dp.toPx()) }
+                        val points = values.mapIndexed { index, value -> androidx.compose.ui.geometry.Offset(if (duration == 0L) size.width / 2 else size.width * ((dates[index] - firstDay).toDouble() / duration).toFloat(), size.height - ((value - min) / range).toFloat() * (size.height - 16.dp.toPx()) - 8.dp.toPx()) }
                         points.zipWithNext().forEach { pair -> drawLine(chartLineColor, pair.first, pair.second, strokeWidth = 4f) }
-                        points.forEach { drawCircle(chartPointColor, 5f, it) }
+                        points.forEachIndexed { index, point -> drawCircle(chartPointColor, if (index == selectedPoint) 8f else 5f, point) }
                     }
-                    Text(numericHistory.first().performedAt.toDisplayDate() + " ← " + numericHistory.last().performedAt.toDisplayDate(), style = MaterialTheme.typography.labelSmall)
+                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        numericHistory.forEachIndexed { index, point ->
+                            FilterChip(selected = selectedPoint == index, onClick = { selectedPoint = index },
+                                label = { Text(point.performedAt.toDisplayDate()) })
+                        }
+                    }
+                    val point = numericHistory[selectedPoint]
+                    Text(point.displayValue + " · " + point.performedAt.toDisplayDate(), style = MaterialTheme.typography.titleSmall)
+                    if (point.referenceLow != null || point.referenceHigh != null) {
+                        Text("المجال المرجعي: ${point.referenceLow ?: "—"} إلى ${point.referenceHigh ?: "—"} ${point.unit}",
+                            style = MaterialTheme.typography.bodySmall)
+                    }
                 } }
             }
         }
@@ -157,7 +174,8 @@ internal fun LabResultsScreen(member: FamilyMember, records: List<LabResult>, do
             showAdd = false
             editingId = null
             reviewCandidate = null
-        }, onSave = saveResult)
+            sourceUri = null
+        }, source = sourceUri, onSave = saveResult)
     }
 }
 
@@ -168,7 +186,8 @@ private fun LabResultEditor(
     existing: LabResult?,
     candidate: LabReportCandidate?,
     onDismiss: () -> Unit,
-    onSave: suspend (LabResult) -> Boolean
+    source: Uri?,
+    onSave: suspend (LabResult, Uri?) -> Boolean
 ) {
     val scope = rememberCoroutineScope()
     var name by rememberSaveable(existing?.id, candidate?.testName) {
@@ -192,7 +211,7 @@ private fun LabResultEditor(
     var lab by rememberSaveable(existing?.id) { mutableStateOf(existing?.laboratory.orEmpty()) }
     var notes by rememberSaveable(existing?.id, candidate?.sourceLine) {
         mutableStateOf(existing?.notes ?: candidate?.let {
-            "اقتراح مستخرج من PDF. راجع النتيجة والوحدة والمجال والتاريخ مقابل التقرير الأصلي." +
+            "اقتراح مستخرج من تقرير المختبر. راجع النتيجة والوحدة والمجال والتاريخ مقابل التقرير الأصلي." +
                 if (it.flag.isNotBlank()) " علامة المختبر: " + it.flag else ""
         }.orEmpty())
     }
@@ -273,13 +292,13 @@ private fun LabResultEditor(
                     memberId = memberId, testName = name.trim(), value = number,
                     qualitativeValue = result.trim().takeIf { qualitative }, unit = unit.trim(),
                     referenceLow = lower, referenceHigh = upper, performedAt = date,
-                    laboratory = lab.trim(), source = existing?.source ?: if (candidate != null) "pdf_review" else "manual",
+                    laboratory = lab.trim(), source = existing?.source ?: if (source != null) "report_review" else "manual",
                     notes = notes.trim(), createdAt = existing?.createdAt ?: System.currentTimeMillis()
                 )
                 saving = true
                 scope.launch {
                     try {
-                        if (onSave(record)) onDismiss() else error = "تعذر العثور على نتيجة الفحص."
+                        if (onSave(record, source)) onDismiss() else error = "تعذر العثور على نتيجة الفحص."
                     } catch (cancelled: CancellationException) {
                         throw cancelled
                     } catch (_: Exception) {
@@ -289,7 +308,7 @@ private fun LabResultEditor(
                     }
                 }
             }
-        }) { Text(if (saving) "جارٍ الحفظ…" else "حفظ النتيجة") }
+        }) { Text(if (saving) "جارٍ الحفظ…" else if (source != null) "حفظ النتيجة وإرفاق المصدر" else "حفظ النتيجة") }
     }, dismissButton = { TextButton(enabled = !saving, onClick = onDismiss) { Text("إلغاء") } })
 }
 

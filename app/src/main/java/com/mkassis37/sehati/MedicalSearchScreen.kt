@@ -5,7 +5,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.mkassis37.sehati.data.FamilyMember
@@ -23,12 +22,14 @@ private val searchLabels = mapOf(
 @Composable
 internal fun MedicalSearchScreen(
     members: List<FamilyMember>,
+    text: String,
+    onTextChange: (String) -> Unit,
+    chosenMember: Long?,
+    onChooseMember: (Long?) -> Unit,
     search: (String, Long?) -> Flow<List<MedicalSearchHit>>,
     open: (MedicalSearchHit) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var text by remember { mutableStateOf("") }
-    var chosenMember by rememberSaveable { mutableStateOf<Long?>(null) }
     var menu by remember { mutableStateOf(false) }
     val member = members.firstOrNull { it.id == chosenMember }
     val query = text.trim()
@@ -43,16 +44,16 @@ internal fun MedicalSearchScreen(
     LazyColumn(modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item {
             OutlinedTextField(
-                text, { text = it }, label = { Text("ابحث في الملفات الصحية") },
+                text, onTextChange, label = { Text("ابحث في الملفات الصحية") },
                 modifier = Modifier.fillMaxWidth(), singleLine = true
             )
             ExposedDropdownMenuBox(menu, { menu = it }) {
                 OutlinedTextField(member?.fullName ?: "جميع الأفراد", {}, label = { Text("نطاق البحث") },
                     readOnly = true, modifier = Modifier.fillMaxWidth().menuAnchor())
                 ExposedDropdownMenu(menu, { menu = false }) {
-                    DropdownMenuItem({ Text("جميع الأفراد") }, { chosenMember = null; menu = false })
+                    DropdownMenuItem({ Text("جميع الأفراد") }, { onChooseMember(null); menu = false })
                     members.forEach { option ->
-                        DropdownMenuItem({ Text(option.fullName) }, { chosenMember = option.id; menu = false })
+                        DropdownMenuItem({ Text(option.fullName) }, { onChooseMember(option.id); menu = false })
                     }
                 }
             }

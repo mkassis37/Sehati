@@ -25,6 +25,33 @@ class MemberHealthDatabaseTest {
     )
 
     @Test
+    fun importedLabResultAndSourceAreCommittedTogether() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val database = Room.inMemoryDatabaseBuilder(context, SehatiDatabase::class.java).build()
+        try {
+            val dao = database.medicalDao()
+            val owner = dao.addMember(FamilyMember(fullName = "Synthetic owner"))
+            val other = dao.addMember(FamilyMember(fullName = "Synthetic other"))
+            val record = LabResult(memberId = owner, testName = "Synthetic test", value = 8.0,
+                performedAt = "2026-11-26", source = "report_review")
+            val document = MedicalDocument(id = 50, memberId = owner, displayName = "Synthetic.png",
+                relativePath = "$owner/synthetic.shtd", sizeBytes = 20, mimeType = "image/png")
+
+            val resultId = database.addLabResultWithSource(record, document)
+            assertEquals(resultId, dao.findDocument(50, owner)?.relatedLabResultId)
+            assertTrue(runCatching {
+                database.addLabResultWithSource(record, document.copy(memberId = other))
+            }.isFailure)
+            assertTrue(runCatching {
+                database.addLabResultWithSource(record, document)
+            }.isFailure)
+            assertEquals(listOf(resultId), dao.observeLabResults(owner).first().map { it.id })
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
     fun editingLabResultKeepsItsOwnerAndAttachment() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         val database = Room.inMemoryDatabaseBuilder(context, SehatiDatabase::class.java).build()

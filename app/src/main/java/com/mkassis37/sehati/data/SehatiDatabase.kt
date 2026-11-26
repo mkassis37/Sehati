@@ -72,6 +72,15 @@ abstract class SehatiDatabase : RoomDatabase() {
         document
     }
 
+    suspend fun addLabResultWithSource(record: LabResult, document: MedicalDocument): Long = withTransaction {
+        require(record.id == 0L && document.memberId == record.memberId)
+        val dao = medicalDao()
+        check(dao.memberExists(record.memberId))
+        val id = dao.addLabResult(record)
+        dao.addDocument(document.copy(relatedLabResultId = id))
+        id
+    }
+
     suspend fun updateMemberLabResult(record: LabResult, memberId: Long): Boolean = withTransaction {
         require(record.memberId == memberId)
         val dao = medicalDao()

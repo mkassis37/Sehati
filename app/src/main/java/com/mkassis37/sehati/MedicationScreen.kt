@@ -27,14 +27,16 @@ internal fun MedicationScreen(
     addMedication: suspend (MedicationRecord) -> Unit,
     updateMedication: suspend (MedicationRecord) -> Unit,
     deleteMedication: suspend (MedicationRecord) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    initiallyShowInactive: Boolean = false,
+    initialDoseId: Long? = null
 ) {
     val scope = rememberCoroutineScope()
-    var selectedDoseMedicationId by rememberSaveable(member.id) { mutableStateOf<Long?>(null) }
+    var selectedDoseMedicationId by rememberSaveable(member.id) { mutableStateOf(initialDoseId) }
     var editingId by rememberSaveable(member.id) { mutableStateOf<Long?>(null) }
     val editing = records.firstOrNull { it.id == editingId }
     var showForm by rememberSaveable(member.id) { mutableStateOf(false) }
-    var showInactive by rememberSaveable(member.id) { mutableStateOf(false) }
+    var showInactive by rememberSaveable(member.id) { mutableStateOf(initiallyShowInactive) }
     val active = records.filter { it.isActive && !it.completed && (it.endDate.isEmpty() || it.endDate >= LocalDate.now().toString()) }
     val visible = if (showInactive) records else active
     Column(modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {

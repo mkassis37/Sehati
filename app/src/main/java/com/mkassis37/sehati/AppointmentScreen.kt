@@ -65,7 +65,8 @@ internal fun AppointmentScreen(
     onOpenDocument: (MedicalDocument) -> Unit,
     onSave: suspend (MedicalAppointment) -> Boolean,
     onDelete: suspend (MedicalAppointment) -> Boolean,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    focusedId: Long? = null
 ) {
     val scope = rememberCoroutineScope()
     val today = LocalDate.now()
@@ -82,7 +83,7 @@ internal fun AppointmentScreen(
     val monthStart = day.withDayOfMonth(1)
     val monthGridStart = monthStart.with(WeekFields.of(arabicLocale).dayOfWeek(), 1)
     val groups = appointments.groupBy { it.date }
-    val visible = when (view) {
+    val visible = if (focusedId != null) appointments else when (view) {
         CalendarView.MONTH, CalendarView.DAY -> groups[selectedDay].orEmpty()
         CalendarView.WEEK -> appointments.filter { it.date in weekStart.toString()..weekStart.plusDays(6).toString() }
         CalendarView.HISTORY -> appointments.filter {

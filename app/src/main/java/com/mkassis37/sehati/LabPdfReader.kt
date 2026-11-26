@@ -1,6 +1,7 @@
 package com.mkassis37.sehati
 
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.pdf.PdfRenderer
 import com.googlecode.tesseract.android.TessBaseAPI
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
@@ -56,21 +57,23 @@ import kotlinx.coroutines.withContext
  * OCR text is presented for human verification and is never written to the medical record automatically.
  */
 @Composable
-fun LabPdfReader(onExtractedText: (String) -> Unit, onCandidateSelected: (LabReportCandidate) -> Unit, onSavePdf: suspend (Uri) -> Unit) {
+fun LabPdfReader(onExtractedText: (String) -> Unit, onCandidateSelected: (LabReportCandidate, Uri) -> Unit, onSavePdf: suspend (Uri) -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var selectedUri by remember { mutableStateOf<Uri?>(null) }
+    var isImage by remember { mutableStateOf(false) }
     var pageBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var pageCount by remember { mutableIntStateOf(0) }
     var pageIndex by remember { mutableIntStateOf(0) }
     var extractedText by remember { mutableStateOf("") }
     var candidates by remember { mutableStateOf<List<LabReportCandidate>>(emptyList()) }
-    var status by remember { mutableStateOf("اختاري تقرير PDF من الهاتف.") }
+    var status by remember { mutableStateOf("اختر صورة أو تقرير PDF من الهاتف.") }
     var busy by remember { mutableStateOf(false) }
     var savingPdf by remember { mutableStateOf(false) }
     var pdfSaved by remember { mutableStateOf(false) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
+            isImage = context.contentResolver.getType(uri)?.startsWith("image/") == true
             selectedUri = uri
             pageIndex = 0
             pageCount = 0
@@ -88,6 +91,14 @@ fun LabPdfReader(onExtractedText: (String) -> Unit, onCandidateSelected: (LabRep
         busy = true
         try {
             val result = withContext(Dispatchers.IO) {
+                if (isImage) {
+                    val bitmap = readLabImage(context.contentResolver, uri)
+                    return@withContext try {
+                        1 to recognizeLabImage(context, bitmap)
+                    } finally {
+                        bitmap.recycle()
+                    }
+                }
                 val descriptor = context.contentResolver.openFileDescriptor(uri, "r")
                     ?: error("لم يتمكن أندرويد من فتح الملف. جرّبي حفظ PDF على الجهاز أولًا.")
                 descriptor.use { parcel ->
@@ -125,27 +136,15 @@ fun LabPdfReader(onExtractedText: (String) -> Unit, onCandidateSelected: (LabRep
                                 renderer.openPage(index).use { page ->
                                     val bitmap = page.renderLabPage()
                                     try {
-                                        val arabic = runCatching {
-                                            tess.value?.setImage(bitmap)
-                                            tess.value?.getUTF8Text().orEmpty()
-                                        }.getOrDefault("")
-                                        val latin = runCatching {
-                                            // ML Kit may continue reading the bitmap after the caller is cancelled.
-                                            withContext(NonCancellable) {
+                                        text.append("\n").append(recognizeLabBitmap(
+                                            recognizeArabic = {
+                                                tess.value?.setImage(bitmap)
+                                                tess.value?.getUTF8Text().orEmpty()
+                                            },
+                                            recognizeLatin = {
                                                 recognizer.value.process(InputImage.fromBitmap(bitmap, 0)).awaitResult().text
                                             }
-                                        }.getOrElse {
-                                            if (it is CancellationException) throw it
-                                            ""
-                                        }
-                                        // ML Kit Latin OCR is primary for English names, values and units.
-// Tesseract is configured for Arabic; keep only Arabic-script lines from it
-// to avoid Latin hallucinations such as "Normal 18" beside English rows.
-val arabicLines = arabic.lineSequence()
-.filter { line -> line.any { it in '\u0600'..'\u06FF' } }
-.joinToString("\n")
-text.append("\n").append(latin.take(MAX_LAB_PAGE_TEXT))
-.append("\n").append(arabicLines.take(MAX_LAB_PAGE_TEXT))
+                                        ))
                                     } finally {
                                         bitmap.recycle()
                                     }
@@ -164,7 +163,7 @@ text.append("\n").append(latin.take(MAX_LAB_PAGE_TEXT))
             candidates = LabReportParser.parse(extractedText)
             onExtractedText(extractedText)
             status = if (extractedText.isBlank())
-                "تم فتح PDF، لكن لم يظهر نص قابل للقراءة. تحققي من وضوح الصفحات أو أدخلي النتائج يدويًا."
+                "تم فتح الملف، لكن لم يظهر نص قابل للقراءة. تحققي من وضوح الصفحات أو أدخلي النتائج يدويًا."
             else "تمت معاينة الصفحة الأولى وقراءة النص من $pageCount صفحة."
         } catch (cancelled: CancellationException) {
             throw cancelled
@@ -180,6 +179,7 @@ text.append("\n").append(latin.take(MAX_LAB_PAGE_TEXT))
         if (pageCount == 0) return@LaunchedEffect
         try {
             val bitmap = withContext(Dispatchers.IO) {
+                if (isImage) return@withContext readLabImage(context.contentResolver, uri)
                 val descriptor = context.contentResolver.openFileDescriptor(uri, "r") ?: error("تعذر فتح الملف")
                 descriptor.use { parcel ->
                     PdfRenderer(parcel).use { renderer ->
@@ -191,6 +191,8 @@ text.append("\n").append(latin.take(MAX_LAB_PAGE_TEXT))
             }
             pageBitmap?.takeIf { it !== bitmap }?.recycle()
             pageBitmap = bitmap
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (_: Exception) { status = "تعذر عرض الصفحة ${pageIndex + 1}." }
     }
     Card(Modifier.fillMaxWidth()) {
@@ -198,22 +200,23 @@ text.append("\n").append(latin.take(MAX_LAB_PAGE_TEXT))
             Modifier.fillMaxWidth().heightIn(max = 720.dp).verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Text("قراءة تقرير المختبر PDF", style = MaterialTheme.typography.titleMedium)
+            Text("قراءة تقرير المختبر", style = MaterialTheme.typography.titleMedium)
             Text(
                 "تتم المعالجة على الجهاز دون إرسال التقرير إلى خادم خارجي. تتم قراءة كل الصفحات، وتبقى النتائج بحاجة إلى مراجعتك قبل إضافتها للملف الطبي.",
                 style = MaterialTheme.typography.bodySmall
             )
-            Button(onClick = { picker.launch(arrayOf("application/pdf")) }) { Text("اختيار تقرير PDF") }
+            Button(onClick = { picker.launch(arrayOf("application/pdf", "image/jpeg", "image/png", "image/webp")) }) { Text("اختيار صورة أو PDF") }
             if (selectedUri != null) {
                 Button(enabled = !busy && !savingPdf && !pdfSaved, onClick = {
                     val uri = selectedUri ?: return@Button
                     scope.launch {
                         savingPdf = true
                         try { onSavePdf(uri); pdfSaved = true; status = "تم حفظ نسخة مشفرة من التقرير ضمن الملف الطبي." }
+                        catch (cancelled: CancellationException) { throw cancelled }
                         catch (error: Exception) { status = "تعذر حفظ التقرير: ${error.message ?: "خطأ غير معروف"}" }
                         finally { savingPdf = false }
                     }
-                }) { Text(if (pdfSaved) "تم حفظ التقرير" else if (savingPdf) "جارٍ حفظ التقرير..." else "حفظ PDF الأصلي في الملف") }
+                }) { Text(if (pdfSaved) "تم حفظ التقرير" else if (savingPdf) "جارٍ حفظ التقرير..." else "حفظ الملف الأصلي") }
             }
             Text(status, style = MaterialTheme.typography.bodySmall)
             if (busy) CircularProgressIndicator()
@@ -236,7 +239,7 @@ text.append("\n").append(latin.take(MAX_LAB_PAGE_TEXT))
                             Text(listOfNotNull(candidate.qualitativeValue ?: candidate.value?.toString(), candidate.unit.takeIf { it.isNotBlank() }).joinToString(" "))
                             Text("المرجع المقروء: " + (candidate.referenceLow?.toString() ?: "—") + " إلى " + (candidate.referenceHigh?.toString() ?: "—"), style = MaterialTheme.typography.bodySmall)
                             Text("النص الأصلي: " + candidate.sourceLine, style = MaterialTheme.typography.bodySmall)
-                            Button(onClick = { onCandidateSelected(candidate) }) { Text("مراجعة وإدخال هذه النتيجة") }
+                            Button(onClick = { selectedUri?.let { onCandidateSelected(candidate, it) } }) { Text("مراجعة وإدخال هذه النتيجة") }
                         }
                     }
                 }
@@ -252,6 +255,52 @@ text.append("\n").append(latin.take(MAX_LAB_PAGE_TEXT))
             }
         }
     }
+}
+
+private fun readLabImage(resolver: android.content.ContentResolver, uri: Uri): Bitmap {
+    resolver.openFileDescriptor(uri, "r")?.use {
+        require(it.statSize in 1..MAX_LAB_PDF_BYTES) { "اختر صورة محلية لا تتجاوز 25 ميغابايت." }
+    } ?: error("تعذر فتح الصورة.")
+    val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, options) }
+    require(options.outWidth > 0 && options.outHeight > 0) { "تعذر قراءة أبعاد الصورة." }
+    val edge = maxOf(options.outWidth, options.outHeight)
+    options.inSampleSize = 1
+    while (edge / options.inSampleSize > 2400) options.inSampleSize *= 2
+    options.inJustDecodeBounds = false
+    return resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, options) }
+        ?: error("تعذر فك ترميز الصورة.")
+}
+
+private suspend fun recognizeLabImage(context: android.content.Context, bitmap: Bitmap): String {
+    val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+    val tess = runCatching { createArabicTesseract(context) }.getOrNull()
+    try {
+        return recognizeLabBitmap( recognizeArabic = {
+            tess?.setImage(bitmap)
+            tess?.getUTF8Text().orEmpty()
+        }, recognizeLatin = {
+            recognizer.process(InputImage.fromBitmap(bitmap, 0)).awaitResult().text
+        })
+    } finally {
+        tess?.recycle()
+        recognizer.close()
+    }
+}
+
+private suspend fun recognizeLabBitmap(
+    recognizeArabic: () -> String,
+    recognizeLatin: suspend () -> String
+): String {
+    val arabic = runCatching(recognizeArabic).getOrDefault("")
+    // Keep the supplied bitmap alive until ML Kit finishes reading it.
+    val latin = try { withContext(NonCancellable) { recognizeLatin() } }
+    catch (cancelled: CancellationException) { throw cancelled }
+    catch (_: Exception) { "" }
+    val arabicLines = arabic.lineSequence()
+        .filter { line -> line.any { it in '\u0600'..'\u06FF' } }
+        .joinToString("\n")
+    return latin.take(MAX_LAB_PAGE_TEXT) + "\n" + arabicLines.take(MAX_LAB_PAGE_TEXT)
 }
 
 private fun createArabicTesseract(context: android.content.Context): TessBaseAPI {

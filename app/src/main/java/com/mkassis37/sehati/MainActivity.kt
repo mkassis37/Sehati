@@ -64,6 +64,8 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import com.mkassis37.sehati.data.AllergyRecord
+import com.mkassis37.sehati.data.AppointmentStatus
+import com.mkassis37.sehati.data.displayValue
 import com.mkassis37.sehati.data.FamilyMember
 import com.mkassis37.sehati.data.MedicalDocument
 import com.mkassis37.sehati.data.MedicationRecord
@@ -235,6 +237,12 @@ private fun SehatiApp(
         }
     }
     val members by dao.observeMembers().collectAsState(initial = emptyList())
+    var searchText by rememberSaveable { mutableStateOf("") }
+    var searchMemberId by rememberSaveable { mutableStateOf<Long?>(null) }
+    var focusedRecordId by rememberSaveable { mutableStateOf<Long?>(null) }
+    var focusedRecordKind by rememberSaveable { mutableStateOf<String?>(null) }
+    var quickAddLab by rememberSaveable { mutableStateOf(false) }
+    var quickDoseId by rememberSaveable { mutableStateOf<Long?>(null) }
     var selectedId by rememberSaveable { mutableStateOf<Long?>(null) }
     var editingId by rememberSaveable { mutableStateOf<Long?>(null) }
     var healthInitialTab by rememberSaveable { mutableIntStateOf(0) }
@@ -295,13 +303,16 @@ private fun SehatiApp(
         }
     }
 
+    fun documentName(uri: Uri, fallbackName: String): String =
+        context.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)
+            ?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null } ?: fallbackName
+
     suspend fun saveMemberDocument(
         uri: Uri, memberId: Long, fallbackName: String, category: DocumentCategory,
         procedureId: Long? = null
     ) {
         withContext(Dispatchers.IO + NonCancellable) {
-            val name = context.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)
-                ?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null } ?: fallbackName
+            val name = documentName(uri, fallbackName)
             val document = documentStore.save(uri, memberId, name)
             try {
                 db.addLinkedDocument(document.copy(category = category.name, relatedProcedureId = procedureId))
@@ -326,6 +337,11 @@ private fun SehatiApp(
 
     val reportActions = rememberMedicalReportActions()
 
+    fun <T> matchingRecords(kind: String, records: List<T>, recordId: (T) -> Long): List<T> {
+        val wanted = focusedRecordId
+        return if (wanted == null || focusedRecordKind != kind) records else records.filter { recordId(it) == wanted }
+    }
+
     val title = when (screen) {
         Screen.MEMBERS -> "أفراد العائلة"
         Screen.DETAILS -> selected?.fullName ?: "الملف الطبي"
@@ -345,7 +361,13 @@ private fun SehatiApp(
     // Keep Android system-back inside the app instead of finishing the Activity.
     // Details returns to the family list so another member can be selected.
     val navigateBack: () -> Unit = {
-        screen = when (screen) {
+        quickAddLab = false
+        quickDoseId = null
+        if (focusedRecordId != null) {
+            focusedRecordId = null
+            focusedRecordKind = null
+            screen = Screen.SEARCH
+        } else screen = when (screen) {
             Screen.FORM -> if (editingId == null) Screen.MEMBERS else Screen.DETAILS
             Screen.DETAILS -> Screen.MEMBERS
             Screen.ALLERGIES, Screen.LAB_RESULTS, Screen.HEALTH_RECORDS -> Screen.DETAILS
@@ -409,6 +431,9 @@ private fun SehatiApp(
                 }
             },
             actions = {
+                if (focusedRecordId != null) {
+                    TextButton(onClick = { focusedRecordId = null; focusedRecordKind = null }) { Text("عرض الكل") }
+                }
                 if (screen == Screen.MEMBERS) {
                     IconButton(onClick = { screen = Screen.SEARCH }) {
                         Icon(Icons.Outlined.Search, contentDescription = "البحث الشامل")
@@ -438,9 +463,15 @@ private fun SehatiApp(
 
             Screen.SEARCH -> MedicalSearchScreen(
                 members = members,
+                text = searchText,
+                onTextChange = { searchText = it },
+                chosenMember = searchMemberId,
+                onChooseMember = { searchMemberId = it },
                 search = dao::searchMedicalRecords,
                 open = { result ->
                     selectedId = result.memberId
+                    focusedRecordId = result.recordId
+                    focusedRecordKind = result.kind
                     screen = when (result.kind) {
                         "ALLERGY" -> Screen.ALLERGIES
                         "LAB" -> Screen.LAB_RESULTS
@@ -470,6 +501,17 @@ private fun SehatiApp(
                     { screen = Screen.LAB_RESULTS }, labResults.size,
                     { screen = Screen.MEDICATIONS }, medications.size,
                     onAppointments = { screen = Screen.APPOINTMENTS },
+                    upcomingAppointment = appointments.firstOrNull {
+                        it.status == AppointmentStatus.UPCOMING.name &&
+                            (it.date + "T" + it.time) >= java.time.LocalDateTime.now().toString().take(16)
+                    }?.let { "${it.doctor} · ${it.date.toDisplayDate()} · ${it.time}" },
+                    activeMedications = medications.filter {
+                        it.isActive && !it.completed && (it.startDate.isBlank() || it.startDate <= LocalDate.now().toString()) &&
+                            (it.endDate.isBlank() || it.endDate >= LocalDate.now().toString())
+                    },
+                    latestLab = labResults.firstOrNull()?.let { "${it.testName} · ${it.displayValue}" },
+                    onAddLab = { quickAddLab = true; screen = Screen.LAB_RESULTS },
+                    onRecordDose = { quickDoseId = it; screen = Screen.MEDICATIONS },
                     appointmentCount = appointments.size,
                     onDocuments = { screen = Screen.DOCUMENTS },
                     onReports = { screen = Screen.REPORTS },
@@ -500,8 +542,11 @@ private fun SehatiApp(
             Screen.HEALTH_RECORDS -> if (selected != null) {
                 MedicalHealthScreen(
                     member = selected, initialTab = healthInitialTab, allergies = allergies, medications = medications, labResults = labResults, documents = medicalDocuments,
-                    conditions = conditions, procedures = procedures, history = historyEvents, appointments = appointments,
-                    familyHistory = familyHistory, measurements = measurements,
+                    conditions = matchingRecords("CONDITION", conditions) { it.id },
+                    procedures = matchingRecords("PROCEDURE", procedures) { it.id },
+                    history = matchingRecords("HISTORY", historyEvents) { it.id },
+                    appointments = appointments,
+                    familyHistory = matchingRecords("FAMILY_HISTORY", familyHistory) { it.id }, measurements = measurements,
                     onSaveMember = { dao.updateMember(it) },
                     onAddCondition = { dao.addCondition(it); Unit }, onUpdateCondition = { dao.updateCondition(it) },
                     onDeleteCondition = { dao.deleteCondition(it, selected.id) },
@@ -555,10 +600,26 @@ private fun SehatiApp(
 
             Screen.LAB_RESULTS -> if (selected != null) {
                 LabResultsScreen(
-                    selected, labResults, medicalDocuments,
-                    saveResult = { record ->
-                        if (record.id == 0L) dao.addLabResult(record) > 0
-                        else db.updateMemberLabResult(record, selected.id)
+                    selected, matchingRecords("LAB", labResults) { it.id },
+                    if (focusedRecordKind == "LAB") medicalDocuments.filter { it.relatedLabResultId == focusedRecordId } else medicalDocuments,
+                    initiallyAdd = quickAddLab,
+                    saveResult = { record, source ->
+                        when {
+                            record.id != 0L -> db.updateMemberLabResult(record, selected.id)
+                            source == null -> dao.addLabResult(record) > 0
+                            else -> withContext(Dispatchers.IO + NonCancellable) {
+                                val document = documentStore.save(source, selected.id, documentName(source, "تقرير مختبر"))
+                                try {
+                                    db.addLabResultWithSource(record, document.copy(
+                                        category = DocumentCategory.LAB.name,
+                                        documentDate = record.performedAt
+                                    )) > 0
+                                } catch (error: Exception) {
+                                    documentStore.delete(document)
+                                    throw error
+                                }
+                            }
+                        }
                     },
                     deleteResult = { db.deleteLabResultAndUnlinkAttachments(it, selected.id) },
                     saveDocument = { uri -> saveMemberDocument(uri, selected.id, "تقرير طبي.pdf", DocumentCategory.LAB) },
@@ -568,7 +629,7 @@ private fun SehatiApp(
                 )
             }
             Screen.ALLERGIES -> if (selected != null) {
-                AllergyScreen(selected, allergies,
+                AllergyScreen(selected, matchingRecords("ALLERGY", allergies) { it.id },
                     addAllergy = { dao.addAllergy(it) },
                     updateAllergy = { record -> dao.updateAllergy(record.id, selected.id, record.category, record.substance, record.commercialName, record.activeIngredient, record.reaction, record.severity, record.notes) },
                     deleteAllergy = { dao.deleteAllergy(it, selected.id) },
@@ -577,8 +638,10 @@ private fun SehatiApp(
             Screen.MEDICATIONS -> if (selected != null) {
                 MedicationScreen(
                     member = selected,
-                    records = medications,
+                    records = matchingRecords("MEDICATION", medications) { it.id },
                     doseLogs = doseLogs,
+                    initiallyShowInactive = focusedRecordKind == "MEDICATION",
+                    initialDoseId = quickDoseId,
                     onRecordDose = { db.recordDose(it, selected.id) },
                     addMedication = { dao.addMedication(it); Unit },
                     updateMedication = { dao.updateMedication(it) },
@@ -659,7 +722,8 @@ private fun SehatiApp(
             }
             Screen.APPOINTMENTS -> if (selected != null) AppointmentScreen(
                 member = selected,
-                appointments = appointments,
+                appointments = matchingRecords("VISIT", appointments) { it.id },
+                focusedId = focusedRecordId.takeIf { focusedRecordKind == "VISIT" },
                 documents = medicalDocuments,
                 onAttach = appointmentAttachments.attach,
                 onOpenDocument = appointmentAttachments.open,
@@ -669,7 +733,7 @@ private fun SehatiApp(
             )
             Screen.DOCUMENTS -> if (selected != null) DocumentLibraryScreen(
                 member = selected,
-                documents = medicalDocuments,
+                documents = matchingRecords("DOCUMENT", medicalDocuments) { it.id },
                 links = buildList {
                     appointments.forEach { add(DocumentLink("appointment", it.id, "موعد · ${it.doctor} · ${it.date.toDisplayDate()}")) }
                     labResults.forEach { add(DocumentLink("lab", it.id, "فحص · ${it.testName} · ${it.performedAt.toDisplayDate()}")) }
@@ -888,6 +952,11 @@ private fun MemberDetailsScreen(
     onMedications: () -> Unit,
     medicationCount: Int,
     onAppointments: () -> Unit,
+    upcomingAppointment: String?,
+    activeMedications: List<MedicationRecord>,
+    latestLab: String?,
+    onAddLab: () -> Unit,
+    onRecordDose: (Long) -> Unit,
     appointmentCount: Int,
     onDocuments: () -> Unit,
     onReports: () -> Unit,
@@ -897,6 +966,25 @@ private fun MemberDetailsScreen(
     var showDeleteConfirmation by rememberSaveable(member.id) { mutableStateOf(false) }
     Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(18.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("ملخص ${member.fullName}", style = MaterialTheme.typography.titleLarge)
+                DetailLine("الموعد القادم", upcomingAppointment ?: "لا يوجد موعد قادم")
+                DetailLine("الأدوية الحالية", if (activeMedications.isEmpty()) "لا توجد أدوية حالية" else
+                    activeMedications.take(3).joinToString("، ") { it.name } +
+                        if (activeMedications.size > 3) " (+${activeMedications.size - 3})" else "")
+                DetailLine("آخر تحليل", latestLab ?: "لا توجد نتائج محفوظة")
+                Button(onClick = onAddLab, modifier = Modifier.fillMaxWidth()) { Text("إضافة تحليل") }
+                if (activeMedications.isNotEmpty()) {
+                    val onlyMedication = activeMedications.singleOrNull()
+                    OutlinedButton(onClick = {
+                        if (onlyMedication == null) onMedications() else onRecordDose(onlyMedication.id)
+                    }, modifier = Modifier.fillMaxWidth()) {
+                        Text(if (onlyMedication == null) "فتح سجل الجرعات" else "تسجيل جرعة · ${onlyMedication.name}")
+                    }
+                }
+            }
+        }
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(member.fullName, style = MaterialTheme.typography.headlineSmall)

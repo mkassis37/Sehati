@@ -7,7 +7,9 @@ import android.security.keystore.KeyProperties
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.io.InputStream
 import java.io.OutputStream
+import java.io.PushbackInputStream
 import java.security.KeyStore
 import java.util.UUID
 import javax.crypto.Cipher
@@ -66,26 +68,57 @@ class SecureMedicalDocumentStore(private val context: Context) {
         decryptFile(resolve(document.relativePath)).use { it.copyTo(output) }
     }
 
-    suspend fun restore(document: MedicalDocument, plaintext: ByteArray): MedicalDocument = withContext(Dispatchers.IO) {
-        require(plaintext.size <= MAX_DOCUMENT_BYTES && detectMime(plaintext.copyOfRange(0, minOf(12, plaintext.size))) == document.mimeType) {
-            "صيغة المرفق غير متوافقة مع بيانات النسخة الاحتياطية."
-        }
-        val target = resolve(document.relativePath)
-        target.parentFile?.mkdirs()
-        try {
-            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-            cipher.init(Cipher.ENCRYPT_MODE, getKey())
-            FileOutputStream(target).use { file ->
-                file.write(MAGIC)
-                file.write(cipher.iv)
-                CipherOutputStream(file, cipher).use { it.write(plaintext) }
+    suspend fun restore(document: MedicalDocument, plaintext: ByteArray): MedicalDocument =
+        restore(document, plaintext.inputStream(), plaintext.size.toLong())
+
+    /**
+     * Streams authenticated backup attachment plaintext straight into this store's
+     * device-key-encrypted file. The caller's stream is fully consumed so an upstream
+     * authenticated stream can verify its final GCM tag before this method succeeds.
+     */
+    suspend fun restore(document: MedicalDocument, plaintext: InputStream, expectedSize: Long): MedicalDocument =
+        withContext(Dispatchers.IO) {
+            require(expectedSize in 1..MAX_DOCUMENT_BYTES) {
+                "حجم المرفق غير صالح في النسخة الاحتياطية."
             }
-            document.copy(sizeBytes = plaintext.size.toLong())
-        } catch (error: Exception) {
-            target.delete()
-            throw error
+            val source = PushbackInputStream(plaintext, 12)
+            val header = readAtMost(source, 12)
+            source.unread(header)
+            require(detectMime(header) == document.mimeType) {
+                "صيغة المرفق غير متوافقة مع بيانات النسخة الاحتياطية."
+            }
+            val target = resolve(document.relativePath)
+            target.parentFile?.mkdirs()
+            var copied = 0L
+            try {
+                source.use { input ->
+                    val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+                    cipher.init(Cipher.ENCRYPT_MODE, getKey())
+                    FileOutputStream(target).use { file ->
+                        file.write(MAGIC)
+                        file.write(cipher.iv)
+                        CipherOutputStream(file, cipher).use { encrypted ->
+                            val buffer = ByteArray(32 * 1024)
+                            while (true) {
+                                val count = input.read(buffer)
+                                if (count < 0) break
+                                if (count == 0) continue
+                                copied += count
+                                require(copied <= expectedSize && copied <= MAX_DOCUMENT_BYTES) {
+                                    "حجم المرفق أكبر من الحجم المعلن."
+                                }
+                                encrypted.write(buffer, 0, count)
+                            }
+                        }
+                    }
+                }
+                require(copied == expectedSize) { "حجم المرفق لا يطابق بيانات النسخة الاحتياطية." }
+                document.copy(sizeBytes = copied)
+            } catch (error: Exception) {
+                target.delete()
+                throw error
+            }
         }
-    }
 
     suspend fun createTemporaryFile(document: MedicalDocument): File = withContext(Dispatchers.IO) {
         val extension = when (document.mimeType) {
@@ -113,6 +146,33 @@ class SecureMedicalDocumentStore(private val context: Context) {
     }
 
     fun deleteAll() { directory.deleteRecursively() }
+
+    internal fun createBackupPreviewFile(): File {
+        val directory = backupPreviewDirectory()
+        return File.createTempFile("sehati-backup-preview-", ".shtb", directory)
+    }
+
+    internal fun deleteBackupPreviewFile(path: String?) {
+        if (path.isNullOrBlank()) return
+        val directory = backupPreviewDirectory().canonicalFile
+        val file = File(path).canonicalFile
+        if (file.parentFile == directory && file.name.startsWith("sehati-backup-preview-")) {
+            file.delete()
+        }
+    }
+
+    internal fun clearBackupPreviewFiles() {
+        val directory = File(context.cacheDir, BACKUP_PREVIEW_DIRECTORY)
+        directory.listFiles()?.filter { it.isFile && it.name.startsWith("sehati-backup-preview-") }
+            ?.forEach { it.delete() }
+    }
+
+    private fun backupPreviewDirectory(): File =
+        File(context.cacheDir, BACKUP_PREVIEW_DIRECTORY).apply {
+            if (!isDirectory && !mkdirs() && !isDirectory) {
+                throw java.io.IOException("تعذر تجهيز مساحة معاينة النسخة الاحتياطية.")
+            }
+        }
 
     fun clearTemporaryPdfs() {
         // Older builds stored these files directly in cache.
@@ -200,6 +260,7 @@ class SecureMedicalDocumentStore(private val context: Context) {
 
     companion object {
         private const val KEY_ALIAS = "sehati_medical_documents_v1"
+        private const val BACKUP_PREVIEW_DIRECTORY = "sehati-backup-previews"
         private const val MAX_DOCUMENT_BYTES = 25L * 1024L * 1024L
         private val MAGIC = byteArrayOf(0x53, 0x48, 0x44, 0x46)
     }

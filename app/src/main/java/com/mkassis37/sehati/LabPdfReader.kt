@@ -122,7 +122,6 @@ fun LabPdfReader(onExtractedText: (String) -> Unit, onCandidateSelected: (LabRep
                                 ensureActive()
                                 val pageText = pageTexts.getOrElse(index) { "" }
                                 text.append("\n\n--- الصفحة ${index + 1} ---\n").append(pageText)
-                                if (LabReportParser.parse(pageText).isNotEmpty()) continue
                                 renderer.openPage(index).use { page ->
                                     val bitmap = page.renderLabPage()
                                     try {

@@ -465,20 +465,12 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
                 manifestIv.fill(0)
                 documents.forEachIndexed { index, document ->
                     require(document.sizeBytes in 1..MAX_DOCUMENT_BYTES)
-                    val iv = ByteArray(12).also(SecureRandom()::nextBytes)
-                    val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-                    cipher.init(Cipher.ENCRYPT_MODE, SecretKeySpec(keyBytes, "AES"), GCMParameterSpec(128, iv))
-                    cipher.updateAAD(documentAad(index, document))
-                    output.write(iv)
-                    val encryptedOutput = CipherOutputStream(NonClosingOutputStream(output), cipher)
-                    val counted = CountingOutputStream(encryptedOutput)
+                    val chunked = ChunkedGcmOutputStream(output, keyBytes, document, index)
                     try {
-                        documentStore.copyPlaintextTo(document, counted)
-                        counted.flush()
-                        require(counted.count == document.sizeBytes) { "Attachment size changed during backup." }
+                        documentStore.copyPlaintextTo(document, chunked)
+                        chunked.finish()
                     } finally {
-                        encryptedOutput.close()
-                        iv.fill(0)
+                        chunked.wipe()
                     }
                 }
                 output.flush()
@@ -540,15 +532,20 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
         for (index in 0 until documents.length()) {
             val row = documents.getJSONObject(index)
             val size = row.getLong("sizeBytes")
-            require(size in 1..MAX_DOCUMENT_BYTES)
+            require(size in 1..MAX_DOCUMENT_BYTES) { "Invalid attachment size in backup." }
             require(row.getString("mimeType") in SUPPORTED_DOCUMENT_MIME_TYPES)
-            expected += 12L + size + GCM_TAG_BYTES
+            val chunks = (size + STREAM_CHUNK_BYTES - 1) / STREAM_CHUNK_BYTES
+            expected += size + chunks * (4L + 12L + GCM_TAG_BYTES)
             if (expected > MAX_BACKUP_BYTES) throw BackupSizeLimitException()
         }
         require(expected == file.length()) { "Backup is truncated or contains trailing bytes." }
     }
 
-    private suspend fun restoreVersionTwoDocuments(preview: BackupPreview, documentRows: List<MedicalDocument>, createdFiles: MutableList<MedicalDocument>) {
+    private suspend fun restoreVersionTwoDocuments(
+        preview: BackupPreview,
+        documentRows: List<MedicalDocument>,
+        createdFiles: MutableList<MedicalDocument>
+    ) {
         val archive = File(checkNotNull(preview.stagedArchivePath)).canonicalFile
         val keyBytes = checkNotNull(preview.archiveKeyBytes)
         require(keyBytes.size == 32 && archive.name.startsWith("sehati-backup-preview-") &&
@@ -575,24 +572,20 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
                 require(verifiedRoot.toString() == preview.payload.toString())
                 validateVersionTwoArchiveLength(archive, verifiedRoot, manifestLength)
             } finally {
-                salt.fill(0); manifestIv.fill(0); encryptedManifest.fill(0); manifest.fill(0)
+                salt.fill(0)
+                manifestIv.fill(0)
+                encryptedManifest.fill(0)
+                manifest.fill(0)
             }
             require(documentRows.size == preview.documentCount)
             documentRows.forEachIndexed { index, document ->
                 currentCoroutineContext().ensureActive()
-                val iv = ByteArray(12)
-                input.readFully(iv)
-                val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-                cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(keyBytes, "AES"), GCMParameterSpec(128, iv))
-                cipher.updateAAD(documentAad(index, document))
-                val limited = LimitedInputStream(input, document.sizeBytes + GCM_TAG_BYTES)
-                val decrypted = AuthenticatedRecordInputStream(limited, cipher)
+                val decrypted = ChunkedGcmInputStream(input, keyBytes, document, index)
                 try {
                     val restored = documentStore.restore(document, decrypted, document.sizeBytes)
-                    require(decrypted.isAuthenticated && limited.remaining == 0L)
+                    require(decrypted.isAuthenticated) { "Attachment authentication failed." }
                     createdFiles += restored
                 } finally {
-                    iv.fill(0)
                     decrypted.close()
                 }
             }
@@ -608,9 +601,204 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
         .put("relatedLabResultId", doc.relatedLabResultId ?: JSONObject.NULL)
         .put("category", doc.category).put("documentDate", doc.documentDate)
 
-    private fun documentAad(index: Int, document: MedicalDocument): ByteArray =
-        "sehati:shtb:v2:document:$index:${document.id}:${document.memberId}:${document.mimeType}:${document.sizeBytes}"
+    private fun documentAad(index: Int, document: MedicalDocument, chunkIndex: Int, plainLength: Int): ByteArray =
+        "sehati:shtb:v2:document:$index:${document.id}:${document.memberId}:${document.mimeType}:${document.sizeBytes}:chunk:$chunkIndex:$plainLength"
             .toByteArray(Charsets.UTF_8)
+
+    private class ChunkedGcmOutputStream(
+        private val output: DataOutputStream,
+        private val keyBytes: ByteArray,
+        private val document: MedicalDocument,
+        private val documentIndex: Int
+    ) : OutputStream() {
+        private val buffer = ByteArray(STREAM_CHUNK_BYTES)
+        private var buffered = 0
+        private var total = 0L
+        private var chunkIndex = 0
+        private var finished = false
+
+        override fun write(value: Int) {
+            check(!finished) { "Attachment stream is already finished." }
+            buffer[buffered++] = value.toByte()
+            total++
+            if (buffered == buffer.size) flushChunk()
+        }
+
+        override fun write(source: ByteArray, offset: Int, length: Int) {
+            check(!finished) { "Attachment stream is already finished." }
+            var position = offset
+            var remaining = length
+            while (remaining > 0) {
+                val count = minOf(remaining, buffer.size - buffered)
+                System.arraycopy(source, position, buffer, buffered, count)
+                buffered += count
+                total += count
+                position += count
+                remaining -= count
+                if (buffered == buffer.size) flushChunk()
+            }
+        }
+
+        private fun flushChunk() {
+            if (buffered == 0) return
+            val iv = ByteArray(12).also(SecureRandom()::nextBytes)
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+            cipher.init(Cipher.ENCRYPT_MODE, SecretKeySpec(keyBytes, "AES"), GCMParameterSpec(128, iv))
+            cipher.updateAAD(documentAad(documentIndex, document, chunkIndex, buffered))
+            val encrypted = cipher.doFinal(buffer, 0, buffered)
+            try {
+                output.writeInt(buffered)
+                output.write(iv)
+                output.write(encrypted)
+            } finally {
+                iv.fill(0)
+                encrypted.fill(0)
+                buffer.fill(0)
+                buffered = 0
+                chunkIndex++
+            }
+        }
+
+        fun finish() {
+            check(!finished)
+            require(total == document.sizeBytes) { "Attachment size changed during backup." }
+            flushChunk()
+            finished = true
+        }
+
+        fun wipe() {
+            buffer.fill(0)
+            buffered = 0
+            finished = true
+        }
+    }
+
+    private class ChunkedGcmInputStream(
+        private val input: DataInputStream,
+        private val keyBytes: ByteArray,
+        private val document: MedicalDocument,
+        private val documentIndex: Int
+    ) : InputStream() {
+        private var plainRemaining = document.sizeBytes
+        private var chunkIndex = 0
+        private var current: AuthenticatedRecordInputStream? = null
+        private var currentLimit: LimitedInputStream? = null
+        var isAuthenticated: Boolean = false
+            private set
+
+        override fun read(): Int {
+            val single = ByteArray(1)
+            val count = read(single, 0, 1)
+            return if (count < 0) -1 else single[0].toInt() and 0xff
+        }
+
+        override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
+            if (length == 0) return 0
+            while (true) {
+                val active = current
+                if (active != null) {
+                    val count = active.read(buffer, offset, length)
+                    if (count >= 0) {
+                        plainRemaining -= count
+                        return count
+                    }
+                    require(active.isAuthenticated && currentLimit?.remaining == 0L) {
+                        "Attachment chunk authentication failed."
+                    }
+                    active.close()
+                    current = null
+                    currentLimit = null
+                    chunkIndex++
+                }
+                if (plainRemaining == 0L) {
+                    isAuthenticated = true
+                    return -1
+                }
+                val expectedLength = minOf(STREAM_CHUNK_BYTES.toLong(), plainRemaining).toInt()
+                val actualLength = input.readInt()
+                require(actualLength == expectedLength) { "Invalid attachment chunk length." }
+                val iv = ByteArray(12)
+                input.readFully(iv)
+                val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+                cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(keyBytes, "AES"), GCMParameterSpec(128, iv))
+                cipher.updateAAD(documentAad(documentIndex, document, chunkIndex, expectedLength))
+                iv.fill(0)
+                val limited = LimitedInputStream(input, expectedLength + GCM_TAG_BYTES)
+                currentLimit = limited
+                current = AuthenticatedRecordInputStream(limited, cipher)
+            }
+        }
+
+        override fun close() {
+            current?.close()
+            current = null
+            currentLimit = null
+        }
+    }
+
+    private class AuthenticatedRecordInputStream(
+        private val source: LimitedInputStream,
+        private val cipher: Cipher
+    ) : InputStream() {
+        private var encryptedRemaining = source.remaining
+        private var pending = ByteArray(0)
+        private var pendingOffset = 0
+        private var finalized = false
+        var isAuthenticated: Boolean = false
+            private set
+
+        override fun read(): Int {
+            val one = ByteArray(1)
+            val count = read(one, 0, 1)
+            return if (count < 0) -1 else one[0].toInt() and 0xff
+        }
+
+        override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
+            if (length == 0) return 0
+            while (pendingOffset >= pending.size) {
+                if (encryptedRemaining > 0) {
+                    val encrypted = ByteArray(minOf(STREAM_BUFFER_SIZE.toLong(), encryptedRemaining).toInt())
+                    val count = source.read(encrypted)
+                    if (count < 0) throw EOFException("Truncated encrypted attachment chunk.")
+                    if (count == 0) continue
+                    encryptedRemaining -= count
+                    val output = cipher.update(encrypted, 0, count)
+                    encrypted.fill(0)
+                    if (output != null && output.isNotEmpty()) {
+                        pending = output
+                        pendingOffset = 0
+                    }
+                } else if (!finalized) {
+                    finalized = true
+                    try {
+                        pending = cipher.doFinal()
+                        pendingOffset = 0
+                        isAuthenticated = true
+                    } catch (error: Exception) {
+                        throw IOException("Encrypted attachment authentication failed.", error)
+                    }
+                    if (pending.isEmpty()) return -1
+                } else {
+                    return -1
+                }
+            }
+            val count = minOf(length, pending.size - pendingOffset)
+            System.arraycopy(pending, pendingOffset, buffer, offset, count)
+            pendingOffset += count
+            if (pendingOffset == pending.size) {
+                pending.fill(0)
+                pending = ByteArray(0)
+                pendingOffset = 0
+            }
+            return count
+        }
+
+        override fun close() {
+            pending.fill(0)
+            pending = ByteArray(0)
+            source.close()
+        }
+    }
 
     private fun deriveBytes(password: CharArray, salt: ByteArray): ByteArray {
         val spec = PBEKeySpec(password, salt, PBKDF2_ITERATIONS, 256)
@@ -798,6 +986,7 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
         private const val MAX_MANIFEST_BYTES = 8 * 1024 * 1024
         private const val GCM_TAG_BYTES = 16
         private const val STREAM_BUFFER_SIZE = 32 * 1024
+        private const val STREAM_CHUNK_BYTES = 64 * 1024
         private const val PBKDF2_ITERATIONS = 310_000
         private const val LEGACY_CONTAINER_VERSION = 1
         private const val STREAMING_CONTAINER_VERSION = 2

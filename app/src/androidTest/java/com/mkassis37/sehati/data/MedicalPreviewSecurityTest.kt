@@ -45,6 +45,8 @@ class MedicalPreviewSecurityTest {
         } finally {
             source.delete()
         }
+    }
+
     @Test
     fun orphanCleanupKeepsReferencedEncryptedDocuments() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
@@ -68,6 +70,5 @@ class MedicalPreviewSecurityTest {
         } finally {
             source.delete()
         }
-    }
     }
 }

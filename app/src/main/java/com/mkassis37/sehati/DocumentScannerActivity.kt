@@ -944,81 +944,44 @@ private fun DocumentScannerUi(
     onFinish: () -> Unit,
     onCancel: () -> Unit
 ) {
-    Surface(
-        modifier = Modifier.fillMaxSize(),
-        color = Color(0xFF0B1118)
-    ) {
+    Surface(Modifier.fillMaxSize(), color = Color.Black) {
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color(0xFF0B1118))
-                // Keep every control inside the safe display area, above Android's
-                // gesture/three-button navigation region and below the status bar.
+            Modifier.fillMaxSize()
+                .background(Color.Black)
                 .windowInsetsPadding(WindowInsets.safeDrawing)
-                .padding(horizontal = 14.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+                .padding(horizontal = 10.dp, vertical = 4.dp),
+            verticalArrangement = Arrangement.spacedBy(5.dp)
         ) {
+            // Camera-style top bar: compact and always visible.
             Row(
-                modifier = Modifier.fillMaxWidth().height(48.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                Modifier.fillMaxWidth().height(44.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 androidx.compose.material3.IconButton(
                     onClick = onCancel,
                     enabled = !busy && draftBitmap == null,
-                    modifier = Modifier.size(44.dp)
+                    modifier = Modifier.size(42.dp)
                 ) {
                     Icon(
                         androidx.compose.material.icons.Icons.Filled.Close,
-                        contentDescription = "إغلاق الماسح",
+                        contentDescription = "إغلاق الكاميرا",
                         tint = Color.White
                     )
                 }
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.Center
-                ) {
-                    Text(
-                        "مسح مستند طبي",
-                        color = Color.White,
-                        style = MaterialTheme.typography.titleMedium
-                    )
-                    Text(
-                        "صوّري الورقة ثم راجعي حدودها",
-                        color = Color(0xFF9EAFBF),
-                        style = MaterialTheme.typography.labelSmall
-                    )
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("مسح مستند طبي", color = Color.White, style = MaterialTheme.typography.titleMedium)
+                    Text("SCAN DOCUMENT  •  $pageCount / 20", color = Color(0xFFB8C4CE), style = MaterialTheme.typography.labelSmall)
                 }
-                Surface(
-                    color = Color(0xFF1B2B37),
-                    shape = androidx.compose.foundation.shape.RoundedCornerShape(50)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            androidx.compose.material.icons.Icons.Filled.Description,
-                            contentDescription = null,
-                            tint = Color(0xFF83DCCF),
-                            modifier = Modifier.size(17.dp)
-                        )
-                        Text(
-                            "$pageCount / 20",
-                            color = Color.White,
-                            style = MaterialTheme.typography.labelMedium
-                        )
-                    }
-                }
+                // Keep a balanced right-side spacer so the title remains centered.
+                Box(Modifier.size(42.dp))
             }
 
+            // Live camera preview occupies the largest part of the screen.
             Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(26.dp))
-                    .background(Color(0xFF18232E))
+                Modifier.weight(1f).fillMaxWidth()
+                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(18.dp))
+                    .background(Color(0xFF090D11))
             ) {
                 if (permissionGranted) {
                     CameraXPreview(
@@ -1026,98 +989,51 @@ private fun DocumentScannerUi(
                         onCaptureReady = onCaptureReady,
                         onError = onCameraError
                     )
-
                     Surface(
-                        modifier = Modifier.align(Alignment.TopStart).padding(12.dp),
-                        color = Color(0xCC111A23),
-                        shape = androidx.compose.foundation.shape.RoundedCornerShape(50)
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 11.dp, vertical = 7.dp),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                androidx.compose.material.icons.Icons.Filled.CameraAlt,
-                                contentDescription = null,
-                                tint = Color(0xFF83DCCF),
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Text(
-                                "الكاميرا الخلفية",
-                                color = Color.White,
-                                style = MaterialTheme.typography.labelSmall
-                            )
-                        }
-                    }
-
-                    Surface(
-                        modifier = Modifier.align(Alignment.BottomCenter).padding(12.dp),
-                        color = Color(0xCC111A23),
-                        shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp)
+                        Modifier.align(Alignment.TopCenter).padding(top = 12.dp),
+                        color = Color(0x99000000),
+                        shape = androidx.compose.foundation.shape.RoundedCornerShape(30.dp)
                     ) {
                         Text(
-                            "ضعي الورقة داخل الإطار واجعلي الإضاءة واضحة",
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
+                            "وجّهي الكاميرا نحو الورقة",
+                            Modifier.padding(horizontal = 13.dp, vertical = 7.dp),
                             color = Color.White,
                             style = MaterialTheme.typography.labelMedium
                         )
                     }
                 } else {
                     Column(
-                        modifier = Modifier.fillMaxSize().padding(24.dp),
+                        Modifier.fillMaxSize().padding(22.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Center
                     ) {
                         Icon(
                             androidx.compose.material.icons.Icons.Filled.CameraAlt,
                             contentDescription = null,
-                            tint = Color(0xFF83DCCF),
-                            modifier = Modifier.size(54.dp)
+                            tint = Color.White,
+                            modifier = Modifier.size(48.dp)
                         )
-                        Spacer(Modifier.height(14.dp))
+                        Spacer(Modifier.height(12.dp))
                         Text(
-                            if (permissionDenied) {
-                                "يلزم السماح باستخدام الكاميرا لمسح المستندات."
-                            } else {
-                                "نحتاج إلى إذن الكاميرا لبدء المسح."
-                            },
+                            if (permissionDenied) "يلزم السماح باستخدام الكاميرا لمسح المستندات." else "نحتاج إلى إذن الكاميرا لبدء المسح.",
                             color = Color.White,
                             style = MaterialTheme.typography.bodyMedium
                         )
-                        Spacer(Modifier.height(14.dp))
-                        Button(onClick = onRequestPermission) {
-                            Icon(
-                                androidx.compose.material.icons.Icons.Filled.CameraAlt,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            Text("السماح بالكاميرا")
-                        }
+                        Spacer(Modifier.height(12.dp))
+                        Button(onClick = onRequestPermission) { Text("السماح بالكاميرا") }
                     }
                 }
 
                 if (busy) {
-                    Box(
-                        modifier = Modifier.fillMaxSize().background(Color(0x66000000)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Surface(
-                            color = Color(0xEE17232E),
-                            shape = androidx.compose.foundation.shape.RoundedCornerShape(18.dp)
-                        ) {
+                    Box(Modifier.fillMaxSize().background(Color(0x66000000)), contentAlignment = Alignment.Center) {
+                        Surface(color = Color(0xEE17232E), shape = MaterialTheme.shapes.large) {
                             Row(
-                                modifier = Modifier.padding(horizontal = 18.dp, vertical = 14.dp),
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                                horizontalArrangement = Arrangement.spacedBy(9.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(21.dp),
-                                    color = Color(0xFF83DCCF),
-                                    strokeWidth = 2.dp
-                                )
-                                Text("جارٍ تجهيز الصفحة...", color = Color.White)
+                                CircularProgressIndicator(Modifier.size(20.dp), color = Color.White, strokeWidth = 2.dp)
+                                Text("جارٍ تجهيز الصورة...", color = Color.White)
                             }
                         }
                     }
@@ -1126,114 +1042,89 @@ private fun DocumentScannerUi(
 
             if (errorMessage.isNotBlank()) {
                 Surface(
-                    color = Color(0xFF3A2025),
-                    shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp)
+                    Modifier.fillMaxWidth(),
+                    color = Color(0xFF4B2026),
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp)
                 ) {
                     Text(
                         errorMessage,
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 9.dp),
-                        color = Color(0xFFFFC7C7),
-                        style = MaterialTheme.typography.bodySmall
+                        Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        color = Color(0xFFFFD7D7),
+                        style = MaterialTheme.typography.labelSmall,
+                        maxLines = 2
                     )
                 }
             }
 
+            // Compact film strip for captured pages. Tap a page to adjust it.
             if (pageThumbnails.isNotEmpty()) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        "الصفحات المضافة",
-                        color = Color(0xFFEAF2F8),
-                        style = MaterialTheme.typography.labelLarge
-                    )
-                    Text(
-                        "اضغطي على الصورة لتعديلها",
-                        color = Color(0xFF9EAFBF),
-                        style = MaterialTheme.typography.labelSmall
-                    )
-                }
-
                 LazyRow(
-                    modifier = Modifier.fillMaxWidth().height(108.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    Modifier.fillMaxWidth().height(68.dp),
+                    horizontalArrangement = Arrangement.spacedBy(7.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     itemsIndexed(pageThumbnails) { index, bitmap ->
                         Column(
-                            modifier = Modifier
-                                .width(88.dp)
-                                .clip(androidx.compose.foundation.shape.RoundedCornerShape(14.dp))
-                                .background(Color(0xFF1B2935))
-                                .padding(6.dp),
+                            Modifier.width(76.dp).height(66.dp)
+                                .clip(androidx.compose.foundation.shape.RoundedCornerShape(9.dp))
+                                .background(Color(0xFF202832)).padding(3.dp),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(61.dp)
-                                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(9.dp))
+                                Modifier.weight(1f).fillMaxWidth()
+                                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(6.dp))
                                     .clickable(enabled = !busy) { onEditPage(index) }
                             ) {
                                 Image(
                                     bitmap.asImageBitmap(),
                                     contentDescription = "تعديل الصفحة ${index + 1}",
-                                    modifier = Modifier.fillMaxSize(),
+                                    Modifier.fillMaxSize(),
                                     contentScale = ContentScale.Crop
                                 )
-                                Surface(
-                                    modifier = Modifier.align(Alignment.TopStart).padding(4.dp),
-                                    color = Color(0xDD101820),
-                                    shape = androidx.compose.foundation.shape.RoundedCornerShape(7.dp)
-                                ) {
-                                    Text(
-                                        "${index + 1}",
-                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                        color = Color.White,
-                                        style = MaterialTheme.typography.labelSmall
-                                    )
-                                }
+                                Text(
+                                    "${index + 1}",
+                                    Modifier.align(Alignment.TopStart).padding(3.dp)
+                                        .background(Color(0xCC000000), androidx.compose.foundation.shape.RoundedCornerShape(4.dp))
+                                        .padding(horizontal = 4.dp, vertical = 1.dp),
+                                    color = Color.White,
+                                    style = MaterialTheme.typography.labelSmall
+                                )
                             }
-                            Row(
-                                modifier = Modifier.fillMaxWidth().height(30.dp),
-                                horizontalArrangement = Arrangement.SpaceEvenly,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
+                            Row(Modifier.fillMaxWidth().height(20.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
                                 androidx.compose.material3.IconButton(
                                     onClick = { onMovePage(index, index - 1) },
                                     enabled = !busy && index > 0,
-                                    modifier = Modifier.size(28.dp)
+                                    modifier = Modifier.size(20.dp)
                                 ) {
                                     Icon(
                                         androidx.compose.material.icons.Icons.Filled.KeyboardArrowUp,
-                                        contentDescription = "تحريك الصفحة للأعلى",
-                                        tint = if (index > 0) Color(0xFFB8C8D5) else Color(0xFF56636F),
-                                        modifier = Modifier.size(19.dp)
+                                        contentDescription = "تقديم الصفحة",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(15.dp)
                                     )
                                 }
                                 androidx.compose.material3.IconButton(
                                     onClick = { onMovePage(index, index + 1) },
                                     enabled = !busy && index < pageThumbnails.lastIndex,
-                                    modifier = Modifier.size(28.dp)
+                                    modifier = Modifier.size(20.dp)
                                 ) {
                                     Icon(
                                         androidx.compose.material.icons.Icons.Filled.KeyboardArrowDown,
-                                        contentDescription = "تحريك الصفحة للأسفل",
-                                        tint = if (index < pageThumbnails.lastIndex) Color(0xFFB8C8D5) else Color(0xFF56636F),
-                                        modifier = Modifier.size(19.dp)
+                                        contentDescription = "تأخير الصفحة",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(15.dp)
                                     )
                                 }
                                 androidx.compose.material3.IconButton(
                                     onClick = { onRemovePage(index) },
                                     enabled = !busy,
-                                    modifier = Modifier.size(28.dp)
+                                    modifier = Modifier.size(20.dp)
                                 ) {
                                     Icon(
                                         androidx.compose.material.icons.Icons.Filled.DeleteOutline,
                                         contentDescription = "حذف الصفحة",
                                         tint = Color(0xFFFF9D9D),
-                                        modifier = Modifier.size(18.dp)
+                                        modifier = Modifier.size(14.dp)
                                     )
                                 }
                             }
@@ -1242,43 +1133,56 @@ private fun DocumentScannerUi(
                 }
             }
 
+            // Fixed camera shutter and PDF actions: never placed below a scroll area.
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalAlignment = Alignment.CenterVertically
+                Modifier.fillMaxWidth().height(84.dp).padding(bottom = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                OutlinedButton(
-                    onClick = onFinish,
-                    enabled = pageCount > 0 && !busy && draftBitmap == null,
-                    modifier = Modifier.weight(1f).height(58.dp),
-                    shape = androidx.compose.foundation.shape.RoundedCornerShape(18.dp),
-                    colors = androidx.compose.material3.ButtonDefaults.outlinedButtonColors(
-                        contentColor = Color(0xFFB6EEE5),
-                        disabledContentColor = Color(0xFF657481)
-                    )
-                ) {
-                    Icon(
-                        androidx.compose.material.icons.Icons.Filled.PictureAsPdf,
-                        contentDescription = null,
-                        modifier = Modifier.size(21.dp)
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text("حفظ PDF", maxLines = 1)
+                Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                    TextButton(onClick = onCancel, enabled = !busy && draftBitmap == null) {
+                        Text("إلغاء", color = Color(0xFFE8EDF2))
+                    }
                 }
-
-                Button(
-                    onClick = onCapture,
-                    enabled = permissionGranted && !busy && draftBitmap == null && pageCount < 20,
-                    modifier = Modifier.weight(1.15f).height(58.dp),
-                    shape = androidx.compose.foundation.shape.RoundedCornerShape(18.dp)
-                ) {
-                    Icon(
-                        androidx.compose.material.icons.Icons.Filled.CameraAlt,
-                        contentDescription = null,
-                        modifier = Modifier.size(22.dp)
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text("تصوير صفحة", maxLines = 1)
+                Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                    Box(
+                        Modifier.size(68.dp)
+                            .clip(androidx.compose.foundation.shape.CircleShape)
+                            .background(if (permissionGranted && !busy && draftBitmap == null && pageCount < 20) Color.White else Color(0xFF7C858D))
+                            .clickable(enabled = permissionGranted && !busy && draftBitmap == null && pageCount < 20) { onCapture() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            androidx.compose.material.icons.Icons.Filled.CameraAlt,
+                            contentDescription = "التقاط صورة",
+                            tint = Color(0xFF111820),
+                            modifier = Modifier.size(29.dp)
+                        )
+                    }
+                }
+                Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                    Button(
+                        onClick = onFinish,
+                        enabled = pageCount > 0 && !busy && draftBitmap == null,
+                        modifier = Modifier.fillMaxWidth().height(52.dp),
+                        shape = androidx.compose.foundation.shape.RoundedCornerShape(15.dp),
+                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFF167F82),
+                            disabledContainerColor = Color(0xFF343B42),
+                            contentColor = Color.White,
+                            disabledContentColor = Color(0xFF89939B)
+                        ),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp)
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                            Icon(
+                                androidx.compose.material.icons.Icons.Filled.PictureAsPdf,
+                                contentDescription = null,
+                                modifier = Modifier.size(19.dp)
+                            )
+                            Text("إنشاء PDF", style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                        }
+                    }
                 }
             }
         }
@@ -1329,32 +1233,34 @@ private fun CropEditorDialog(
             Column(
                 Modifier.fillMaxSize()
                     .windowInsetsPadding(WindowInsets.safeDrawing)
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
+                    .padding(horizontal = 10.dp, vertical = 5.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 Row(
-                    Modifier.fillMaxWidth().height(44.dp),
+                    Modifier.fillMaxWidth().height(40.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(Modifier.weight(1f)) {
-                        Text("مراجعة وقص الصفحة", color = Color.White, style = MaterialTheme.typography.titleMedium)
-                        Text("اسحبي الدوائر لتحديد أطراف الورقة", color = Color(0xFFB8C7D6), style = MaterialTheme.typography.labelSmall)
+                        Text("مراجعة المستند", color = Color.White, style = MaterialTheme.typography.titleMedium)
+                        Text("حرّكي الزوايا لتحديد الورقة", color = Color(0xFFB8C7D6), style = MaterialTheme.typography.labelSmall)
                     }
                     TextButton(onClick = onCancel, enabled = !busy) {
-                        Text("رجوع", color = Color.White)
+                        Text("إعادة التصوير", color = Color.White, style = MaterialTheme.typography.labelMedium)
                     }
                 }
 
+                // Flexible image area; controls remain pinned beneath it.
                 Box(
-                    Modifier.fillMaxWidth().weight(1f).heightIn(min = 165.dp, max = 360.dp)
-                        .clip(MaterialTheme.shapes.large)
+                    Modifier.weight(1f).fillMaxWidth()
+                        .heightIn(min = 125.dp)
+                        .clip(androidx.compose.foundation.shape.RoundedCornerShape(14.dp))
                         .background(Color(0xFF202B38)),
                     contentAlignment = Alignment.Center
                 ) {
                     Image(
                         bitmap.asImageBitmap(),
-                        contentDescription = "الصورة الأصلية لتحديد حدود القص",
+                        contentDescription = "معاينة المستند",
                         modifier = Modifier.fillMaxSize().padding(4.dp),
                         contentScale = ContentScale.Fit
                     )
@@ -1408,67 +1314,78 @@ private fun CropEditorDialog(
                                 lineTo(points[3].x, points[3].y)
                                 close()
                             }
-                            drawPath(path, Color(0xFF24D6E8), style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3.dp.toPx()))
+                            drawPath(path, Color(0xFF26D7E8), style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3.dp.toPx()))
                             points.forEach { point ->
-                                drawCircle(Color.Black, radius = 21.dp.toPx(), center = point)
-                                drawCircle(Color(0xFF24D6E8), radius = 15.dp.toPx(), center = point)
-                                drawCircle(Color.White, radius = 6.dp.toPx(), center = point)
+                                drawCircle(Color.Black, 21.dp.toPx(), point)
+                                drawCircle(Color(0xFF26D7E8), 15.dp.toPx(), point)
+                                drawCircle(Color.White, 6.dp.toPx(), point)
                             }
                         }
                     }
                     if (busy) {
                         Box(Modifier.fillMaxSize().background(Color(0x55000000)), contentAlignment = Alignment.Center) {
-                            CircularProgressIndicator(color = Color(0xFF24D6E8))
+                            CircularProgressIndicator(color = Color(0xFF26D7E8))
                         }
                     }
                 }
 
-                Surface(color = Color(0xFF1D2A38), shape = MaterialTheme.shapes.medium) {
-                    Text(
-                        message,
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 7.dp),
-                        color = Color(0xFFD4E1EB),
-                        style = MaterialTheme.typography.labelSmall,
-                        maxLines = 2
-                    )
+                Text(
+                    message,
+                    Modifier.fillMaxWidth().heightIn(min = 18.dp, max = 32.dp).padding(horizontal = 2.dp),
+                    color = Color(0xFFCED8E1),
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1
+                )
+
+                Row(
+                    Modifier.fillMaxWidth().height(48.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    CropToolButton(
+                        label = "تلقائي",
+                        enabled = !busy,
+                        modifier = Modifier.weight(1f),
+                        onClick = onAutoDetect
+                    ) {
+                        Icon(Icons.Filled.AutoFixHigh, contentDescription = null, modifier = Modifier.size(18.dp))
+                    }
+                    CropToolButton(
+                        label = "كامل الصورة",
+                        enabled = !busy,
+                        modifier = Modifier.weight(1f),
+                        onClick = onResetCrop
+                    ) {
+                        Icon(Icons.Filled.CropFree, contentDescription = null, modifier = Modifier.size(18.dp))
+                    }
+                    CropToolButton(
+                        label = "تدوير",
+                        enabled = !busy,
+                        modifier = Modifier.weight(1f),
+                        onClick = onRotate
+                    ) {
+                        Icon(Icons.Filled.RotateRight, contentDescription = null, modifier = Modifier.size(18.dp))
+                    }
                 }
 
-                Text("أدوات تحديد الورقة", color = Color(0xFFEAF2F8), style = MaterialTheme.typography.labelMedium)
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                    CropToolButton("تلقائي", !busy, Modifier.weight(1f), onAutoDetect) {
-                        Icon(Icons.Filled.AutoFixHigh, contentDescription = null, modifier = Modifier.size(20.dp))
-                    }
-                    CropToolButton("كامل الصورة", !busy, Modifier.weight(1f), onResetCrop) {
-                        Icon(Icons.Filled.CropFree, contentDescription = null, modifier = Modifier.size(20.dp))
-                    }
-                    CropToolButton("تدوير", !busy, Modifier.weight(1f), onRotate) {
-                        Icon(Icons.Filled.RotateRight, contentDescription = null, modifier = Modifier.size(20.dp))
-                    }
-                }
-
-                Text("اختاري مظهر المستند", color = Color(0xFFEAF2F8), style = MaterialTheme.typography.labelMedium)
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                Text("مظهر المستند", color = Color.White, style = MaterialTheme.typography.labelMedium)
+                Row(Modifier.fillMaxWidth().height(46.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     DocumentScanFilter.values().forEach { filter ->
                         val selected = selectedFilter == filter
                         val accent = when (filter) {
-                            DocumentScanFilter.COLOR -> Color(0xFF24C7D8)
-                            DocumentScanFilter.GRAYSCALE -> Color(0xFFB8C2CC)
-                            DocumentScanFilter.BLACK_WHITE -> Color(0xFFFFFFFF)
+                            DocumentScanFilter.COLOR -> Color(0xFF20C6D8)
+                            DocumentScanFilter.GRAYSCALE -> Color(0xFFB9C3CC)
+                            DocumentScanFilter.BLACK_WHITE -> Color.White
                         }
                         Surface(
-                            modifier = Modifier.weight(1f).height(48.dp)
-                                .clickable(enabled = !busy) { onFilterSelected(filter) },
-                            shape = androidx.compose.foundation.shape.RoundedCornerShape(13.dp),
-                            color = if (selected) accent.copy(alpha = 0.20f) else Color(0xFF202B38),
-                            border = androidx.compose.foundation.BorderStroke(
-                                if (selected) 2.dp else 1.dp,
-                                if (selected) accent else Color(0xFF536575)
-                            )
+                            Modifier.weight(1f).fillMaxHeight().clickable(enabled = !busy) { onFilterSelected(filter) },
+                            shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+                            color = if (selected) accent.copy(alpha = 0.22f) else Color(0xFF202B38),
+                            border = androidx.compose.foundation.BorderStroke(if (selected) 2.dp else 1.dp, if (selected) accent else Color(0xFF596A78))
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Text(
                                     filter.label,
-                                    color = if (selected) Color.White else Color(0xFFD3DDE5),
+                                    color = Color.White,
                                     style = MaterialTheme.typography.labelMedium,
                                     maxLines = 1
                                 )
@@ -1478,27 +1395,36 @@ private fun CropEditorDialog(
                 }
 
                 Row(
-                    Modifier.fillMaxWidth().height(54.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    Modifier.fillMaxWidth().height(52.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     OutlinedButton(
+                        onClick = onCancel,
+                        enabled = !busy,
+                        modifier = Modifier.weight(0.8f).fillMaxHeight(),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 3.dp)
+                    ) {
+                        Text("إعادة", maxLines = 1, style = MaterialTheme.typography.labelMedium)
+                    }
+                    OutlinedButton(
                         onClick = onUseFullPage,
                         enabled = !busy,
-                        modifier = Modifier.weight(0.85f).fillMaxHeight(),
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp)
+                        modifier = Modifier.weight(1f).fillMaxHeight(),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 3.dp)
                     ) {
-                        Text("الصورة كاملة", maxLines = 1, style = MaterialTheme.typography.labelMedium)
+                        Text("بدون قص", maxLines = 1, style = MaterialTheme.typography.labelMedium)
                     }
                     Button(
                         onClick = onApplyCrop,
                         enabled = !busy,
-                        modifier = Modifier.weight(1.15f).fillMaxHeight(),
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp)
+                        modifier = Modifier.weight(1.2f).fillMaxHeight(),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 3.dp),
+                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = Color(0xFF167F82))
                     ) {
-                        Icon(Icons.Filled.CheckCircle, contentDescription = null, modifier = Modifier.size(20.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("اعتماد القص", maxLines = 1)
+                        Icon(Icons.Filled.CheckCircle, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("اعتماد الصفحة", maxLines = 1, style = MaterialTheme.typography.labelMedium)
                     }
                 }
             }
@@ -1517,7 +1443,7 @@ private fun CropToolButton(
     OutlinedButton(
         onClick = onClick,
         enabled = enabled,
-        modifier = modifier.height(68.dp),
+        modifier = modifier.height(48.dp),
         shape = androidx.compose.foundation.shape.RoundedCornerShape(18.dp),
         colors = androidx.compose.material3.ButtonDefaults.outlinedButtonColors(
             contentColor = Color(0xFF8FE7DC),
@@ -1531,13 +1457,13 @@ private fun CropToolButton(
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(5.dp)
+            verticalArrangement = Arrangement.spacedBy(2.dp)
         ) {
             icon()
             Text(
                 label,
                 color = if (enabled) Color(0xFFE5F3F5) else Color(0xFF647482),
-                style = MaterialTheme.typography.labelMedium,
+                style = MaterialTheme.typography.labelSmall,
                 maxLines = 1
             )
         }

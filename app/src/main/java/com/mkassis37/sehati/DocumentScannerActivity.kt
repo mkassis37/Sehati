@@ -1114,7 +1114,7 @@ private fun CropEditorDialog(
 
                 Box(
                     Modifier.fillMaxWidth()
-                        .heightIn(min = 190.dp, max = 290.dp)
+                        .heightIn(min = 250.dp, max = 390.dp)
                         .background(Color(0xFF202B38), MaterialTheme.shapes.large),
                     contentAlignment = Alignment.Center
                 ) {
@@ -1203,7 +1203,7 @@ private fun CropEditorDialog(
                 ) {
                     Text(
                         message,
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 9.dp),
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
                         color = Color(0xFFD4E1EB),
                         style = MaterialTheme.typography.bodySmall
                     )
@@ -1282,7 +1282,7 @@ private fun CropEditorDialog(
                     Button(
                         onClick = onApplyCrop,
                         enabled = !busy,
-                        modifier = Modifier.weight(1.15f).height(62.dp),
+                        modifier = Modifier.weight(1.15f).height(68.dp),
                         contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 8.dp)
                     ) {
                         if (busy) {
@@ -1322,17 +1322,27 @@ private fun CropToolButton(
     OutlinedButton(
         onClick = onClick,
         enabled = enabled,
-        modifier = modifier.height(62.dp),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 5.dp, vertical = 6.dp)
+        modifier = modifier.height(68.dp),
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(18.dp),
+        colors = androidx.compose.material3.OutlinedButtonDefaults.colors(
+            contentColor = Color(0xFF8FE7DC),
+            disabledContentColor = Color(0xFF647482)
+        ),
+        border = androidx.compose.foundation.BorderStroke(
+            1.dp,
+            if (enabled) Color(0xFF426C78) else Color(0xFF34424E)
+        ),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp, vertical = 7.dp)
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(3.dp)
+            verticalArrangement = Arrangement.spacedBy(5.dp)
         ) {
             icon()
             Text(
                 label,
-                style = MaterialTheme.typography.labelSmall,
+                color = if (enabled) Color(0xFFE5F3F5) else Color(0xFF647482),
+                style = MaterialTheme.typography.labelMedium,
                 maxLines = 1
             )
         }

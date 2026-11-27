@@ -43,17 +43,25 @@ class SecureMedicalDocumentStore(private val context: Context) {
                     file.write(cipher.iv)
                     CipherOutputStream(file, cipher).use { encrypted ->
                         val header = readAtMost(source, 12)
-                        detectedMime = detectMime(header)
-                            ?: throw IllegalArgumentException("الصيغ المدعومة هي PDF وJPG وPNG وWebP فقط.")
-                        plainSize += header.size
-                        encrypted.write(header)
+                        try {
+                            detectedMime = detectMime(header)
+                                ?: throw IllegalArgumentException("الصيغ المدعومة هي PDF وJPG وPNG وWebP فقط.")
+                            plainSize += header.size
+                            encrypted.write(header)
+                        } finally {
+                            header.fill(0)
+                        }
                         val buffer = ByteArray(16 * 1024)
-                        while (true) {
-                            val count = source.read(buffer)
-                            if (count < 0) break
-                            plainSize += count
-                            require(plainSize <= MAX_DOCUMENT_BYTES) { "حجم PDF أكبر من الحد المسموح (25 MB)." }
-                            encrypted.write(buffer, 0, count)
+                        try {
+                            while (true) {
+                                val count = source.read(buffer)
+                                if (count < 0) break
+                                plainSize += count
+                                require(plainSize <= MAX_DOCUMENT_BYTES) { "حجم الملف أكبر من الحد المسموح (25 MB)." }
+                                encrypted.write(buffer, 0, count)
+                            }
+                        } finally {
+                            buffer.fill(0)
                         }
                     }
                 }
@@ -67,7 +75,18 @@ class SecureMedicalDocumentStore(private val context: Context) {
     }
 
     internal fun copyPlaintextTo(document: MedicalDocument, output: OutputStream) {
-        decryptFile(resolve(document.relativePath)).use { it.copyTo(output) }
+        decryptFile(resolve(document.relativePath)).use { input ->
+            val buffer = ByteArray(32 * 1024)
+            try {
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    if (count > 0) output.write(buffer, 0, count)
+                }
+            } finally {
+                buffer.fill(0)
+            }
+        }
     }
 
     suspend fun restore(document: MedicalDocument, plaintext: ByteArray): MedicalDocument =
@@ -85,13 +104,18 @@ class SecureMedicalDocumentStore(private val context: Context) {
             }
             val source = PushbackInputStream(plaintext, 12)
             val header = readAtMost(source, 12)
-            source.unread(header)
-            require(detectMime(header) == document.mimeType) {
-                "صيغة المرفق غير متوافقة مع بيانات النسخة الاحتياطية."
+            try {
+                require(detectMime(header) == document.mimeType) {
+                    "صيغة المرفق غير متوافقة مع بيانات النسخة الاحتياطية."
+                }
+                source.unread(header)
+            } finally {
+                header.fill(0)
             }
             val target = resolve(document.relativePath)
             target.parentFile?.mkdirs()
             var copied = 0L
+            val buffer = ByteArray(32 * 1024)
             try {
                 source.use { input ->
                     val coroutineContext = currentCoroutineContext()
@@ -101,7 +125,6 @@ class SecureMedicalDocumentStore(private val context: Context) {
                         file.write(MAGIC)
                         file.write(cipher.iv)
                         CipherOutputStream(file, cipher).use { encrypted ->
-                            val buffer = ByteArray(32 * 1024)
                             while (true) {
                                 coroutineContext.ensureActive()
                                 val count = input.read(buffer)
@@ -121,6 +144,8 @@ class SecureMedicalDocumentStore(private val context: Context) {
             } catch (error: Exception) {
                 target.delete()
                 throw error
+            } finally {
+                buffer.fill(0)
             }
         }
 

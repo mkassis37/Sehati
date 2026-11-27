@@ -540,8 +540,8 @@ internal class DocumentScannerActivity : ComponentActivity() {
                             Imgproc.fillConvexPoly(insideMask, polygon, Scalar(255.0))
                             Imgproc.dilate(insideMask, expandedMask, ringKernel)
                             Core.subtract(expandedMask, insideMask, outsideMask)
-                            val paperBrightness = Core.mean(gray, insideMask).toArray()[0]
-                            val backgroundBrightness = Core.mean(gray, outsideMask).toArray()[0]
+                            val paperBrightness = Core.mean(gray, insideMask).`val`[0]
+                            val backgroundBrightness = Core.mean(gray, outsideMask).`val`[0]
                             val contrast = paperBrightness - backgroundBrightness
 
                             // A true sheet should be brighter than the narrow band

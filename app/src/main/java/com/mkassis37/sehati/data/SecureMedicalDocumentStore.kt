@@ -51,7 +51,7 @@ class SecureMedicalDocumentStore(private val context: Context) {
                         } finally {
                             header.fill(0)
                         }
-                        val buffer = ByteArray(16 * 1024)
+                        val buffer = ByteArray(128 * 1024)
                         try {
                             while (true) {
                                 val count = source.read(buffer)
@@ -160,7 +160,7 @@ class SecureMedicalDocumentStore(private val context: Context) {
         val output = File.createTempFile("sehati-preview-${document.id}-", ".$extension", medicalShareDirectory(context))
         try {
             decryptFile(resolve(document.relativePath)).use { input ->
-                FileOutputStream(output).use { input.copyTo(it) }
+                FileOutputStream(output).use { input.copyTo(it, bufferSize = 128 * 1024) }
             }
             output
         } catch (error: Exception) {

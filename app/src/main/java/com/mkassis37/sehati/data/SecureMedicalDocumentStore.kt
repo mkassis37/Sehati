@@ -1,10 +1,14 @@
 package com.mkassis37.sehati.data
 
 import android.content.Context
+import android.os.SystemClock
+import android.util.Log
 import android.net.Uri
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import java.io.File
+import java.io.BufferedInputStream
+import java.io.BufferedOutputStream
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.InputStream
@@ -25,6 +29,8 @@ import kotlinx.coroutines.withContext
 /** App-private PDF storage encrypted with an Android Keystore key. */
 class SecureMedicalDocumentStore(private val context: Context) {
     private val directory = File(context.filesDir, "medical_documents")
+    private val keyLock = Any()
+    @Volatile private var cachedKey: java.security.Key? = null
 
     suspend fun save(uri: Uri, memberId: Long, displayName: String): MedicalDocument = withContext(Dispatchers.IO) {
         val input = context.contentResolver.openInputStream(uri)
@@ -158,10 +164,26 @@ class SecureMedicalDocumentStore(private val context: Context) {
             else -> throw IllegalArgumentException("نوع مرفق غير مدعوم.")
         }
         val output = File.createTempFile("sehati-preview-${document.id}-", ".$extension", medicalShareDirectory(context))
+        val startedAt = SystemClock.elapsedRealtime()
         try {
-            decryptFile(resolve(document.relativePath)).use { input ->
-                FileOutputStream(output).use { input.copyTo(it, bufferSize = 128 * 1024) }
+            // Larger buffered reads/writes reduce small I/O operations while preserving
+            // authenticated AES-GCM decryption and the existing encrypted-at-rest format.
+            BufferedInputStream(decryptFile(resolve(document.relativePath)), PREVIEW_BUFFER_BYTES).use { input ->
+                BufferedOutputStream(FileOutputStream(output), PREVIEW_BUFFER_BYTES).use { sink ->
+                    val buffer = ByteArray(PREVIEW_BUFFER_BYTES)
+                    try {
+                        while (true) {
+                            val count = input.read(buffer)
+                            if (count < 0) break
+                            if (count > 0) sink.write(buffer, 0, count)
+                        }
+                        sink.flush()
+                    } finally {
+                        buffer.fill(0)
+                    }
+                }
             }
+            Log.d("SehatiDocuments", "Secure preview prepared in ${SystemClock.elapsedRealtime() - startedAt} ms; bytes=${output.length()}")
             output
         } catch (error: Exception) {
             output.delete()
@@ -295,21 +317,29 @@ class SecureMedicalDocumentStore(private val context: Context) {
     }
 
     private fun getKey(): java.security.Key {
-        val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-        (store.getKey(KEY_ALIAS, null) as? java.security.Key)?.let { return it }
-        val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
-        generator.init(KeyGenParameterSpec.Builder(KEY_ALIAS,
-            KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
-            .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-            .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-            .setKeySize(256).setRandomizedEncryptionRequired(true).build())
-        return generator.generateKey()
+        cachedKey?.let { return it }
+        return synchronized(keyLock) {
+            cachedKey ?: run {
+                val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+                (store.getKey(KEY_ALIAS, null) as? java.security.Key)
+                    ?: run {
+                        val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
+                        generator.init(KeyGenParameterSpec.Builder(KEY_ALIAS,
+                            KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
+                            .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                            .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                            .setKeySize(256).setRandomizedEncryptionRequired(true).build())
+                        generator.generateKey()
+                    }
+            }.also { cachedKey = it }
+        }
     }
 
     companion object {
         private const val KEY_ALIAS = "sehati_medical_documents_v1"
         private const val BACKUP_PREVIEW_DIRECTORY = "sehati-backup-previews"
         private const val MAX_DOCUMENT_BYTES = 25L * 1024L * 1024L
+        private const val PREVIEW_BUFFER_BYTES = 512 * 1024
         private val MAGIC = byteArrayOf(0x53, 0x48, 0x44, 0x46)
     }
 }

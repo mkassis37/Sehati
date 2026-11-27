@@ -224,6 +224,8 @@ internal class DocumentScannerActivity : ComponentActivity() {
                             if (pages.size >= MAX_PAGES) {
                                 errorMessage = "وصلت إلى الحد الأقصى: $MAX_PAGES صفحة."
                             }
+                        } catch (error: IllegalArgumentException) {
+                            errorMessage = error.message ?: "تعذرت معالجة الصورة. حاول تصوير الصفحة بإضاءة أوضح."
                         } catch (_: Exception) {
                             errorMessage = "تعذرت معالجة الصورة. حاول تصوير الصفحة بإضاءة أوضح."
                         } finally {
@@ -487,7 +489,7 @@ internal class DocumentScannerActivity : ComponentActivity() {
         var bestScore = Double.NEGATIVE_INFINITY
 
         try {
-            contours.forEach { contour ->
+            contours.sortedByDescending { Imgproc.contourArea(it) }.take(35).forEach { contour ->
                 val area = Imgproc.contourArea(contour)
                 val areaRatio = area / imageArea
                 if (areaRatio !in 0.18..0.90) return@forEach
@@ -546,9 +548,10 @@ internal class DocumentScannerActivity : ComponentActivity() {
                             // immediately outside it; a table/grid contour usually is not.
                             if (contrast < 5.0) return@forEach
                             val contrastScore = (contrast / 55.0).coerceIn(0.0, 1.0)
-                            val areaScore = (areaRatio / 0.55).coerceIn(0.0, 1.0)
+                            val areaScore = ((areaRatio - 0.18) / 0.37).coerceIn(0.0, 1.0)
+                            val oversizedPenalty = ((areaRatio - 0.72) / 0.18).coerceIn(0.0, 1.0) * 0.55
                             val score = aspectScore * 0.30 + areaScore * 0.22 +
-                                contrastScore * 0.48
+                                contrastScore * 0.48 - oversizedPenalty
 
                             if (score > bestScore) {
                                 bestScore = score

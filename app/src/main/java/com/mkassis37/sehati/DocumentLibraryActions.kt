@@ -34,7 +34,7 @@ internal data class DocumentLibraryActions(
     val capture: (Long) -> Unit,
     val scan: (Long) -> Unit,
     val cancel: () -> Unit,
-    val save: suspend (DocumentCategory, String, DocumentLink?) -> Unit,
+    val save: suspend (DocumentCategory, String, DocumentLink?, String) -> Unit,
     val open: (MedicalDocument) -> Unit,
     val delete: suspend (MedicalDocument) -> Unit
 )
@@ -172,16 +172,27 @@ internal fun rememberDocumentLibrary(
             }
         },
         cancel = ::clear,
-        save = { type, date, link ->
+        save = { type, date, link, requestedName ->
             checkNotNull(pending)
             withContext(Dispatchers.IO + NonCancellable) {
                 val stagedName = cameraPath
-                val name = when {
-                    stagedName?.startsWith("sehati-scan-") == true -> "مستند ممسوح - $date.pdf"
-                    stagedName?.startsWith("sehati-camera-") == true -> "صورة طبية - $date.jpg"
+                val sourceName = when {
+                    stagedName?.startsWith("sehati-scan-") == true -> "مستند ممسوح"
+                    stagedName?.startsWith("sehati-camera-") == true -> "صورة طبية"
                     else -> context.contentResolver.query(pending.uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
                         ?.use { if (it.moveToFirst()) it.getString(0) else null } ?: "مرفق طبي"
                 }
+                val extension = when (pending.uri.lastPathSegment?.substringAfterLast('.', "")?.lowercase()) {
+                    "jpg", "jpeg" -> ".jpg"
+                    "png" -> ".png"
+                    "webp" -> ".webp"
+                    "pdf" -> ".pdf"
+                    else -> if (stagedName?.startsWith("sehati-scan-") == true) ".pdf" else if (stagedName?.startsWith("sehati-camera-") == true) ".jpg" else ""
+                }
+                val cleanName = requestedName.trim().ifBlank { sourceName }
+                    .replace(Regex("[\\\\/:*?\\"<>|]"), "_")
+                    .take(150)
+                val name = cleanName + if (cleanName.substringAfterLast('.', "").isBlank()) extension else ""
                 val document = store.save(pending.uri, pending.memberId, name)
                 try {
                     database.addLinkedDocument(document.copy(

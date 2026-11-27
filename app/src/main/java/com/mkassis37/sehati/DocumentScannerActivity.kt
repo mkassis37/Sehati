@@ -16,6 +16,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -51,12 +53,16 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -114,9 +120,14 @@ internal class DocumentScannerActivity : ComponentActivity() {
     private var busy by mutableStateOf(false)
     private var errorMessage by mutableStateOf("")
     private var selectedFilter by mutableStateOf(DocumentScanFilter.COLOR)
-    private var previewPageIndex by mutableStateOf<Int?>(null)
     private var imageCapture by mutableStateOf<ImageCapture?>(null)
     private val pages = mutableStateListOf<ScannedPage>()
+    private var draftSourceFile by mutableStateOf<File?>(null)
+    private var draftBitmap by mutableStateOf<Bitmap?>(null)
+    private var draftCorners by mutableStateOf(fullPageCorners())
+    private var draftMessage by mutableStateOf("")
+    private var editingPageIndex by mutableStateOf<Int?>(null)
+    private var draftOwnsSourceFile by mutableStateOf(false)
     private var cameraInitializationError by mutableStateOf("")
 
     private val permissionLauncher = registerForActivityResult(
@@ -148,9 +159,9 @@ internal class DocumentScannerActivity : ComponentActivity() {
                     permissionDenied = cameraPermissionDenied,
                     pageCount = pages.size,
                     pageThumbnails = pages.map { it.thumbnail },
-                    previewPageIndex = previewPageIndex,
-                    onPreviewPage = { previewPageIndex = it },
-                    onDismissPreview = { previewPageIndex = null },
+                    draftBitmap = draftBitmap,
+                    draftCorners = draftCorners,
+                    draftMessage = draftMessage,
                     busy = busy,
                     errorMessage = errorMessage.ifBlank { cameraInitializationError },
                     selectedFilter = selectedFilter,
@@ -161,11 +172,22 @@ internal class DocumentScannerActivity : ComponentActivity() {
                     onCaptureReady = { imageCapture = it },
                     onCameraError = { cameraInitializationError = it },
                     onCapture = ::capturePage,
+                    onEditPage = ::editPage,
+                    onMovePage = ::movePage,
                     onRemovePage = { index ->
                         if (index in pages.indices && !busy) {
-                            pages.removeAt(index).file.delete()
+                            val removed = pages.removeAt(index)
+                            removed.file.delete()
+                            removed.sourceFile.delete()
+                            removed.thumbnail.recycle()
                         }
                     },
+                    onCornersChanged = { draftCorners = it },
+                    onAutoDetect = ::autoDetectDraft,
+                    onRotateDraft = ::rotateDraft,
+                    onApplyCrop = { applyDraft(useCrop = true) },
+                    onUseFullPage = { applyDraft(useCrop = false) },
+                    onCancelDraft = ::cancelDraft,
                     onFinish = ::createPdfAndFinish,
                     onCancel = { setResult(RESULT_CANCELED); finish() }
                 )
@@ -178,7 +200,7 @@ internal class DocumentScannerActivity : ComponentActivity() {
             errorMessage = "الكاميرا ليست جاهزة بعد."
             return
         }
-        if (busy || pages.size >= MAX_PAGES) return
+        if (busy || pages.size >= MAX_PAGES || draftBitmap != null) return
 
         busy = true
         errorMessage = ""
@@ -189,51 +211,7 @@ internal class DocumentScannerActivity : ComponentActivity() {
             ContextCompat.getMainExecutor(this),
             object : ImageCapture.OnImageSavedCallback {
                 override fun onImageSaved(result: ImageCapture.OutputFileResults) {
-                    lifecycleScope.launch {
-                        var processedFile: File? = null
-                        try {
-                            val created = withContext(Dispatchers.Default) {
-                                val bitmap = processDocumentImage(rawFile, selectedFilter)
-                                try {
-                                    val target = File.createTempFile(
-                                        "sehati-page-",
-                                        ".jpg",
-                                        medicalShareDirectory(this@DocumentScannerActivity)
-                                    )
-                                    try {
-                                        FileOutputStream(target).use { stream ->
-                                            check(bitmap.compress(Bitmap.CompressFormat.JPEG, 80, stream)) {
-                                                "تعذر ضغط الصفحة."
-                                            }
-                                        }
-                                        target
-                                    } catch (error: Exception) {
-                                        target.delete()
-                                        throw error
-                                    }
-                                } finally {
-                                    bitmap.recycle()
-                                }
-                            }
-                            processedFile = created
-                            val thumb = withContext(Dispatchers.Default) {
-                                decodeThumbnail(created)
-                            }
-                            pages.add(ScannedPage(created, thumb))
-                            processedFile = null
-                            if (pages.size >= MAX_PAGES) {
-                                errorMessage = "وصلت إلى الحد الأقصى: $MAX_PAGES صفحة."
-                            }
-                        } catch (error: IllegalArgumentException) {
-                            errorMessage = error.message ?: "تعذرت معالجة الصورة. حاول تصوير الصفحة بإضاءة أوضح."
-                        } catch (_: Exception) {
-                            errorMessage = "تعذرت معالجة الصورة. حاول تصوير الصفحة بإضاءة أوضح."
-                        } finally {
-                            rawFile.delete()
-                            processedFile?.delete()
-                            busy = false
-                        }
-                    }
+                    openDraft(rawFile, editingIndex = null, ownsSource = true)
                 }
 
                 override fun onError(exception: ImageCaptureException) {
@@ -243,6 +221,241 @@ internal class DocumentScannerActivity : ComponentActivity() {
                 }
             }
         )
+    }
+
+    private fun openDraft(
+        file: File,
+        editingIndex: Int?,
+        ownsSource: Boolean,
+        initialCorners: List<Offset>? = null
+    ) {
+        busy = true
+        errorMessage = ""
+        lifecycleScope.launch {
+            var normalizedFile: File? = null
+            var preparedBitmap: Bitmap? = null
+            try {
+                val prepared = withContext(Dispatchers.Default) {
+                    val decoded = decodeOrientedBitmap(file)
+                    val bitmap = resizeBitmap(decoded, MAX_IMAGE_DIMENSION)
+                    if (bitmap !== decoded) decoded.recycle()
+                    var stableFile = file
+                    if (ownsSource) {
+                        stableFile = File.createTempFile(
+                            "sehati-source-", ".jpg", medicalShareDirectory(this@DocumentScannerActivity)
+                        )
+                        try {
+                            FileOutputStream(stableFile).use { output ->
+                                check(bitmap.compress(Bitmap.CompressFormat.JPEG, 90, output)) {
+                                    "تعذر تجهيز الصورة للمراجعة."
+                                }
+                            }
+                        } catch (error: Exception) {
+                            stableFile.delete()
+                            bitmap.recycle()
+                            throw error
+                        }
+                    }
+                    val detected = initialCorners ?: detectDocumentCorners(bitmap)?.map { point ->
+                        Offset(
+                            (point.x / bitmap.width).toFloat().coerceIn(0f, 1f),
+                            (point.y / bitmap.height).toFloat().coerceIn(0f, 1f)
+                        )
+                    }
+                    Triple(stableFile, bitmap, detected ?: fullPageCorners())
+                }
+                normalizedFile = prepared.first
+                preparedBitmap = prepared.second
+                if (ownsSource && prepared.first != file) file.delete()
+                draftSourceFile = prepared.first
+                draftBitmap = prepared.second
+                draftCorners = prepared.third
+                draftOwnsSourceFile = ownsSource
+                editingPageIndex = editingIndex
+                draftMessage = if (initialCorners != null) {
+                    "حرّكي الزوايا لتعديل القص، أو اختاري اكتشاف الحدود من جديد."
+                } else if (prepared.third != fullPageCorners()) {
+                    "اكتشفنا حدودًا مقترحة للورقة. راجعي الزوايا وعدّليها قبل الاعتماد."
+                } else {
+                    "لم تُكتشف الحدود تلقائيًا؛ اسحبي الدوائر الأربع حول الورقة يدويًا."
+                }
+                normalizedFile = null
+                preparedBitmap = null
+            } catch (_: Exception) {
+                if (ownsSource) file.delete()
+                normalizedFile?.delete()
+                preparedBitmap?.recycle()
+                errorMessage = "تعذر تجهيز الصورة للمراجعة. جرّبي تصويرها مرة أخرى."
+            } finally {
+                busy = false
+            }
+        }
+    }
+
+    private fun editPage(index: Int) {
+        if (busy || draftBitmap != null || index !in pages.indices) return
+        val page = pages[index]
+        selectedFilter = page.filter
+        openDraft(page.sourceFile, editingIndex = index, ownsSource = false, initialCorners = page.corners)
+    }
+
+    private fun movePage(from: Int, to: Int) {
+        if (busy || from !in pages.indices || to !in pages.indices || from == to) return
+        val page = pages.removeAt(from)
+        pages.add(to, page)
+    }
+
+    private fun autoDetectDraft() {
+        val bitmap = draftBitmap ?: return
+        if (busy) return
+        busy = true
+        lifecycleScope.launch {
+            try {
+                val detected = withContext(Dispatchers.Default) { detectDocumentCorners(bitmap) }
+                draftCorners = detected?.map { point ->
+                    Offset(
+                        (point.x / bitmap.width).toFloat().coerceIn(0f, 1f),
+                        (point.y / bitmap.height).toFloat().coerceIn(0f, 1f)
+                    )
+                } ?: fullPageCorners()
+                draftMessage = if (detected == null) {
+                    "لم أجد حدودًا مؤكدة. حدّدي الزوايا الأربع بنفسك، أو استخدمي الصورة كاملة."
+                } else {
+                    "تم تحديث حدود القص تلقائيًا. افحصيها قبل الحفظ."
+                }
+            } catch (_: Exception) {
+                draftMessage = "تعذر اكتشاف الحدود. يمكنك تحديدها يدويًا."
+            } finally {
+                busy = false
+            }
+        }
+    }
+
+    private fun rotateDraft() {
+        val bitmap = draftBitmap ?: return
+        if (busy) return
+        busy = true
+        lifecycleScope.launch {
+            var rotatedFile: File? = null
+            try {
+                val rotated = withContext(Dispatchers.Default) {
+                    val matrix = Matrix().apply { postRotate(90f) }
+                    val outputBitmap = Bitmap.createBitmap(
+                        bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true
+                    )
+                    val target = File.createTempFile(
+                        "sehati-rotated-", ".jpg", medicalShareDirectory(this@DocumentScannerActivity)
+                    )
+                    try {
+                        FileOutputStream(target).use { output ->
+                            check(outputBitmap.compress(Bitmap.CompressFormat.JPEG, 90, output)) {
+                                "تعذر تدوير الصورة."
+                            }
+                        }
+                        target to outputBitmap
+                    } catch (error: Exception) {
+                        target.delete()
+                        outputBitmap.recycle()
+                        throw error
+                    }
+                }
+                rotatedFile = rotated.first
+                if (draftOwnsSourceFile) draftSourceFile?.delete()
+                draftSourceFile = rotated.first
+                draftOwnsSourceFile = true
+                bitmap.recycle()
+                draftBitmap = rotated.second
+                draftCorners = fullPageCorners()
+                draftMessage = "دُوّرت الصورة. حدّدي زوايا الورقة من جديد."
+                rotatedFile = null
+            } catch (_: Exception) {
+                draftMessage = "تعذر تدوير الصورة."
+            } finally {
+                rotatedFile?.delete()
+                busy = false
+            }
+        }
+    }
+
+    private fun applyDraft(useCrop: Boolean) {
+        val sourceFile = draftSourceFile ?: return
+        val bitmap = draftBitmap ?: return
+        if (busy || pages.size >= MAX_PAGES && editingPageIndex == null) return
+        val chosenCorners = if (useCrop) draftCorners.toList() else null
+        val savedCorners = if (useCrop) draftCorners.toList() else fullPageCorners()
+        val filter = selectedFilter
+        val targetIndex = editingPageIndex
+        busy = true
+        errorMessage = ""
+        lifecycleScope.launch {
+            var createdFile: File? = null
+            var thumbnail: Bitmap? = null
+            try {
+                val created = withContext(Dispatchers.Default) {
+                    val processed = processDocumentImage(sourceFile, filter, chosenCorners)
+                    try {
+                        val target = File.createTempFile(
+                            "sehati-page-", ".jpg", medicalShareDirectory(this@DocumentScannerActivity)
+                        )
+                        try {
+                            FileOutputStream(target).use { output ->
+                                check(processed.compress(Bitmap.CompressFormat.JPEG, 82, output)) {
+                                    "تعذر ضغط الصفحة."
+                                }
+                            }
+                            target
+                        } catch (error: Exception) {
+                            target.delete()
+                            throw error
+                        }
+                    } finally {
+                        processed.recycle()
+                    }
+                }
+                createdFile = created
+                val thumb = withContext(Dispatchers.Default) { decodeThumbnail(created) }
+                thumbnail = thumb
+                val replacement = ScannedPage(sourceFile, created, thumb, savedCorners, filter)
+                if (targetIndex == null) {
+                    pages.add(replacement)
+                } else {
+                    val old = pages.getOrNull(targetIndex)
+                        ?: throw IllegalStateException("الصفحة التي نعدّلها لم تعد موجودة.")
+                    pages[targetIndex] = replacement
+                    old.file.delete()
+                    old.thumbnail.recycle()
+                    if (old.sourceFile != sourceFile) old.sourceFile.delete()
+                }
+                draftOwnsSourceFile = false
+                clearDraft(deleteOwnedSource = false)
+                createdFile = null
+                thumbnail = null
+                errorMessage = if (pages.size >= MAX_PAGES) "وصلت إلى الحد الأقصى: $MAX_PAGES صفحة." else ""
+            } catch (_: Exception) {
+                errorMessage = "تعذر تجهيز الصفحة. عدّلي القص أو اختاري الصورة كاملة ثم حاولي مجددًا."
+            } finally {
+                createdFile?.delete()
+                thumbnail?.recycle()
+                busy = false
+            }
+        }
+    }
+
+    private fun cancelDraft() {
+        if (busy) return
+        clearDraft(deleteOwnedSource = true)
+    }
+
+    private fun clearDraft(deleteOwnedSource: Boolean) {
+        val source = draftSourceFile
+        if (deleteOwnedSource && draftOwnsSourceFile) source?.delete()
+        draftBitmap?.recycle()
+        draftBitmap = null
+        draftSourceFile = null
+        draftCorners = fullPageCorners()
+        draftMessage = ""
+        editingPageIndex = null
+        draftOwnsSourceFile = false
     }
 
     private fun createPdfAndFinish() {
@@ -321,8 +534,10 @@ internal class DocumentScannerActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        clearDraft(deleteOwnedSource = true)
         pages.forEach { page ->
             page.file.delete()
+            page.sourceFile.delete()
             page.thumbnail.recycle()
         }
         pages.clear()
@@ -337,7 +552,13 @@ internal class DocumentScannerActivity : ComponentActivity() {
         finish()
     }
 
-    private data class ScannedPage(val file: File, val thumbnail: Bitmap)
+    private data class ScannedPage(
+        val sourceFile: File,
+        val file: File,
+        val thumbnail: Bitmap,
+        val corners: List<Offset>,
+        val filter: DocumentScanFilter
+    )
 
     private fun decodeThumbnail(file: File): Bitmap {
         val options = BitmapFactory.Options().apply { inSampleSize = 8 }
@@ -345,77 +566,31 @@ internal class DocumentScannerActivity : ComponentActivity() {
             ?: throw IllegalStateException("تعذر إنشاء معاينة الصفحة.")
     }
 
-    private fun processDocumentImage(file: File, filter: DocumentScanFilter): Bitmap {
+    private fun processDocumentImage(
+        file: File,
+        filter: DocumentScanFilter,
+        cropCorners: List<Offset>? = null
+    ): Bitmap {
         val decoded = decodeOrientedBitmap(file)
         val sourceBitmap = resizeBitmap(decoded, MAX_IMAGE_DIMENSION)
         if (sourceBitmap !== decoded) decoded.recycle()
 
         val source = Mat()
         val gray = Mat()
-        val blurred = Mat()
-        val edges = Mat()
-        val hierarchy = Mat()
-        val kernel = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(3.0, 3.0))
         val warped = Mat()
         val filtered = Mat()
         try {
             Utils.bitmapToMat(sourceBitmap, source)
             Imgproc.cvtColor(source, gray, Imgproc.COLOR_RGBA2GRAY)
-            Imgproc.GaussianBlur(gray, blurred, Size(5.0, 5.0), 0.0)
-            Imgproc.Canny(blurred, edges, 55.0, 165.0)
-            Imgproc.morphologyEx(edges, edges, Imgproc.MORPH_CLOSE, kernel)
-
-            // Use both strong edges and a joined bright-paper mask. This helps when
-            // a plain sheet has weak borders but the table/carpet has visible texture.
-            val contours = ArrayList<MatOfPoint>()
-            Imgproc.findContours(
-                edges,
-                contours,
-                hierarchy,
-                Imgproc.RETR_EXTERNAL,
-                Imgproc.CHAIN_APPROX_SIMPLE
-            )
-
-            val brightPaper = Mat()
-            val paperKernel = Imgproc.getStructuringElement(
-                Imgproc.MORPH_RECT,
-                Size(25.0, 25.0)
-            )
-            val paperHierarchy = Mat()
-            try {
-                Imgproc.threshold(
-                    gray,
-                    brightPaper,
-                    0.0,
-                    255.0,
-                    Imgproc.THRESH_BINARY or Imgproc.THRESH_OTSU
+            val corners = cropCorners?.map { point ->
+                Point(
+                    point.x.toDouble() * (source.cols() - 1),
+                    point.y.toDouble() * (source.rows() - 1)
                 )
-                Imgproc.morphologyEx(
-                    brightPaper,
-                    brightPaper,
-                    Imgproc.MORPH_CLOSE,
-                    paperKernel
-                )
-                Imgproc.findContours(
-                    brightPaper,
-                    contours,
-                    paperHierarchy,
-                    Imgproc.RETR_EXTERNAL,
-                    Imgproc.CHAIN_APPROX_SIMPLE
-                )
-            } finally {
-                brightPaper.release()
-                paperKernel.release()
-                paperHierarchy.release()
-            }
+            }?.toTypedArray()
+            if (corners != null) perspectiveCrop(source, warped, orderCorners(corners))
+            else source.copyTo(warped)
 
-            val corners = findDocumentCorners(contours, gray)
-            if (corners != null) {
-                perspectiveCrop(source, warped, corners)
-            } else {
-                errorMessage = "لم أتمكن من تحديد حدود الورقة؛ حُفظت الصورة كاملة دون قصّ. جرّبي خلفية داكنة وإظهار أطراف الورقة."
-                source.copyTo(warped)
-            }
             applyFilter(warped, filtered, filter)
             val output = Bitmap.createBitmap(
                 filtered.cols(),
@@ -428,12 +603,72 @@ internal class DocumentScannerActivity : ComponentActivity() {
             sourceBitmap.recycle()
             source.release()
             gray.release()
-            blurred.release()
-            edges.release()
-            hierarchy.release()
-            kernel.release()
             warped.release()
             filtered.release()
+        }
+    }
+
+    private fun detectDocumentCorners(bitmap: Bitmap): Array<Point>? {
+        val source = Mat()
+        val gray = Mat()
+        try {
+            Utils.bitmapToMat(bitmap, source)
+            Imgproc.cvtColor(source, gray, Imgproc.COLOR_RGBA2GRAY)
+            return detectDocumentCorners(source, gray)
+        } finally {
+            source.release()
+            gray.release()
+        }
+    }
+
+    private fun detectDocumentCorners(source: Mat, gray: Mat): Array<Point>? {
+        val blurred = Mat()
+        val edges = Mat()
+        val edgeHierarchy = Mat()
+        val edgeContours = ArrayList<MatOfPoint>()
+        val brightPaper = Mat()
+        val paperKernel = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(25.0, 25.0))
+        val paperHierarchy = Mat()
+        val paperContours = ArrayList<MatOfPoint>()
+        var transferred = false
+        try {
+            Imgproc.GaussianBlur(gray, blurred, Size(5.0, 5.0), 0.0)
+            Imgproc.Canny(blurred, edges, 55.0, 165.0)
+            val edgeKernel = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(3.0, 3.0))
+            try {
+                Imgproc.morphologyEx(edges, edges, Imgproc.MORPH_CLOSE, edgeKernel)
+            } finally {
+                edgeKernel.release()
+            }
+            Imgproc.findContours(
+                edges, edgeContours, edgeHierarchy,
+                Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE
+            )
+            Imgproc.threshold(
+                gray, brightPaper, 0.0, 255.0,
+                Imgproc.THRESH_BINARY or Imgproc.THRESH_OTSU
+            )
+            Imgproc.morphologyEx(brightPaper, brightPaper, Imgproc.MORPH_CLOSE, paperKernel)
+            Imgproc.findContours(
+                brightPaper, paperContours, paperHierarchy,
+                Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE
+            )
+            val combined = ArrayList<MatOfPoint>(edgeContours.size + paperContours.size)
+            combined.addAll(edgeContours)
+            combined.addAll(paperContours)
+            transferred = true
+            return findDocumentCorners(combined, gray)
+        } finally {
+            if (!transferred) {
+                edgeContours.forEach { it.release() }
+                paperContours.forEach { it.release() }
+            }
+            blurred.release()
+            edges.release()
+            edgeHierarchy.release()
+            brightPaper.release()
+            paperKernel.release()
+            paperHierarchy.release()
         }
     }
 
@@ -663,9 +898,9 @@ private fun DocumentScannerUi(
     permissionDenied: Boolean,
     pageCount: Int,
     pageThumbnails: List<Bitmap>,
-    previewPageIndex: Int?,
-    onPreviewPage: (Int) -> Unit,
-    onDismissPreview: () -> Unit,
+    draftBitmap: Bitmap?,
+    draftCorners: List<Offset>,
+    draftMessage: String,
     busy: Boolean,
     errorMessage: String,
     selectedFilter: DocumentScanFilter,
@@ -674,7 +909,15 @@ private fun DocumentScannerUi(
     onCaptureReady: (ImageCapture?) -> Unit,
     onCameraError: (String) -> Unit,
     onCapture: () -> Unit,
+    onEditPage: (Int) -> Unit,
+    onMovePage: (Int, Int) -> Unit,
     onRemovePage: (Int) -> Unit,
+    onCornersChanged: (List<Offset>) -> Unit,
+    onAutoDetect: () -> Unit,
+    onRotateDraft: () -> Unit,
+    onApplyCrop: () -> Unit,
+    onUseFullPage: () -> Unit,
+    onCancelDraft: () -> Unit,
     onFinish: () -> Unit,
     onCancel: () -> Unit
 ) {
@@ -683,7 +926,7 @@ private fun DocumentScannerUi(
             Modifier.fillMaxSize().background(Color.Black)
                 .windowInsetsPadding(WindowInsets.systemBars)
                 .padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Row(
                 Modifier.fillMaxWidth(),
@@ -691,7 +934,9 @@ private fun DocumentScannerUi(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text("ماسح المستندات", color = Color.White, style = MaterialTheme.typography.titleLarge)
-                TextButton(onClick = onCancel, enabled = !busy) { Text("إلغاء", color = Color.White) }
+                TextButton(onClick = onCancel, enabled = !busy && draftBitmap == null) {
+                    Text("إلغاء", color = Color.White)
+                }
             }
 
             if (permissionGranted) {
@@ -717,32 +962,39 @@ private fun DocumentScannerUi(
                 }
             }
 
-            Text("الصفحات: $pageCount / 20", color = Color.White)
             Row(
-                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                DocumentScanFilter.values().forEach { filter ->
-                    FilterChip(
-                        selected = selectedFilter == filter,
-                        onClick = { onFilterSelected(filter) },
-                        label = { Text(filter.label) }
-                    )
-                }
+                Text("الصفحات: $pageCount / 20", color = Color.White)
+                Text("اضغطي على أي صفحة لتعديلها", color = Color(0xFFB8C7C5), style = MaterialTheme.typography.bodySmall)
             }
 
             if (pageThumbnails.isNotEmpty()) {
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     itemsIndexed(pageThumbnails) { index, bitmap ->
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.background(Color(0xFF202124), MaterialTheme.shapes.small).padding(4.dp)
+                        ) {
                             Image(
                                 bitmap.asImageBitmap(),
-                                contentDescription = "الصفحة ${index + 1}",
-                                modifier = Modifier.size(76.dp).clickable { onPreviewPage(index) },
+                                contentDescription = "تعديل الصفحة ${index + 1}",
+                                modifier = Modifier.size(66.dp).clickable { onEditPage(index) },
                                 contentScale = ContentScale.Fit
                             )
-                            TextButton(onClick = { onRemovePage(index) }, enabled = !busy) {
-                                Text("حذف")
+                            Text("${index + 1}", color = Color.White, style = MaterialTheme.typography.labelSmall)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                TextButton(onClick = { onMovePage(index, index - 1) }, enabled = !busy && index > 0) {
+                                    Text("←")
+                                }
+                                TextButton(onClick = { onMovePage(index, index + 1) }, enabled = !busy && index < pageThumbnails.lastIndex) {
+                                    Text("→")
+                                }
+                                TextButton(onClick = { onRemovePage(index) }, enabled = !busy) {
+                                    Text("حذف", color = Color(0xFFFFB4AB))
+                                }
                             }
                         }
                     }
@@ -760,12 +1012,12 @@ private fun DocumentScannerUi(
             ) {
                 Button(
                     onClick = onCapture,
-                    enabled = permissionGranted && !busy && pageCount < 20,
+                    enabled = permissionGranted && !busy && draftBitmap == null && pageCount < 20,
                     modifier = Modifier.weight(1f)
-                ) { Text("●  تصوير") }
+                ) { Text("●  تصوير صفحة") }
                 Button(
                     onClick = onFinish,
-                    enabled = pageCount > 0 && !busy,
+                    enabled = pageCount > 0 && !busy && draftBitmap == null,
                     modifier = Modifier.weight(1f)
                 ) {
                     if (busy) CircularProgressIndicator(Modifier.size(18.dp))
@@ -774,37 +1026,220 @@ private fun DocumentScannerUi(
             }
         }
     }
-        previewPageIndex?.let { index ->
-            val bitmap = pageThumbnails.getOrNull(index)
-            if (bitmap != null) {
-                Dialog(onDismissRequest = onDismissPreview) {
-                    Surface(
-                        modifier = Modifier.fillMaxWidth().fillMaxHeight(0.88f),
-                        color = Color(0xFF202124),
-                        shape = MaterialTheme.shapes.large
-                    ) {
-                        Column(
-                            Modifier.fillMaxSize().padding(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Text("معاينة الصفحة ${index + 1}", color = Color.White,
-                                style = MaterialTheme.typography.titleMedium)
-                            Image(
-                                bitmap.asImageBitmap(),
-                                contentDescription = "معاينة كاملة للصفحة",
-                                modifier = Modifier.weight(1f).fillMaxWidth(),
-                                contentScale = ContentScale.Fit
+
+    if (draftBitmap != null) {
+        CropEditorDialog(
+            bitmap = draftBitmap,
+            corners = draftCorners,
+            message = draftMessage,
+            selectedFilter = selectedFilter,
+            busy = busy,
+            onCornersChanged = onCornersChanged,
+            onAutoDetect = onAutoDetect,
+            onRotate = onRotateDraft,
+            onFilterSelected = onFilterSelected,
+            onApplyCrop = onApplyCrop,
+            onUseFullPage = onUseFullPage,
+            onCancel = onCancelDraft
+        )
+    }
+}
+
+@Composable
+private fun CropEditorDialog(
+    bitmap: Bitmap,
+    corners: List<Offset>,
+    message: String,
+    selectedFilter: DocumentScanFilter,
+    busy: Boolean,
+    onCornersChanged: (List<Offset>) -> Unit,
+    onAutoDetect: () -> Unit,
+    onRotate: () -> Unit,
+    onFilterSelected: (DocumentScanFilter) -> Unit,
+    onApplyCrop: () -> Unit,
+    onUseFullPage: () -> Unit,
+    onCancel: () -> Unit
+) {
+    val currentCorners by rememberUpdatedState(corners)
+    val updateCorners by rememberUpdatedState(onCornersChanged)
+    Dialog(
+        onDismissRequest = { if (!busy) onCancel() },
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(Modifier.fillMaxSize(), color = Color(0xFF15191A)) {
+            Column(
+                Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.systemBars).padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("مراجعة وقص الصفحة", color = Color.White, style = MaterialTheme.typography.titleLarge)
+                        Text("اسحبي الدوائر الأربع إلى أطراف الورقة", color = Color(0xFFB8C7C5), style = MaterialTheme.typography.bodySmall)
+                    }
+                    TextButton(onClick = onCancel, enabled = !busy) { Text("رجوع", color = Color.White) }
+                }
+
+                Box(
+                    Modifier.weight(1f).fillMaxWidth().background(Color(0xFF252B2C)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Image(
+                        bitmap.asImageBitmap(),
+                        contentDescription = "الصورة الأصلية لتحديد حدود القص",
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Fit
+                    )
+                    Canvas(
+                        Modifier.fillMaxSize().pointerInput(bitmap.width, bitmap.height) {
+                            var activeCorner = -1
+                            detectDragGestures(
+                                onDragStart = { position ->
+                                    val rect = scannerImageRect(size.width, size.height, bitmap.width, bitmap.height)
+                                    val handles = currentCorners.map { point ->
+                                        Offset(rect.left + point.x * rect.width(), rect.top + point.y * rect.height())
+                                    }
+                                    val nearest = handles.indices.minByOrNull { index ->
+                                        val dx = handles[index].x - position.x
+                                        val dy = handles[index].y - position.y
+                                        dx * dx + dy * dy
+                                    } ?: -1
+                                    activeCorner = if (nearest >= 0) {
+                                        val dx = handles[nearest].x - position.x
+                                        val dy = handles[nearest].y - position.y
+                                        if (dx * dx + dy * dy <= 72f * 72f) nearest else -1
+                                    } else -1
+                                },
+                                onDrag = { change, _ ->
+                                    if (activeCorner >= 0) {
+                                        val rect = scannerImageRect(size.width, size.height, bitmap.width, bitmap.height)
+                                        if (rect.width() > 0f && rect.height() > 0f) {
+                                            val point = Offset(
+                                                ((change.position.x - rect.left) / rect.width()).coerceIn(0f, 1f),
+                                                ((change.position.y - rect.top) / rect.height()).coerceIn(0f, 1f)
+                                            )
+                                            updateCorners(moveCropCorner(currentCorners, activeCorner, point))
+                                        }
+                                    }
+                                    change.consume()
+                                },
+                                onDragEnd = { activeCorner = -1 },
+                                onDragCancel = { activeCorner = -1 }
                             )
-                            TextButton(onClick = onDismissPreview, modifier = Modifier.align(Alignment.End)) {
-                                Text("إغلاق")
+                        }
+                    ) {
+                        val rect = scannerImageRect(size.width, size.height, bitmap.width, bitmap.height)
+                        val points = corners.map { point ->
+                            Offset(rect.left + point.x * rect.width(), rect.top + point.y * rect.height())
+                        }
+                        if (points.size == 4) {
+                            val path = androidx.compose.ui.graphics.Path().apply {
+                                moveTo(points[0].x, points[0].y)
+                                lineTo(points[1].x, points[1].y)
+                                lineTo(points[2].x, points[2].y)
+                                lineTo(points[3].x, points[3].y)
+                                close()
+                            }
+                            drawPath(path, Color(0xFF21D4C2), style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3.dp.toPx()))
+                            points.forEach { point ->
+                                drawCircle(Color.Black, radius = 15.dp.toPx(), center = point)
+                                drawCircle(Color(0xFF21D4C2), radius = 10.dp.toPx(), center = point)
+                                drawCircle(Color.White, radius = 4.dp.toPx(), center = point)
                             }
                         }
                     }
                 }
+
+                Text(message, color = Color(0xFFCAD6D4), style = MaterialTheme.typography.bodySmall)
+                Row(
+                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(onClick = onAutoDetect, enabled = !busy) { Text("اكتشاف تلقائي") }
+                    OutlinedButton(onClick = onRotate, enabled = !busy) { Text("تدوير 90°") }
+                }
+                Row(
+                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    DocumentScanFilter.values().forEach { filter ->
+                        FilterChip(
+                            selected = selectedFilter == filter,
+                            onClick = { onFilterSelected(filter) },
+                            enabled = !busy,
+                            label = { Text(filter.label) }
+                        )
+                    }
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = onUseFullPage,
+                        enabled = !busy,
+                        modifier = Modifier.weight(1f)
+                    ) { Text("استخدام الصورة كاملة") }
+                    Button(
+                        onClick = onApplyCrop,
+                        enabled = !busy,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        if (busy) CircularProgressIndicator(Modifier.size(18.dp))
+                        else Text("اعتماد القص")
+                    }
+                }
+                if (busy) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                        CircularProgressIndicator()
+                        Spacer(Modifier.width(8.dp))
+                        Text("جارٍ تجهيز الصفحة...", color = Color.White)
+                    }
+                }
             }
         }
-
+    }
 }
+
+private fun scannerImageRect(viewWidth: Float, viewHeight: Float, imageWidth: Int, imageHeight: Int): RectF {
+    val scale = min(viewWidth / imageWidth.toFloat(), viewHeight / imageHeight.toFloat())
+    val width = imageWidth * scale
+    val height = imageHeight * scale
+    val left = (viewWidth - width) / 2f
+    val top = (viewHeight - height) / 2f
+    return RectF(left, top, left + width, top + height)
+}
+
+private fun moveCropCorner(corners: List<Offset>, index: Int, point: Offset): List<Offset> {
+    if (corners.size != 4 || index !in 0..3) return corners
+    val result = corners.toMutableList()
+    val gap = 0.025f
+    val next = when (index) {
+        0 -> Offset(
+            point.x.coerceIn(0f, (corners[1].x - gap).coerceAtLeast(gap)),
+            point.y.coerceIn(0f, (corners[3].y - gap).coerceAtLeast(gap))
+        )
+        1 -> Offset(
+            point.x.coerceIn((corners[0].x + gap).coerceAtMost(1f - gap), 1f),
+            point.y.coerceIn(0f, (corners[2].y - gap).coerceAtLeast(gap))
+        )
+        2 -> Offset(
+            point.x.coerceIn((corners[3].x + gap).coerceAtMost(1f - gap), 1f),
+            point.y.coerceIn((corners[1].y + gap).coerceAtMost(1f - gap), 1f)
+        )
+        else -> Offset(
+            point.x.coerceIn(0f, (corners[2].x - gap).coerceAtLeast(gap)),
+            point.y.coerceIn((corners[0].y + gap).coerceAtMost(1f - gap), 1f)
+        )
+    }
+    result[index] = next
+    return result
+}
+
+private fun fullPageCorners(): List<Offset> = listOf(
+    Offset(0.015f, 0.015f), Offset(0.985f, 0.015f),
+    Offset(0.985f, 0.985f), Offset(0.015f, 0.985f)
+)
 
 @Composable
 private fun CameraXPreview(

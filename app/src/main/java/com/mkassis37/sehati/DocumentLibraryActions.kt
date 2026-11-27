@@ -132,7 +132,7 @@ internal fun rememberDocumentLibrary(
                 scope.launch {
                     var stagedFile: File? = null
                     try {
-                        stagedFile = withContext(Dispatchers.IO) {
+                        val staged = withContext(Dispatchers.IO) {
                             val target = File.createTempFile("sehati-scan-", ".pdf", medicalShareDirectory(context))
                             try {
                                 val source = context.contentResolver.openInputStream(scannedPdfUri)
@@ -163,11 +163,12 @@ internal fun rememberDocumentLibrary(
                                 throw error
                             }
                         }
-                        cameraPath = stagedFile.name
+                        stagedFile = staged
+                        cameraPath = staged.name
                         uri = FileProvider.getUriForFile(
                             context,
                             context.packageName + ".fileprovider",
-                            stagedFile
+                            staged
                         )
                         returnToLibrary(memberId)
                         stagedFile = null // The staged file now belongs to the pending import flow.

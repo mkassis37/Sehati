@@ -110,7 +110,6 @@ internal fun rememberDocumentLibrary(
             .setPageLimit(20)
             .setResultFormats(GmsDocumentScannerOptions.RESULT_FORMAT_PDF)
             .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_FULL)
-            .setCaptureMode(GmsDocumentScannerOptions.CAPTURE_MODE_AUTO)
             .build()
         GmsDocumentScanning.getClient(options)
     }

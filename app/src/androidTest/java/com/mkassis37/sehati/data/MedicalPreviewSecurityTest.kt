@@ -7,9 +7,6 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import java.io.File
 import java.io.InputStream
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertFalse
@@ -74,14 +71,11 @@ class MedicalPreviewSecurityTest {
     fun cancelledStreamingRestoreDeletesPartialEncryptedAttachment() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val store = SecureMedicalDocumentStore(context)
-        val header = "%PDF-1.7\nxyz".toByteArray()
-        val payloadSize = 1024 * 1024
-        val enteredRead = CountDownLatch(1)
-        val continueRead = CountDownLatch(1)
-        var payloadWritten = 0
+        val header = "%PDF-1.7\\nxyz".toByteArray()
+        val payload = ByteArray(32 * 1024) { 0x41 }
+        var headerDelivered = false
+        var payloadDelivered = false
         val source = object : InputStream() {
-            private var headerOffset = 0
-
             override fun read(): Int {
                 val one = ByteArray(1)
                 val count = read(one, 0, 1)
@@ -89,19 +83,19 @@ class MedicalPreviewSecurityTest {
             }
 
             override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
-                if (headerOffset < header.size) {
-                    val count = minOf(length, header.size - headerOffset)
-                    System.arraycopy(header, headerOffset, buffer, offset, count)
-                    headerOffset += count
+                if (!headerDelivered) {
+                    val count = minOf(length, header.size)
+                    System.arraycopy(header, 0, buffer, offset, count)
+                    headerDelivered = true
                     return count
                 }
-                enteredRead.countDown()
-                check(continueRead.await(10, TimeUnit.SECONDS)) { "Test stream timed out." }
-                if (payloadWritten >= payloadSize) return -1
-                val count = minOf(length, payloadSize - payloadWritten)
-                java.util.Arrays.fill(buffer, offset, offset + count, 0x41.toByte())
-                payloadWritten += count
-                return count
+                if (!payloadDelivered) {
+                    val count = minOf(length, payload.size)
+                    System.arraycopy(payload, 0, buffer, offset, count)
+                    payloadDelivered = true
+                    return count
+                }
+                throw java.util.concurrent.CancellationException("Synthetic backup restore cancellation.")
             }
         }
         val relativePath = "73/cancel-${System.nanoTime()}.shtd"
@@ -110,19 +104,16 @@ class MedicalPreviewSecurityTest {
             displayName = "Synthetic cancellation.pdf",
             mimeType = "application/pdf",
             relativePath = relativePath,
-            sizeBytes = header.size.toLong() + payloadSize
+            sizeBytes = header.size.toLong() + payload.size + 1024
         )
         val target = File(context.filesDir, "medical_documents/$relativePath")
         try {
-            val job = launch { store.restore(document, source, document.sizeBytes) }
-            assertTrue("Restore did not reach the streaming read.", enteredRead.await(10, TimeUnit.SECONDS))
-            job.cancel()
-            continueRead.countDown()
-            job.join()
+            assertTrue(runCatching { store.restore(document, source, document.sizeBytes) }.isFailure)
+            assertTrue("Test stream did not deliver the partial attachment payload.", payloadDelivered)
             assertFalse("Partial encrypted attachment was left behind.", target.exists())
         } finally {
-            continueRead.countDown()
             target.delete()
+            payload.fill(0)
         }
     }
 

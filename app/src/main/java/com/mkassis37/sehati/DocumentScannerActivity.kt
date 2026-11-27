@@ -10,6 +10,7 @@ import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.pdf.PdfDocument
+import android.net.Uri
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -29,7 +30,6 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -49,7 +49,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
@@ -58,7 +57,7 @@ import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CropFree
 import androidx.compose.material.icons.filled.Palette
-import androidx.compose.material.icons.filled.RotateRight
+import androidx.compose.material.icons.automirrored.filled.RotateRight
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -76,6 +75,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -124,6 +125,12 @@ internal enum class DocumentScanFilter(val label: String) {
     BLACK_WHITE("أبيض وأسود")
 }
 
+internal enum class ScanPaperSize(val label: String, val widthPoints: Int, val heightPoints: Int) {
+    A4("A4", 595, 842),
+    LETTER("Letter", 612, 792),
+    A5("A5", 420, 595)
+}
+
 internal class DocumentScannerActivity : ComponentActivity() {
 
     companion object {
@@ -138,6 +145,7 @@ internal class DocumentScannerActivity : ComponentActivity() {
     private var busy by mutableStateOf(false)
     private var errorMessage by mutableStateOf("")
     private var selectedFilter by mutableStateOf(DocumentScanFilter.COLOR)
+    private var selectedPaperSize by mutableStateOf(ScanPaperSize.A4)
     private var imageCapture by mutableStateOf<ImageCapture?>(null)
     private val pages = mutableStateListOf<ScannedPage>()
     private var draftSourceFile by mutableStateOf<File?>(null)
@@ -154,6 +162,9 @@ internal class DocumentScannerActivity : ComponentActivity() {
         cameraPermissionGranted = granted
         cameraPermissionDenied = !granted
     }
+    private val imagePickerLauncher = registerForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri -> uri?.let(::importImageFromDevice) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -183,13 +194,16 @@ internal class DocumentScannerActivity : ComponentActivity() {
                     busy = busy,
                     errorMessage = errorMessage.ifBlank { cameraInitializationError },
                     selectedFilter = selectedFilter,
+                    selectedPaperSize = selectedPaperSize,
                     onRequestPermission = {
                         permissionLauncher.launch(Manifest.permission.CAMERA)
                     },
                     onFilterSelected = { selectedFilter = it },
+                    onPaperSizeSelected = { selectedPaperSize = it },
                     onCaptureReady = { imageCapture = it },
                     onCameraError = { cameraInitializationError = it },
                     onCapture = ::capturePage,
+                    onPickImage = ::pickImageFromDevice,
                     onEditPage = ::editPage,
                     onMovePage = ::movePage,
                     onRemovePage = { index ->
@@ -243,6 +257,57 @@ internal class DocumentScannerActivity : ComponentActivity() {
                 }
             }
         )
+    }
+
+    private fun pickImageFromDevice() {
+        if (busy || draftBitmap != null || pages.size >= MAX_PAGES) return
+        runCatching { imagePickerLauncher.launch("image/*") }
+            .onFailure { errorMessage = "تعذر فتح معرض الصور." }
+    }
+
+    private fun importImageFromDevice(uri: Uri) {
+        if (busy || draftBitmap != null || pages.size >= MAX_PAGES) return
+        busy = true
+        errorMessage = ""
+        lifecycleScope.launch {
+            var staged: File? = null
+            try {
+                staged = withContext(Dispatchers.IO) {
+                    val target = File.createTempFile(
+                        "sehati-gallery-", ".img", medicalShareDirectory(this@DocumentScannerActivity)
+                    )
+                    try {
+                        contentResolver.openInputStream(uri)?.use { input ->
+                            FileOutputStream(target).use { output ->
+                                val buffer = ByteArray(16 * 1024)
+                                var total = 0L
+                                while (true) {
+                                    val count = input.read(buffer)
+                                    if (count < 0) break
+                                    total += count
+                                    require(total <= 25L * 1024L * 1024L) { "حجم الصورة أكبر من 25 MB." }
+                                    output.write(buffer, 0, count)
+                                }
+                                require(total > 0) { "الصورة المحددة فارغة." }
+                            }
+                        } ?: throw IllegalArgumentException("تعذر فتح الصورة المحددة.")
+                        target
+                    } catch (error: Exception) {
+                        target.delete()
+                        throw error
+                    }
+                }
+                val source = staged ?: return@launch
+                staged = null
+                busy = false
+                openDraft(source, editingIndex = null, ownsSource = true)
+            } catch (error: Exception) {
+                staged?.delete()
+                busy = false
+                errorMessage = error.message?.takeIf { it.contains("25 MB") }
+                    ?: "تعذر تحميل الصورة من الجهاز. اختاري صورة بصيغة مدعومة."
+            }
+        }
     }
 
     private fun openDraft(
@@ -500,8 +565,10 @@ internal class DocumentScannerActivity : ComponentActivity() {
                                     ?: throw IllegalStateException("تعذر قراءة صفحة ممسوحة.")
                                 try {
                                     val landscape = bitmap.width > bitmap.height
-                                    val pageWidth = if (landscape) 842 else 595
-                                    val pageHeight = if (landscape) 595 else 842
+                                    val baseWidth = selectedPaperSize.widthPoints
+                                    val baseHeight = selectedPaperSize.heightPoints
+                                    val pageWidth = if (landscape) baseHeight else baseWidth
+                                    val pageHeight = if (landscape) baseWidth else baseHeight
                                     val info = PdfDocument.PageInfo.Builder(
                                         pageWidth,
                                         pageHeight,
@@ -926,11 +993,14 @@ private fun DocumentScannerUi(
     busy: Boolean,
     errorMessage: String,
     selectedFilter: DocumentScanFilter,
+    selectedPaperSize: ScanPaperSize,
     onRequestPermission: () -> Unit,
     onFilterSelected: (DocumentScanFilter) -> Unit,
+    onPaperSizeSelected: (ScanPaperSize) -> Unit,
     onCaptureReady: (ImageCapture?) -> Unit,
     onCameraError: (String) -> Unit,
     onCapture: () -> Unit,
+    onPickImage: () -> Unit,
     onEditPage: (Int) -> Unit,
     onMovePage: (Int, Int) -> Unit,
     onRemovePage: (Int) -> Unit,
@@ -1280,6 +1350,17 @@ private fun DocumentScannerUi(
                     Spacer(Modifier.width(8.dp))
                     Text("تصوير صفحة", maxLines = 1)
                 }
+                OutlinedButton(
+                    onClick = onPickImage,
+                    enabled = !busy && draftBitmap == null && pageCount < 20,
+                    modifier = Modifier.weight(1f).height(58.dp),
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(18.dp),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp)
+                ) {
+                    Icon(Icons.Filled.Description, contentDescription = null, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("من الجهاز", maxLines = 1, style = MaterialTheme.typography.labelMedium)
+                }
             }
         }
     }
@@ -1290,12 +1371,14 @@ private fun DocumentScannerUi(
             corners = draftCorners,
             message = draftMessage,
             selectedFilter = selectedFilter,
+            selectedPaperSize = selectedPaperSize,
             busy = busy,
             onCornersChanged = onCornersChanged,
             onResetCrop = onResetCrop,
             onAutoDetect = onAutoDetect,
             onRotate = onRotateDraft,
             onFilterSelected = onFilterSelected,
+            onPaperSizeSelected = onPaperSizeSelected,
             onApplyCrop = onApplyCrop,
             onUseFullPage = onUseFullPage,
             onCancel = onCancelDraft
@@ -1309,18 +1392,32 @@ private fun CropEditorDialog(
     corners: List<Offset>,
     message: String,
     selectedFilter: DocumentScanFilter,
+    selectedPaperSize: ScanPaperSize,
     busy: Boolean,
     onCornersChanged: (List<Offset>) -> Unit,
     onResetCrop: () -> Unit,
     onAutoDetect: () -> Unit,
     onRotate: () -> Unit,
     onFilterSelected: (DocumentScanFilter) -> Unit,
+    onPaperSizeSelected: (ScanPaperSize) -> Unit,
     onApplyCrop: () -> Unit,
     onUseFullPage: () -> Unit,
     onCancel: () -> Unit
 ) {
     val currentCorners by rememberUpdatedState(corners)
     val updateCorners by rememberUpdatedState(onCornersChanged)
+    val previewColorFilter = when (selectedFilter) {
+        DocumentScanFilter.COLOR -> null
+        DocumentScanFilter.GRAYSCALE -> ColorFilter.colorMatrix(ColorMatrix().apply { setToSaturation(0f) })
+        DocumentScanFilter.BLACK_WHITE -> ColorFilter.colorMatrix(
+            ColorMatrix(floatArrayOf(
+                2.2f, 0f, 0f, 0f, -150f,
+                2.2f, 0f, 0f, 0f, -150f,
+                2.2f, 0f, 0f, 0f, -150f,
+                0f, 0f, 0f, 1f, 0f
+            ))
+        )
+    }
     Dialog(
         onDismissRequest = { if (!busy) onCancel() },
         properties = DialogProperties(usePlatformDefaultWidth = false)
@@ -1329,7 +1426,6 @@ private fun CropEditorDialog(
             Column(
                 Modifier.fillMaxSize()
                     .windowInsetsPadding(WindowInsets.safeDrawing)
-                    .verticalScroll(rememberScrollState())
                     .padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
@@ -1356,8 +1452,9 @@ private fun CropEditorDialog(
                 }
 
                 Box(
-                    Modifier.fillMaxWidth()
-                        .heightIn(min = 250.dp, max = 390.dp)
+                    Modifier.weight(1f)
+                        .fillMaxWidth()
+                        .heightIn(min = 150.dp, max = 390.dp)
                         .background(Color(0xFF202B38), MaterialTheme.shapes.large),
                     contentAlignment = Alignment.Center
                 ) {
@@ -1365,7 +1462,8 @@ private fun CropEditorDialog(
                         bitmap.asImageBitmap(),
                         contentDescription = "الصورة الأصلية لتحديد حدود القص",
                         modifier = Modifier.fillMaxSize().padding(5.dp),
-                        contentScale = ContentScale.Fit
+                        contentScale = ContentScale.Fit,
+                        colorFilter = previewColorFilter
                     )
                     Canvas(
                         Modifier.fillMaxSize().pointerInput(bitmap.width, bitmap.height) {
@@ -1448,12 +1546,13 @@ private fun CropEditorDialog(
                         message,
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
                         color = Color(0xFFD4E1EB),
-                        style = MaterialTheme.typography.bodySmall
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 2
                     )
                 }
 
                 Text(
-                    "أدوات تحديد الورقة",
+                    "أدوات المسح",
                     color = Color(0xFFEAF2F8),
                     style = MaterialTheme.typography.labelLarge
                 )
@@ -1483,7 +1582,7 @@ private fun CropEditorDialog(
                         modifier = Modifier.weight(1f),
                         onClick = onRotate
                     ) {
-                        Icon(Icons.Filled.RotateRight, contentDescription = null, modifier = Modifier.size(23.dp))
+                        Icon(Icons.AutoMirrored.Filled.RotateRight, contentDescription = null, modifier = Modifier.size(23.dp))
                     }
                 }
 
@@ -1511,6 +1610,22 @@ private fun CropEditorDialog(
 
                 Row(
                     Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("حجم الورقة", color = Color(0xFFB8C7D6), style = MaterialTheme.typography.labelSmall)
+                    ScanPaperSize.values().forEach { paper ->
+                        FilterChip(
+                            selected = selectedPaperSize == paper,
+                            onClick = { onPaperSizeSelected(paper) },
+                            enabled = !busy,
+                            label = { Text(paper.label, style = MaterialTheme.typography.labelSmall, maxLines = 1) }
+                        )
+                    }
+                }
+
+                Row(
+                    Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -1525,7 +1640,7 @@ private fun CropEditorDialog(
                     Button(
                         onClick = onApplyCrop,
                         enabled = !busy,
-                        modifier = Modifier.weight(1.15f).height(68.dp),
+                        modifier = Modifier.weight(1.15f).height(56.dp),
                         contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 8.dp)
                     ) {
                         if (busy) {
@@ -1565,8 +1680,8 @@ private fun CropToolButton(
     OutlinedButton(
         onClick = onClick,
         enabled = enabled,
-        modifier = modifier.height(68.dp),
-        shape = androidx.compose.foundation.shape.RoundedCornerShape(18.dp),
+        modifier = modifier.height(56.dp),
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp),
         colors = androidx.compose.material3.ButtonDefaults.outlinedButtonColors(
             contentColor = Color(0xFF8FE7DC),
             disabledContentColor = Color(0xFF647482)
@@ -1575,17 +1690,17 @@ private fun CropToolButton(
             1.dp,
             if (enabled) Color(0xFF426C78) else Color(0xFF34424E)
         ),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp, vertical = 7.dp)
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp, vertical = 4.dp)
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(5.dp)
+            verticalArrangement = Arrangement.spacedBy(3.dp)
         ) {
             icon()
             Text(
                 label,
                 color = if (enabled) Color(0xFFE5F3F5) else Color(0xFF647482),
-                style = MaterialTheme.typography.labelMedium,
+                style = MaterialTheme.typography.labelSmall,
                 maxLines = 1
             )
         }

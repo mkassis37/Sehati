@@ -106,7 +106,7 @@ internal class DocumentScannerActivity : ComponentActivity() {
         const val EXTRA_RESULT_FILE_NAME = "sehati_scanned_pdf_file_name"
         private const val MAX_PAGES = 20
         private const val MAX_OUTPUT_BYTES = 25L * 1024L * 1024L
-        private const val MAX_IMAGE_DIMENSION = 2200
+        private const val MAX_IMAGE_DIMENSION = 1700
     }
 
     private var cameraPermissionGranted by mutableStateOf(false)
@@ -202,7 +202,7 @@ internal class DocumentScannerActivity : ComponentActivity() {
                                     )
                                     try {
                                         FileOutputStream(target).use { stream ->
-                                            check(bitmap.compress(Bitmap.CompressFormat.JPEG, 93, stream)) {
+                                            check(bitmap.compress(Bitmap.CompressFormat.JPEG, 80, stream)) {
                                                 "تعذر ضغط الصفحة."
                                             }
                                         }
@@ -410,10 +410,12 @@ internal class DocumentScannerActivity : ComponentActivity() {
             }
 
             val corners = findDocumentCorners(contours, gray)
-                ?: throw IllegalArgumentException(
-                    "لم أتعرف على حدود الورقة. ضعيها على خلفية داكنة وواضحة واتركي فراغًا حول أطرافها ثم أعيدي التصوير."
-                )
-            perspectiveCrop(source, warped, corners)
+            if (corners != null) {
+                perspectiveCrop(source, warped, corners)
+            } else {
+                errorMessage = "لم أتمكن من تحديد حدود الورقة؛ حُفظت الصورة كاملة دون قصّ. جرّبي خلفية داكنة وإظهار أطراف الورقة."
+                source.copyTo(warped)
+            }
             applyFilter(warped, filtered, filter)
             val output = Bitmap.createBitmap(
                 filtered.cols(),
@@ -492,7 +494,7 @@ internal class DocumentScannerActivity : ComponentActivity() {
             contours.sortedByDescending { Imgproc.contourArea(it) }.take(35).forEach { contour ->
                 val area = Imgproc.contourArea(contour)
                 val areaRatio = area / imageArea
-                if (areaRatio !in 0.18..0.90) return@forEach
+                if (areaRatio !in 0.10..0.96) return@forEach
 
                 val curve = MatOfPoint2f(*contour.toArray())
                 val approximation = MatOfPoint2f()
@@ -525,7 +527,7 @@ internal class DocumentScannerActivity : ComponentActivity() {
                         // Common paper proportions: A-series and letter-like sheets,
                         // in portrait or landscape orientation.
                         val ratio = min(width / height, height / width)
-                        if (ratio !in 0.48..0.96) return@forEach
+                        if (ratio !in 0.38..1.02) return@forEach
                         val aspectScore = (1.0 - kotlin.math.abs(ratio - 0.707) / 0.45)
                             .coerceIn(0.0, 1.0)
 
@@ -546,12 +548,12 @@ internal class DocumentScannerActivity : ComponentActivity() {
 
                             // A true sheet should be brighter than the narrow band
                             // immediately outside it; a table/grid contour usually is not.
-                            if (contrast < 5.0) return@forEach
-                            val contrastScore = (contrast / 55.0).coerceIn(0.0, 1.0)
-                            val areaScore = ((areaRatio - 0.18) / 0.37).coerceIn(0.0, 1.0)
+                            if (contrast < -8.0) return@forEach
+                            val contrastScore = ((contrast + 8.0) / 55.0).coerceIn(0.0, 1.0)
+                            val areaScore = ((areaRatio - 0.10) / 0.48).coerceIn(0.0, 1.0)
                             val oversizedPenalty = ((areaRatio - 0.72) / 0.18).coerceIn(0.0, 1.0) * 0.55
-                            val score = aspectScore * 0.30 + areaScore * 0.22 +
-                                contrastScore * 0.48 - oversizedPenalty
+                            val score = aspectScore * 0.24 + areaScore * 0.20 +
+                                contrastScore * 0.56 - oversizedPenalty
 
                             if (score > bestScore) {
                                 bestScore = score

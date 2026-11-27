@@ -234,7 +234,8 @@ internal class DocumentScannerActivity : ComponentActivity() {
                         medicalShareDirectory(this@DocumentScannerActivity)
                     )
                     try {
-                        PdfDocument().use { document ->
+                        val document = PdfDocument()
+                        try {
                             pages.forEachIndexed { index, page ->
                                 val bitmap = BitmapFactory.decodeFile(page.file.absolutePath)
                                     ?: throw IllegalStateException("تعذر قراءة صفحة ممسوحة.")
@@ -248,26 +249,31 @@ internal class DocumentScannerActivity : ComponentActivity() {
                                         index + 1
                                     ).create()
                                     val pdfPage = document.startPage(info)
-                                    val scale = min(
-                                        pageWidth.toFloat() / bitmap.width,
-                                        pageHeight.toFloat() / bitmap.height
-                                    )
-                                    val drawWidth = bitmap.width * scale
-                                    val drawHeight = bitmap.height * scale
-                                    val left = (pageWidth - drawWidth) / 2f
-                                    val top = (pageHeight - drawHeight) / 2f
-                                    pdfPage.canvas.drawBitmap(
-                                        bitmap,
-                                        null,
-                                        RectF(left, top, left + drawWidth, top + drawHeight),
-                                        Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
-                                    )
-                                    document.finishPage(pdfPage)
+                                    try {
+                                        val scale = min(
+                                            pageWidth.toFloat() / bitmap.width,
+                                            pageHeight.toFloat() / bitmap.height
+                                        )
+                                        val drawWidth = bitmap.width * scale
+                                        val drawHeight = bitmap.height * scale
+                                        val left = (pageWidth - drawWidth) / 2f
+                                        val top = (pageHeight - drawHeight) / 2f
+                                        pdfPage.canvas.drawBitmap(
+                                            bitmap,
+                                            null,
+                                            RectF(left, top, left + drawWidth, top + drawHeight),
+                                            Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+                                        )
+                                    } finally {
+                                        document.finishPage(pdfPage)
+                                    }
                                 } finally {
                                     bitmap.recycle()
                                 }
                             }
-                            FileOutputStream(target).use(document::writeTo)
+                            FileOutputStream(target).use { output -> document.writeTo(output) }
+                        } finally {
+                            document.close()
                         }
                         require(target.length() in 1..MAX_OUTPUT_BYTES) {
                             "حجم ملف PDF الناتج أكبر من 25 MB."

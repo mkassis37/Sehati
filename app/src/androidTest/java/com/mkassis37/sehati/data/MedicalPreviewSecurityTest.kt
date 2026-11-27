@@ -74,7 +74,7 @@ class MedicalPreviewSecurityTest {
     fun cancelledStreamingRestoreDeletesPartialEncryptedAttachment() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val store = SecureMedicalDocumentStore(context)
-        val header = "%PDF-1.7\\nxyz".toByteArray()
+        val header = "%PDF-1.7\nxyz".toByteArray()
         val payloadSize = 1024 * 1024
         val enteredRead = CountDownLatch(1)
         val continueRead = CountDownLatch(1)

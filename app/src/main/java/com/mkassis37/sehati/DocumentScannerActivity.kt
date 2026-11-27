@@ -21,6 +21,7 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -33,6 +34,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -1080,10 +1082,13 @@ private fun CropEditorDialog(
         onDismissRequest = { if (!busy) onCancel() },
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
-        Surface(Modifier.fillMaxSize(), color = Color(0xFF15191A)) {
+        Surface(Modifier.fillMaxSize(), color = Color(0xFF111A24)) {
             Column(
-                Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.systemBars).padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                Modifier.fillMaxSize()
+                    .windowInsetsPadding(WindowInsets.systemBars)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Row(
                     Modifier.fillMaxWidth(),
@@ -1091,20 +1096,32 @@ private fun CropEditorDialog(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(Modifier.weight(1f)) {
-                        Text("مراجعة وقص الصفحة", color = Color.White, style = MaterialTheme.typography.titleLarge)
-                        Text("اسحبي الدوائر الأربع إلى أطراف الورقة", color = Color(0xFFB8C7C5), style = MaterialTheme.typography.bodySmall)
+                        Text(
+                            "مراجعة وقص الصفحة",
+                            color = Color.White,
+                            style = MaterialTheme.typography.titleLarge
+                        )
+                        Text(
+                            "اسحبي الدوائر لتحديد أطراف الورقة",
+                            color = Color(0xFFB8C7D6),
+                            style = MaterialTheme.typography.bodySmall
+                        )
                     }
-                    TextButton(onClick = onCancel, enabled = !busy) { Text("رجوع", color = Color.White) }
+                    TextButton(onClick = onCancel, enabled = !busy) {
+                        Text("رجوع", color = Color.White)
+                    }
                 }
 
                 Box(
-                    Modifier.weight(1f).fillMaxWidth().background(Color(0xFF252B2C)),
+                    Modifier.fillMaxWidth()
+                        .heightIn(min = 220.dp, max = 360.dp)
+                        .background(Color(0xFF202B38), MaterialTheme.shapes.large),
                     contentAlignment = Alignment.Center
                 ) {
                     Image(
                         bitmap.asImageBitmap(),
                         contentDescription = "الصورة الأصلية لتحديد حدود القص",
-                        modifier = Modifier.fillMaxSize(),
+                        modifier = Modifier.fillMaxSize().padding(5.dp),
                         contentScale = ContentScale.Fit
                     )
                     Canvas(
@@ -1112,7 +1129,10 @@ private fun CropEditorDialog(
                             var activeCorner = -1
                             detectDragGestures(
                                 onDragStart = { position ->
-                                    val rect = scannerImageRect(size.width.toFloat(), size.height.toFloat(), bitmap.width, bitmap.height)
+                                    val rect = scannerImageRect(
+                                        size.width.toFloat(), size.height.toFloat(),
+                                        bitmap.width, bitmap.height
+                                    )
                                     val handles = currentCorners.map { point ->
                                         Offset(rect.left + point.x * rect.width(), rect.top + point.y * rect.height())
                                     }
@@ -1124,12 +1144,15 @@ private fun CropEditorDialog(
                                     activeCorner = if (nearest >= 0) {
                                         val dx = handles[nearest].x - position.x
                                         val dy = handles[nearest].y - position.y
-                                        if (dx * dx + dy * dy <= 72f * 72f) nearest else -1
+                                        if (dx * dx + dy * dy <= 88f * 88f) nearest else -1
                                     } else -1
                                 },
                                 onDrag = { change, _ ->
                                     if (activeCorner >= 0) {
-                                        val rect = scannerImageRect(size.width.toFloat(), size.height.toFloat(), bitmap.width, bitmap.height)
+                                        val rect = scannerImageRect(
+                                            size.width.toFloat(), size.height.toFloat(),
+                                            bitmap.width, bitmap.height
+                                        )
                                         if (rect.width() > 0f && rect.height() > 0f) {
                                             val point = Offset(
                                                 ((change.position.x - rect.left) / rect.width()).coerceIn(0f, 1f),
@@ -1145,7 +1168,10 @@ private fun CropEditorDialog(
                             )
                         }
                     ) {
-                        val rect = scannerImageRect(size.width.toFloat(), size.height.toFloat(), bitmap.width, bitmap.height)
+                        val rect = scannerImageRect(
+                            size.width.toFloat(), size.height.toFloat(),
+                            bitmap.width, bitmap.height
+                        )
                         val points = corners.map { point ->
                             Offset(rect.left + point.x * rect.width(), rect.top + point.y * rect.height())
                         }
@@ -1157,57 +1183,72 @@ private fun CropEditorDialog(
                                 lineTo(points[3].x, points[3].y)
                                 close()
                             }
-                            drawPath(path, Color(0xFF21D4C2), style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3.dp.toPx()))
+                            drawPath(
+                                path,
+                                Color(0xFF35D6C4),
+                                style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3.dp.toPx())
+                            )
                             points.forEach { point ->
-                                drawCircle(Color.Black, radius = 15.dp.toPx(), center = point)
-                                drawCircle(Color(0xFF21D4C2), radius = 10.dp.toPx(), center = point)
-                                drawCircle(Color.White, radius = 4.dp.toPx(), center = point)
+                                drawCircle(Color.Black, radius = 18.dp.toPx(), center = point)
+                                drawCircle(Color(0xFF35D6C4), radius = 12.dp.toPx(), center = point)
+                                drawCircle(Color.White, radius = 5.dp.toPx(), center = point)
                             }
                         }
                     }
                 }
 
-                Text(message, color = Color(0xFFCAD6D4), style = MaterialTheme.typography.bodySmall)
-                // أدوات القص: ثلاثة أزرار متساوية، بأيقونات واضحة ومن دون تمرير أفقي.
+                Surface(
+                    color = Color(0xFF1D2A38),
+                    shape = MaterialTheme.shapes.medium
+                ) {
+                    Text(
+                        message,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 9.dp),
+                        color = Color(0xFFD4E1EB),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+
+                Text(
+                    "أدوات تحديد الورقة",
+                    color = Color(0xFFEAF2F8),
+                    style = MaterialTheme.typography.labelLarge
+                )
                 Row(
                     Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(7.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    OutlinedButton(
-                        onClick = onAutoDetect,
+                    CropToolButton(
+                        label = "تلقائي",
                         enabled = !busy,
-                        modifier = Modifier.weight(1f).height(58.dp),
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp, vertical = 6.dp)
+                        modifier = Modifier.weight(1f),
+                        onClick = onAutoDetect
                     ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Icon(Icons.Filled.AutoFixHigh, contentDescription = null, modifier = Modifier.size(19.dp))
-                            Text("اكتشاف تلقائي", style = MaterialTheme.typography.labelSmall, maxLines = 1)
-                        }
+                        Icon(Icons.Filled.AutoFixHigh, contentDescription = null, modifier = Modifier.size(23.dp))
                     }
-                    OutlinedButton(
-                        onClick = onResetCrop,
+                    CropToolButton(
+                        label = "إعادة ضبط",
                         enabled = !busy,
-                        modifier = Modifier.weight(1f).height(58.dp),
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp, vertical = 6.dp)
+                        modifier = Modifier.weight(1f),
+                        onClick = onResetCrop
                     ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Icon(Icons.Filled.CropFree, contentDescription = null, modifier = Modifier.size(19.dp))
-                            Text("الصورة كاملة", style = MaterialTheme.typography.labelSmall, maxLines = 1)
-                        }
+                        Icon(Icons.Filled.CropFree, contentDescription = null, modifier = Modifier.size(23.dp))
                     }
-                    OutlinedButton(
-                        onClick = onRotate,
+                    CropToolButton(
+                        label = "تدوير 90°",
                         enabled = !busy,
-                        modifier = Modifier.weight(1f).height(58.dp),
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp, vertical = 6.dp)
+                        modifier = Modifier.weight(1f),
+                        onClick = onRotate
                     ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Icon(Icons.Filled.RotateRight, contentDescription = null, modifier = Modifier.size(19.dp))
-                            Text("تدوير 90°", style = MaterialTheme.typography.labelSmall, maxLines = 1)
-                        }
+                        Icon(Icons.Filled.RotateRight, contentDescription = null, modifier = Modifier.size(23.dp))
                     }
                 }
-                Text("تحسين الصورة", color = Color(0xFFCAD6D4), style = MaterialTheme.typography.labelLarge)
+
+                Text(
+                    "تحسين مظهر المستند",
+                    color = Color(0xFFEAF2F8),
+                    style = MaterialTheme.typography.labelLarge
+                )
                 Row(
                     Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -1219,41 +1260,48 @@ private fun CropEditorDialog(
                             enabled = !busy,
                             modifier = Modifier.weight(1f),
                             label = {
-                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
-                                    Icon(Icons.Filled.Palette, contentDescription = null, modifier = Modifier.size(15.dp))
-                                    Spacer(Modifier.width(4.dp))
-                                    Text(filter.label, style = MaterialTheme.typography.labelSmall, maxLines = 1)
-                                }
+                                Text(filter.label, style = MaterialTheme.typography.labelSmall, maxLines = 1)
                             }
                         )
                     }
                 }
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(
-                        onClick = onUseFullPage,
+
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    CropToolButton(
+                        label = "بدون قص",
                         enabled = !busy,
-                        modifier = Modifier.weight(1f).height(52.dp)
+                        modifier = Modifier.weight(0.85f),
+                        onClick = onUseFullPage
                     ) {
-                        Icon(Icons.Filled.CropFree, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("استخدام الصورة كاملة", style = MaterialTheme.typography.labelLarge, maxLines = 1)
+                        Icon(Icons.Filled.CropFree, contentDescription = null, modifier = Modifier.size(21.dp))
                     }
                     Button(
                         onClick = onApplyCrop,
                         enabled = !busy,
-                        modifier = Modifier.weight(1f).height(52.dp)
+                        modifier = Modifier.weight(1.15f).height(62.dp),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 8.dp)
                     ) {
-                        if (busy) CircularProgressIndicator(Modifier.size(18.dp))
-                        else {
-                            Icon(Icons.Filled.CheckCircle, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(6.dp))
+                        if (busy) {
+                            CircularProgressIndicator(Modifier.size(20.dp), color = Color.White)
+                        } else {
+                            Icon(Icons.Filled.CheckCircle, contentDescription = null, modifier = Modifier.size(21.dp))
+                            Spacer(Modifier.width(7.dp))
                             Text("اعتماد القص", style = MaterialTheme.typography.labelLarge, maxLines = 1)
                         }
                     }
                 }
+
                 if (busy) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-                        CircularProgressIndicator()
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        CircularProgressIndicator(Modifier.size(20.dp))
                         Spacer(Modifier.width(8.dp))
                         Text("جارٍ تجهيز الصفحة...", color = Color.White)
                     }
@@ -1263,6 +1311,33 @@ private fun CropEditorDialog(
     }
 }
 
+@Composable
+private fun CropToolButton(
+    label: String,
+    enabled: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+    icon: @Composable () -> Unit
+) {
+    OutlinedButton(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier.height(62.dp),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 5.dp, vertical = 6.dp)
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(3.dp)
+        ) {
+            icon()
+            Text(
+                label,
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1
+            )
+        }
+    }
+}
 private fun scannerImageRect(viewWidth: Float, viewHeight: Float, imageWidth: Int, imageHeight: Int): RectF {
     val scale = min(viewWidth / imageWidth.toFloat(), viewHeight / imageHeight.toFloat())
     val width = imageWidth * scale

@@ -42,6 +42,13 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AutoFixHigh
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.CropFree
+import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.RotateRight
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -1161,24 +1168,63 @@ private fun CropEditorDialog(
                 }
 
                 Text(message, color = Color(0xFFCAD6D4), style = MaterialTheme.typography.bodySmall)
+                // أدوات القص: ثلاثة أزرار متساوية، بأيقونات واضحة ومن دون تمرير أفقي.
                 Row(
-                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(7.dp)
                 ) {
-                    OutlinedButton(onClick = onAutoDetect, enabled = !busy) { Text("اكتشاف تلقائي") }
-                    OutlinedButton(onClick = onResetCrop, enabled = !busy) { Text("إظهار الصورة كاملة") }
-                    OutlinedButton(onClick = onRotate, enabled = !busy) { Text("تدوير 90°") }
+                    OutlinedButton(
+                        onClick = onAutoDetect,
+                        enabled = !busy,
+                        modifier = Modifier.weight(1f).height(58.dp),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp, vertical = 6.dp)
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Icon(Icons.Filled.AutoFixHigh, contentDescription = null, modifier = Modifier.size(19.dp))
+                            Text("اكتشاف تلقائي", style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                        }
+                    }
+                    OutlinedButton(
+                        onClick = onResetCrop,
+                        enabled = !busy,
+                        modifier = Modifier.weight(1f).height(58.dp),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp, vertical = 6.dp)
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Icon(Icons.Filled.CropFree, contentDescription = null, modifier = Modifier.size(19.dp))
+                            Text("الصورة كاملة", style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                        }
+                    }
+                    OutlinedButton(
+                        onClick = onRotate,
+                        enabled = !busy,
+                        modifier = Modifier.weight(1f).height(58.dp),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp, vertical = 6.dp)
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Icon(Icons.Filled.RotateRight, contentDescription = null, modifier = Modifier.size(19.dp))
+                            Text("تدوير 90°", style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                        }
+                    }
                 }
+                Text("تحسين الصورة", color = Color(0xFFCAD6D4), style = MaterialTheme.typography.labelLarge)
                 Row(
-                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     DocumentScanFilter.values().forEach { filter ->
                         FilterChip(
                             selected = selectedFilter == filter,
                             onClick = { onFilterSelected(filter) },
                             enabled = !busy,
-                            label = { Text(filter.label) }
+                            modifier = Modifier.weight(1f),
+                            label = {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+                                    Icon(Icons.Filled.Palette, contentDescription = null, modifier = Modifier.size(15.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text(filter.label, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                                }
+                            }
                         )
                     }
                 }
@@ -1186,15 +1232,23 @@ private fun CropEditorDialog(
                     OutlinedButton(
                         onClick = onUseFullPage,
                         enabled = !busy,
-                        modifier = Modifier.weight(1f)
-                    ) { Text("استخدام الصورة كاملة") }
+                        modifier = Modifier.weight(1f).height(52.dp)
+                    ) {
+                        Icon(Icons.Filled.CropFree, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("استخدام الصورة كاملة", style = MaterialTheme.typography.labelLarge, maxLines = 1)
+                    }
                     Button(
                         onClick = onApplyCrop,
                         enabled = !busy,
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f).height(52.dp)
                     ) {
                         if (busy) CircularProgressIndicator(Modifier.size(18.dp))
-                        else Text("اعتماد القص")
+                        else {
+                            Icon(Icons.Filled.CheckCircle, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("اعتماد القص", style = MaterialTheme.typography.labelLarge, maxLines = 1)
+                        }
                     }
                 }
                 if (busy) {

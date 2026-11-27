@@ -1,5 +1,6 @@
 package com.mkassis37.sehati
 
+import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri

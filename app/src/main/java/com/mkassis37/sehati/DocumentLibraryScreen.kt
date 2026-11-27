@@ -113,12 +113,6 @@ internal fun DocumentLibraryScreen(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        if (!focused) {
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Button(onClick = { actions.pick(member.id) }) { Text("اختيار ملف") }
-                                OutlinedButton(onClick = { actions.capture(member.id) }) { Text("التقاط صورة") }
-                            }
-                        }
                     }
                 }
             }

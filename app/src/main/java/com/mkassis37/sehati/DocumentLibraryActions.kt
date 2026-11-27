@@ -1,11 +1,15 @@
 package com.mkassis37.sehati
 
+import android.app.Activity
 import android.content.ActivityNotFoundException
+import android.content.Context
+import android.content.ContextWrapper
 import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -15,6 +19,9 @@ import com.mkassis37.sehati.data.MedicalDocument
 import com.mkassis37.sehati.data.SecureMedicalDocumentStore
 import com.mkassis37.sehati.data.medicalShareDirectory
 import com.mkassis37.sehati.data.SehatiDatabase
+import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
+import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
+import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
 import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
@@ -30,6 +37,7 @@ internal data class DocumentLibraryActions(
     val pending: PendingDocument?,
     val pick: (Long) -> Unit,
     val capture: (Long) -> Unit,
+    val scan: (Long) -> Unit,
     val cancel: () -> Unit,
     val save: suspend (DocumentCategory, String, DocumentLink?) -> Unit,
     val open: (MedicalDocument) -> Unit,
@@ -79,7 +87,7 @@ internal fun rememberDocumentLibrary(
 
         if (!capturedName.isNullOrBlank() &&
             File(capturedName).name == capturedName &&
-            capturedName.startsWith("sehati-camera-")
+            (capturedName.startsWith("sehati-camera-") || capturedName.startsWith("sehati-scan-"))
         ) {
             runCatching {
                 File(File(context.cacheDir, "medical-share"), capturedName).delete()
@@ -95,6 +103,89 @@ internal fun rememberDocumentLibrary(
     val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { success ->
         val file = cameraPath?.let { File(medicalShareDirectory(context), it) }
         complete(if (success && file != null) FileProvider.getUriForFile(context, context.packageName + ".fileprovider", file) else null)
+    }
+    val scanner = remember {
+        val options = GmsDocumentScannerOptions.Builder()
+            .setGalleryImportAllowed(false)
+            .setPageLimit(20)
+            .setResultFormats(GmsDocumentScannerOptions.RESULT_FORMAT_PDF)
+            .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_FULL)
+            .setCaptureMode(GmsDocumentScannerOptions.CAPTURE_MODE_AUTO)
+            .build()
+        GmsDocumentScanning.getClient(options)
+    }
+    val scannerLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        val memberId = owner
+        if (result.resultCode != Activity.RESULT_OK || memberId == null) {
+            clear()
+        } else {
+            val scannedPdfUri = runCatching {
+                GmsDocumentScanningResult.fromActivityResultIntent(result.data)?.pdf?.uri
+            }.getOrNull()
+
+            if (scannedPdfUri == null) {
+                clear()
+                Toast.makeText(context, "لم يرجع الماسح ملف PDF صالحًا.", Toast.LENGTH_LONG).show()
+            } else {
+                scope.launch {
+                    var stagedFile: File? = null
+                    try {
+                        stagedFile = withContext(Dispatchers.IO) {
+                            val target = File.createTempFile("sehati-scan-", ".pdf", medicalShareDirectory(context))
+                            try {
+                                val source = context.contentResolver.openInputStream(scannedPdfUri)
+                                    ?: throw java.io.IOException("تعذر قراءة المستند الممسوح.")
+                                source.use { input ->
+                                    FileOutputStream(target).use { output ->
+                                        val buffer = ByteArray(16 * 1024)
+                                        var copied = 0L
+                                        try {
+                                            while (true) {
+                                                val count = input.read(buffer)
+                                                if (count < 0) break
+                                                if (count == 0) continue
+                                                copied += count
+                                                require(copied <= MAX_SCANNED_DOCUMENT_BYTES) {
+                                                    "المستند الممسوح أكبر من الحد المسموح (25 MB)."
+                                                }
+                                                output.write(buffer, 0, count)
+                                            }
+                                        } finally {
+                                            buffer.fill(0)
+                                        }
+                                    }
+                                }
+                                target
+                            } catch (error: Exception) {
+                                target.delete()
+                                throw error
+                            }
+                        }
+                        cameraPath = stagedFile.name
+                        uri = FileProvider.getUriForFile(
+                            context,
+                            context.packageName + ".fileprovider",
+                            stagedFile
+                        )
+                        returnToLibrary(memberId)
+                        stagedFile = null // The staged file now belongs to the pending import flow.
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                        clear()
+                        Toast.makeText(
+                            context,
+                            "تعذر تجهيز المستند الممسوح للحفظ. تأكد أن حجمه لا يتجاوز 25 MB.",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    } finally {
+                        stagedFile?.delete()
+                    }
+                }
+            }
+        }
     }
     val pending = owner?.let { memberId -> uri?.let { PendingDocument(memberId, it) } }
     return DocumentLibraryActions(
@@ -123,13 +214,44 @@ internal fun rememberDocumentLibrary(
                 }
             }
         },
+        scan = { memberId ->
+            if (owner == null) {
+                val activity = context.findActivity()
+                if (activity == null) {
+                    Toast.makeText(context, "تعذر الوصول إلى شاشة المسح.", Toast.LENGTH_SHORT).show()
+                } else {
+                    owner = memberId
+                    scanner.getStartScanIntent(activity)
+                        .addOnSuccessListener { intentSender ->
+                            try {
+                                scannerLauncher.launch(IntentSenderRequest.Builder(intentSender).build())
+                            } catch (_: Exception) {
+                                clear()
+                                Toast.makeText(context, "تعذر تشغيل ماسح المستندات.", Toast.LENGTH_LONG).show()
+                            }
+                        }
+                        .addOnFailureListener {
+                            clear()
+                            Toast.makeText(
+                                context,
+                                "تعذر تشغيل ماسح المستندات. تحقق من خدمات Google Play واتصال الإنترنت عند الاستخدام الأول.",
+                                Toast.LENGTH_LONG
+                            ).show()
+                        }
+                }
+            }
+        },
         cancel = ::clear,
         save = { type, date, link ->
             checkNotNull(pending)
             withContext(Dispatchers.IO + NonCancellable) {
-                val name = if (cameraPath != null) "صورة طبية - $date.jpg" else
-                    context.contentResolver.query(pending.uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+                val stagedName = cameraPath
+                val name = when {
+                    stagedName?.startsWith("sehati-scan-") == true -> "مستند ممسوح - $date.pdf"
+                    stagedName?.startsWith("sehati-camera-") == true -> "صورة طبية - $date.jpg"
+                    else -> context.contentResolver.query(pending.uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
                         ?.use { if (it.moveToFirst()) it.getString(0) else null } ?: "مرفق طبي"
+                }
                 val document = store.save(pending.uri, pending.memberId, name)
                 try {
                     database.addLinkedDocument(document.copy(
@@ -186,4 +308,13 @@ internal fun rememberDocumentLibrary(
             }
         }
     )
+}
+
+
+private const val MAX_SCANNED_DOCUMENT_BYTES = 25L * 1024L * 1024L
+
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
 }

@@ -68,7 +68,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.opencv.android.OpenCVLoader
 import org.opencv.android.Utils
-import org.opencv.core.Core
 import org.opencv.core.Mat
 import org.opencv.core.MatOfPoint
 import org.opencv.core.MatOfPoint2f
@@ -96,7 +95,7 @@ internal class DocumentScannerActivity : ComponentActivity() {
     private var cameraPermissionDenied by mutableStateOf(false)
     private var busy by mutableStateOf(false)
     private var errorMessage by mutableStateOf("")
-    private var selectedFilter by mutableStateOf(ScanFilter.COLOR)
+    private var selectedFilter by mutableStateOf(DocumentScanFilter.COLOR)
     private var imageCapture by mutableStateOf<ImageCapture?>(null)
     private val pages = mutableStateListOf<ScannedPage>()
     private var resultPdf: File? = null
@@ -137,6 +136,8 @@ internal class DocumentScannerActivity : ComponentActivity() {
                         permissionLauncher.launch(Manifest.permission.CAMERA)
                     },
                     onFilterSelected = { selectedFilter = it },
+                    onCaptureReady = { imageCapture = it },
+                    onCameraError = { cameraInitializationError = it },
                     onCapture = ::capturePage,
                     onRemovePage = { index ->
                         if (index in pages.indices && !busy) {
@@ -304,7 +305,7 @@ internal class DocumentScannerActivity : ComponentActivity() {
 
     private data class ScannedPage(val file: File, val thumbnail: Bitmap)
 
-    private enum class ScanFilter(val label: String) {
+    internal enum class DocumentScanFilter(val label: String) {
         COLOR("ملون"),
         GRAYSCALE("رمادي"),
         BLACK_WHITE("أبيض وأسود")
@@ -507,7 +508,7 @@ private fun DocumentScannerUi(
     pageThumbnails: List<Bitmap>,
     busy: Boolean,
     errorMessage: String,
-    selectedFilter: DocumentScannerActivity.ScanFilter,
+    selectedFilter: DocumentScanFilter,
     onRequestPermission: () -> Unit,
     onFilterSelected: (DocumentScannerActivity.ScanFilter) -> Unit,
     onCapture: () -> Unit,
@@ -532,9 +533,8 @@ private fun DocumentScannerUi(
             if (permissionGranted) {
                 CameraXPreview(
                     modifier = Modifier.weight(1f).fillMaxWidth(),
-                    onReady = {},
-                    onCaptureReady = {},
-                    onError = {}
+                    onCaptureReady = onCaptureReady,
+                    onError = onCameraError
                 )
             } else {
                 Box(
@@ -614,7 +614,6 @@ private fun DocumentScannerUi(
 @Composable
 private fun CameraXPreview(
     modifier: Modifier = Modifier,
-    onReady: (ProcessCameraProvider?) -> Unit,
     onCaptureReady: (ImageCapture?) -> Unit,
     onError: (String) -> Unit
 ) {
@@ -647,7 +646,6 @@ private fun CameraXPreview(
                         preview,
                         imageCapture
                     )
-                    onReady(provider)
                     onCaptureReady(imageCapture)
                 } catch (_: Exception) {
                     onError("تعذر تهيئة الكاميرا على هذا الجهاز.")
@@ -658,7 +656,6 @@ private fun CameraXPreview(
         onDispose {
             disposed = true
             provider?.unbindAll()
-            onReady(null)
             onCaptureReady(null)
         }
     }

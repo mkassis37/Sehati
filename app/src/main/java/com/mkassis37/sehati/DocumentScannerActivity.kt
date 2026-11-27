@@ -101,7 +101,7 @@ internal class DocumentScannerActivity : ComponentActivity() {
     private var cameraPermissionDenied by mutableStateOf(false)
     private var busy by mutableStateOf(false)
     private var errorMessage by mutableStateOf("")
-    private var selectedFilter by mutableStateOf(DocumentDocumentScanFilter.COLOR)
+    private var selectedFilter by mutableStateOf(DocumentScanFilter.COLOR)
     private var imageCapture by mutableStateOf<ImageCapture?>(null)
     private val pages = mutableStateListOf<ScannedPage>()
     private var resultPdf: File? = null
@@ -464,9 +464,9 @@ internal class DocumentScannerActivity : ComponentActivity() {
     private fun distance(a: Point, b: Point): Double =
         hypot(a.x - b.x, a.y - b.y)
 
-    private fun applyFilter(source: Mat, output: Mat, filter: ScanFilter) {
+    private fun applyFilter(source: Mat, output: Mat, filter: DocumentScanFilter) {
         when (filter) {
-            ScanFilter.COLOR -> source.copyTo(output)
+            DocumentScanFilter.COLOR -> source.copyTo(output)
             DocumentScanFilter.GRAYSCALE -> {
                 val gray = Mat()
                 try {

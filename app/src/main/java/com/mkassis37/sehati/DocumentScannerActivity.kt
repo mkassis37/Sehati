@@ -131,6 +131,12 @@ internal enum class ScanPaperSize(val label: String, val widthPoints: Int, val h
     A5("A5", 420, 595)
 }
 
+private enum class CropToolGroup(val label: String) {
+    SCAN("أدوات المسح"),
+    APPEARANCE("تحسين المظهر"),
+    PAPER("حجم الورقة")
+}
+
 internal class DocumentScannerActivity : ComponentActivity() {
 
     companion object {
@@ -1227,7 +1233,7 @@ private fun DocumentScannerUi(
                 }
 
                 LazyRow(
-                    modifier = Modifier.fillMaxWidth().height(108.dp),
+                    modifier = Modifier.fillMaxWidth().height(88.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     itemsIndexed(pageThumbnails) { index, bitmap ->
@@ -1242,7 +1248,7 @@ private fun DocumentScannerUi(
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(61.dp)
+                                    .height(46.dp)
                                     .clip(androidx.compose.foundation.shape.RoundedCornerShape(9.dp))
                                     .clickable(enabled = !busy) { onEditPage(index) }
                             ) {
@@ -1266,7 +1272,7 @@ private fun DocumentScannerUi(
                                 }
                             }
                             Row(
-                                modifier = Modifier.fillMaxWidth().height(30.dp),
+                                modifier = Modifier.fillMaxWidth().height(28.dp),
                                 horizontalArrangement = Arrangement.SpaceEvenly,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
@@ -1404,6 +1410,7 @@ private fun CropEditorDialog(
     onUseFullPage: () -> Unit,
     onCancel: () -> Unit
 ) {
+    var selectedToolGroup by remember(bitmap) { mutableStateOf(CropToolGroup.SCAN) }
     val currentCorners by rememberUpdatedState(corners)
     val updateCorners by rememberUpdatedState(onCornersChanged)
     val previewColorFilter = when (selectedFilter) {
@@ -1448,6 +1455,101 @@ private fun CropEditorDialog(
                     }
                     TextButton(onClick = onCancel, enabled = !busy) {
                         Text("رجوع", color = Color.White)
+                    }
+                }
+
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    CropToolGroup.values().forEach { group ->
+                        val selected = selectedToolGroup == group
+                        if (selected) {
+                            Button(
+                                onClick = { selectedToolGroup = group },
+                                enabled = !busy,
+                                modifier = Modifier.weight(1f).height(44.dp),
+                                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 3.dp)
+                            ) {
+                                Text(group.label, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                            }
+                        } else {
+                            OutlinedButton(
+                                onClick = { selectedToolGroup = group },
+                                enabled = !busy,
+                                modifier = Modifier.weight(1f).height(44.dp),
+                                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 3.dp)
+                            ) {
+                                Text(group.label, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                            }
+                        }
+                    }
+                }
+
+                Surface(
+                    Modifier.fillMaxWidth().height(62.dp),
+                    color = Color(0xFF1B2935),
+                    shape = MaterialTheme.shapes.medium
+                ) {
+                    Row(
+                        Modifier.fillMaxSize().padding(horizontal = 8.dp, vertical = 3.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        when (selectedToolGroup) {
+                            CropToolGroup.SCAN -> {
+                                CropToolButton(
+                                    label = "تلقائي",
+                                    enabled = !busy,
+                                    modifier = Modifier.weight(1f),
+                                    onClick = onAutoDetect
+                                ) {
+                                    Icon(Icons.Filled.AutoFixHigh, contentDescription = null, modifier = Modifier.size(20.dp))
+                                }
+                                CropToolButton(
+                                    label = "كامل الصورة",
+                                    enabled = !busy,
+                                    modifier = Modifier.weight(1f),
+                                    onClick = onResetCrop
+                                ) {
+                                    Icon(Icons.Filled.CropFree, contentDescription = null, modifier = Modifier.size(20.dp))
+                                }
+                                CropToolButton(
+                                    label = "تدوير",
+                                    enabled = !busy,
+                                    modifier = Modifier.weight(1f),
+                                    onClick = onRotate
+                                ) {
+                                    Icon(Icons.AutoMirrored.Filled.RotateRight, contentDescription = null, modifier = Modifier.size(20.dp))
+                                }
+                            }
+                            CropToolGroup.APPEARANCE -> {
+                                DocumentScanFilter.values().forEach { filter ->
+                                    FilterChip(
+                                        selected = selectedFilter == filter,
+                                        onClick = { onFilterSelected(filter) },
+                                        enabled = !busy,
+                                        modifier = Modifier.weight(1f),
+                                        label = {
+                                            Text(filter.label, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                                        }
+                                    )
+                                }
+                            }
+                            CropToolGroup.PAPER -> {
+                                ScanPaperSize.values().forEach { paper ->
+                                    FilterChip(
+                                        selected = selectedPaperSize == paper,
+                                        onClick = { onPaperSizeSelected(paper) },
+                                        enabled = !busy,
+                                        modifier = Modifier.weight(1f),
+                                        label = {
+                                            Text(paper.label, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                                        }
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -1551,86 +1653,13 @@ private fun CropEditorDialog(
                     )
                 }
 
-                Text(
-                    "أدوات المسح",
-                    color = Color(0xFFEAF2F8),
-                    style = MaterialTheme.typography.labelLarge
-                )
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    CropToolButton(
-                        label = "تلقائي",
-                        enabled = !busy,
-                        modifier = Modifier.weight(1f),
-                        onClick = onAutoDetect
-                    ) {
-                        Icon(Icons.Filled.AutoFixHigh, contentDescription = null, modifier = Modifier.size(23.dp))
-                    }
-                    CropToolButton(
-                        label = "كامل الصورة",
-                        enabled = !busy,
-                        modifier = Modifier.weight(1f),
-                        onClick = onResetCrop
-                    ) {
-                        Icon(Icons.Filled.CropFree, contentDescription = null, modifier = Modifier.size(23.dp))
-                    }
-                    CropToolButton(
-                        label = "تدوير",
-                        enabled = !busy,
-                        modifier = Modifier.weight(1f),
-                        onClick = onRotate
-                    ) {
-                        Icon(Icons.AutoMirrored.Filled.RotateRight, contentDescription = null, modifier = Modifier.size(23.dp))
-                    }
-                }
-
-                Text(
-                    "تحسين مظهر المستند",
-                    color = Color(0xFFEAF2F8),
-                    style = MaterialTheme.typography.labelLarge
-                )
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    DocumentScanFilter.values().forEach { filter ->
-                        FilterChip(
-                            selected = selectedFilter == filter,
-                            onClick = { onFilterSelected(filter) },
-                            enabled = !busy,
-                            modifier = Modifier.weight(1f),
-                            label = {
-                                Text(filter.label, style = MaterialTheme.typography.labelSmall, maxLines = 1)
-                            }
-                        )
-                    }
-                }
-
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("حجم الورقة", color = Color(0xFFB8C7D6), style = MaterialTheme.typography.labelSmall)
-                    ScanPaperSize.values().forEach { paper ->
-                        FilterChip(
-                            selected = selectedPaperSize == paper,
-                            onClick = { onPaperSizeSelected(paper) },
-                            enabled = !busy,
-                            label = { Text(paper.label, style = MaterialTheme.typography.labelSmall, maxLines = 1) }
-                        )
-                    }
-                }
-
                 Row(
                     Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     CropToolButton(
-                        label = "الصورة كاملة",
+                        label = "صفحة كاملة",
                         enabled = !busy,
                         modifier = Modifier.weight(0.85f),
                         onClick = onUseFullPage

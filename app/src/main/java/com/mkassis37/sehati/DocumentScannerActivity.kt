@@ -1225,35 +1225,39 @@ private fun CropEditorDialog(
 ) {
     val currentCorners by rememberUpdatedState(corners)
     val updateCorners by rememberUpdatedState(onCornersChanged)
+
     Dialog(
         onDismissRequest = { if (!busy) onCancel() },
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
         Surface(Modifier.fillMaxSize(), color = Color(0xFF101923)) {
+            // Safe drawing padding is applied once to the entire editor. The bottom
+            // action bar is outside the scrollable controls, so Android navigation
+            // can never cover the approve buttons.
             Column(
                 Modifier.fillMaxSize()
                     .windowInsetsPadding(WindowInsets.safeDrawing)
                     .padding(horizontal = 10.dp, vertical = 5.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
+                verticalArrangement = Arrangement.spacedBy(5.dp)
             ) {
                 Row(
-                    Modifier.fillMaxWidth().height(40.dp),
+                    Modifier.fillMaxWidth().height(42.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(Modifier.weight(1f)) {
                         Text("مراجعة المستند", color = Color.White, style = MaterialTheme.typography.titleMedium)
-                        Text("حرّكي الزوايا لتحديد الورقة", color = Color(0xFFB8C7D6), style = MaterialTheme.typography.labelSmall)
+                        Text("اسحبي الزوايا لتحديد الورقة", color = Color(0xFFB8C7D6), style = MaterialTheme.typography.labelSmall)
                     }
                     TextButton(onClick = onCancel, enabled = !busy) {
                         Text("إعادة التصوير", color = Color.White, style = MaterialTheme.typography.labelMedium)
                     }
                 }
 
-                // Flexible image area; controls remain pinned beneath it.
+                // The preview takes the remaining height and is allowed to shrink
+                // on short screens instead of pushing the controls below the fold.
                 Box(
-                    Modifier.weight(1f).fillMaxWidth()
-                        .heightIn(min = 125.dp)
+                    Modifier.weight(1f, fill = true).fillMaxWidth().heightIn(min = 0.dp)
                         .clip(androidx.compose.foundation.shape.RoundedCornerShape(14.dp))
                         .background(Color(0xFF202B38)),
                     contentAlignment = Alignment.Center
@@ -1331,44 +1335,33 @@ private fun CropEditorDialog(
 
                 Text(
                     message,
-                    Modifier.fillMaxWidth().heightIn(min = 18.dp, max = 32.dp).padding(horizontal = 2.dp),
+                    Modifier.fillMaxWidth().heightIn(min = 16.dp, max = 22.dp).padding(horizontal = 2.dp),
                     color = Color(0xFFCED8E1),
                     style = MaterialTheme.typography.labelSmall,
                     maxLines = 1
                 )
 
+                // Compact, large-touch crop tools.
                 Row(
-                    Modifier.fillMaxWidth().height(48.dp),
+                    Modifier.fillMaxWidth().height(44.dp),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    CropToolButton(
-                        label = "تلقائي",
-                        enabled = !busy,
-                        modifier = Modifier.weight(1f),
-                        onClick = onAutoDetect
-                    ) {
-                        Icon(Icons.Filled.AutoFixHigh, contentDescription = null, modifier = Modifier.size(18.dp))
+                    CropToolButton("تلقائي", !busy, Modifier.weight(1f), onAutoDetect) {
+                        Icon(Icons.Filled.AutoFixHigh, contentDescription = null, modifier = Modifier.size(17.dp))
                     }
-                    CropToolButton(
-                        label = "كامل الصورة",
-                        enabled = !busy,
-                        modifier = Modifier.weight(1f),
-                        onClick = onResetCrop
-                    ) {
-                        Icon(Icons.Filled.CropFree, contentDescription = null, modifier = Modifier.size(18.dp))
+                    CropToolButton("كامل الصورة", !busy, Modifier.weight(1f), onResetCrop) {
+                        Icon(Icons.Filled.CropFree, contentDescription = null, modifier = Modifier.size(17.dp))
                     }
-                    CropToolButton(
-                        label = "تدوير",
-                        enabled = !busy,
-                        modifier = Modifier.weight(1f),
-                        onClick = onRotate
-                    ) {
-                        Icon(Icons.Filled.RotateRight, contentDescription = null, modifier = Modifier.size(18.dp))
+                    CropToolButton("تدوير", !busy, Modifier.weight(1f), onRotate) {
+                        Icon(Icons.Filled.RotateRight, contentDescription = null, modifier = Modifier.size(17.dp))
                     }
                 }
 
-                Text("مظهر المستند", color = Color.White, style = MaterialTheme.typography.labelMedium)
-                Row(Modifier.fillMaxWidth().height(46.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                // Three distinct filter buttons, always fully visible.
+                Row(
+                    Modifier.fillMaxWidth().height(48.dp),
+                    horizontalArrangement = Arrangement.spacedBy(7.dp)
+                ) {
                     DocumentScanFilter.values().forEach { filter ->
                         val selected = selectedFilter == filter
                         val accent = when (filter) {
@@ -1377,16 +1370,20 @@ private fun CropEditorDialog(
                             DocumentScanFilter.BLACK_WHITE -> Color.White
                         }
                         Surface(
-                            Modifier.weight(1f).fillMaxHeight().clickable(enabled = !busy) { onFilterSelected(filter) },
+                            modifier = Modifier.weight(1f).fillMaxHeight()
+                                .clickable(enabled = !busy) { onFilterSelected(filter) },
                             shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
-                            color = if (selected) accent.copy(alpha = 0.22f) else Color(0xFF202B38),
-                            border = androidx.compose.foundation.BorderStroke(if (selected) 2.dp else 1.dp, if (selected) accent else Color(0xFF596A78))
+                            color = if (selected) accent.copy(alpha = 0.24f) else Color(0xFF202B38),
+                            border = androidx.compose.foundation.BorderStroke(
+                                if (selected) 2.dp else 1.dp,
+                                if (selected) accent else Color(0xFF596A78)
+                            )
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Text(
                                     filter.label,
                                     color = Color.White,
-                                    style = MaterialTheme.typography.labelMedium,
+                                    style = MaterialTheme.typography.labelLarge,
                                     maxLines = 1
                                 )
                             }
@@ -1394,37 +1391,44 @@ private fun CropEditorDialog(
                     }
                 }
 
-                Row(
-                    Modifier.fillMaxWidth().height(52.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                // Pinned bottom actions. These buttons are never placed in a
+                // scrolling column and remain above the phone's system buttons.
+                Surface(
+                    Modifier.fillMaxWidth().height(60.dp),
+                    color = Color(0xFF17232E),
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp)
                 ) {
-                    OutlinedButton(
-                        onClick = onCancel,
-                        enabled = !busy,
-                        modifier = Modifier.weight(0.8f).fillMaxHeight(),
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 3.dp)
+                    Row(
+                        Modifier.fillMaxSize().padding(5.dp),
+                        horizontalArrangement = Arrangement.spacedBy(7.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("إعادة", maxLines = 1, style = MaterialTheme.typography.labelMedium)
-                    }
-                    OutlinedButton(
-                        onClick = onUseFullPage,
-                        enabled = !busy,
-                        modifier = Modifier.weight(1f).fillMaxHeight(),
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 3.dp)
-                    ) {
-                        Text("بدون قص", maxLines = 1, style = MaterialTheme.typography.labelMedium)
-                    }
-                    Button(
-                        onClick = onApplyCrop,
-                        enabled = !busy,
-                        modifier = Modifier.weight(1.2f).fillMaxHeight(),
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 3.dp),
-                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = Color(0xFF167F82))
-                    ) {
-                        Icon(Icons.Filled.CheckCircle, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("اعتماد الصفحة", maxLines = 1, style = MaterialTheme.typography.labelMedium)
+                        OutlinedButton(
+                            onClick = onUseFullPage,
+                            enabled = !busy,
+                            modifier = Modifier.weight(0.9f).fillMaxHeight(),
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp)
+                        ) {
+                            Text("بدون قص", maxLines = 1, style = MaterialTheme.typography.labelMedium)
+                        }
+                        Button(
+                            onClick = onApplyCrop,
+                            enabled = !busy,
+                            modifier = Modifier.weight(1.5f).fillMaxHeight(),
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 5.dp),
+                            colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFF147E83),
+                                disabledContainerColor = Color(0xFF39444D)
+                            )
+                        ) {
+                            if (busy) {
+                                CircularProgressIndicator(Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
+                            } else {
+                                Icon(Icons.Filled.CheckCircle, contentDescription = null, modifier = Modifier.size(19.dp))
+                                Spacer(Modifier.width(5.dp))
+                                Text("اعتماد وإضافة الصفحة", maxLines = 1, style = MaterialTheme.typography.labelMedium)
+                            }
+                        }
                     }
                 }
             }

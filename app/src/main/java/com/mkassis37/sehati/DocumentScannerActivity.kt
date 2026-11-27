@@ -1325,30 +1325,21 @@ private fun CropEditorDialog(
         onDismissRequest = { if (!busy) onCancel() },
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
-        Surface(Modifier.fillMaxSize(), color = Color(0xFF111A24)) {
+        Surface(Modifier.fillMaxSize(), color = Color(0xFF101923)) {
             Column(
                 Modifier.fillMaxSize()
                     .windowInsetsPadding(WindowInsets.safeDrawing)
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Row(
-                    Modifier.fillMaxWidth(),
+                    Modifier.fillMaxWidth().height(44.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(Modifier.weight(1f)) {
-                        Text(
-                            "مراجعة وقص الصفحة",
-                            color = Color.White,
-                            style = MaterialTheme.typography.titleLarge
-                        )
-                        Text(
-                            "اسحبي الدوائر لتحديد أطراف الورقة",
-                            color = Color(0xFFB8C7D6),
-                            style = MaterialTheme.typography.bodySmall
-                        )
+                        Text("مراجعة وقص الصفحة", color = Color.White, style = MaterialTheme.typography.titleMedium)
+                        Text("اسحبي الدوائر لتحديد أطراف الورقة", color = Color(0xFFB8C7D6), style = MaterialTheme.typography.labelSmall)
                     }
                     TextButton(onClick = onCancel, enabled = !busy) {
                         Text("رجوع", color = Color.White)
@@ -1356,15 +1347,15 @@ private fun CropEditorDialog(
                 }
 
                 Box(
-                    Modifier.fillMaxWidth()
-                        .heightIn(min = 250.dp, max = 390.dp)
-                        .background(Color(0xFF202B38), MaterialTheme.shapes.large),
+                    Modifier.fillMaxWidth().weight(1f).heightIn(min = 165.dp, max = 360.dp)
+                        .clip(MaterialTheme.shapes.large)
+                        .background(Color(0xFF202B38)),
                     contentAlignment = Alignment.Center
                 ) {
                     Image(
                         bitmap.asImageBitmap(),
                         contentDescription = "الصورة الأصلية لتحديد حدود القص",
-                        modifier = Modifier.fillMaxSize().padding(5.dp),
+                        modifier = Modifier.fillMaxSize().padding(4.dp),
                         contentScale = ContentScale.Fit
                     )
                     Canvas(
@@ -1372,10 +1363,7 @@ private fun CropEditorDialog(
                             var activeCorner = -1
                             detectDragGestures(
                                 onDragStart = { position ->
-                                    val rect = scannerImageRect(
-                                        size.width.toFloat(), size.height.toFloat(),
-                                        bitmap.width, bitmap.height
-                                    )
+                                    val rect = scannerImageRect(size.width.toFloat(), size.height.toFloat(), bitmap.width, bitmap.height)
                                     val handles = currentCorners.map { point ->
                                         Offset(rect.left + point.x * rect.width(), rect.top + point.y * rect.height())
                                     }
@@ -1387,15 +1375,12 @@ private fun CropEditorDialog(
                                     activeCorner = if (nearest >= 0) {
                                         val dx = handles[nearest].x - position.x
                                         val dy = handles[nearest].y - position.y
-                                        if (dx * dx + dy * dy <= 88f * 88f) nearest else -1
+                                        if (dx * dx + dy * dy <= 104f * 104f) nearest else -1
                                     } else -1
                                 },
                                 onDrag = { change, _ ->
                                     if (activeCorner >= 0) {
-                                        val rect = scannerImageRect(
-                                            size.width.toFloat(), size.height.toFloat(),
-                                            bitmap.width, bitmap.height
-                                        )
+                                        val rect = scannerImageRect(size.width.toFloat(), size.height.toFloat(), bitmap.width, bitmap.height)
                                         if (rect.width() > 0f && rect.height() > 0f) {
                                             val point = Offset(
                                                 ((change.position.x - rect.left) / rect.width()).coerceIn(0f, 1f),
@@ -1411,10 +1396,7 @@ private fun CropEditorDialog(
                             )
                         }
                     ) {
-                        val rect = scannerImageRect(
-                            size.width.toFloat(), size.height.toFloat(),
-                            bitmap.width, bitmap.height
-                        )
+                        val rect = scannerImageRect(size.width.toFloat(), size.height.toFloat(), bitmap.width, bitmap.height)
                         val points = corners.map { point ->
                             Offset(rect.left + point.x * rect.width(), rect.top + point.y * rect.height())
                         }
@@ -1426,127 +1408,97 @@ private fun CropEditorDialog(
                                 lineTo(points[3].x, points[3].y)
                                 close()
                             }
-                            drawPath(
-                                path,
-                                Color(0xFF35D6C4),
-                                style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3.dp.toPx())
-                            )
+                            drawPath(path, Color(0xFF24D6E8), style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3.dp.toPx()))
                             points.forEach { point ->
-                                drawCircle(Color.Black, radius = 18.dp.toPx(), center = point)
-                                drawCircle(Color(0xFF35D6C4), radius = 12.dp.toPx(), center = point)
-                                drawCircle(Color.White, radius = 5.dp.toPx(), center = point)
+                                drawCircle(Color.Black, radius = 21.dp.toPx(), center = point)
+                                drawCircle(Color(0xFF24D6E8), radius = 15.dp.toPx(), center = point)
+                                drawCircle(Color.White, radius = 6.dp.toPx(), center = point)
+                            }
+                        }
+                    }
+                    if (busy) {
+                        Box(Modifier.fillMaxSize().background(Color(0x55000000)), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator(color = Color(0xFF24D6E8))
+                        }
+                    }
+                }
+
+                Surface(color = Color(0xFF1D2A38), shape = MaterialTheme.shapes.medium) {
+                    Text(
+                        message,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 7.dp),
+                        color = Color(0xFFD4E1EB),
+                        style = MaterialTheme.typography.labelSmall,
+                        maxLines = 2
+                    )
+                }
+
+                Text("أدوات تحديد الورقة", color = Color(0xFFEAF2F8), style = MaterialTheme.typography.labelMedium)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                    CropToolButton("تلقائي", !busy, Modifier.weight(1f), onAutoDetect) {
+                        Icon(Icons.Filled.AutoFixHigh, contentDescription = null, modifier = Modifier.size(20.dp))
+                    }
+                    CropToolButton("كامل الصورة", !busy, Modifier.weight(1f), onResetCrop) {
+                        Icon(Icons.Filled.CropFree, contentDescription = null, modifier = Modifier.size(20.dp))
+                    }
+                    CropToolButton("تدوير", !busy, Modifier.weight(1f), onRotate) {
+                        Icon(Icons.Filled.RotateRight, contentDescription = null, modifier = Modifier.size(20.dp))
+                    }
+                }
+
+                Text("اختاري مظهر المستند", color = Color(0xFFEAF2F8), style = MaterialTheme.typography.labelMedium)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                    DocumentScanFilter.values().forEach { filter ->
+                        val selected = selectedFilter == filter
+                        val accent = when (filter) {
+                            DocumentScanFilter.COLOR -> Color(0xFF24C7D8)
+                            DocumentScanFilter.GRAYSCALE -> Color(0xFFB8C2CC)
+                            DocumentScanFilter.BLACK_WHITE -> Color(0xFFFFFFFF)
+                        }
+                        Surface(
+                            modifier = Modifier.weight(1f).height(48.dp)
+                                .clickable(enabled = !busy) { onFilterSelected(filter) },
+                            shape = androidx.compose.foundation.shape.RoundedCornerShape(13.dp),
+                            color = if (selected) accent.copy(alpha = 0.20f) else Color(0xFF202B38),
+                            border = androidx.compose.foundation.BorderStroke(
+                                if (selected) 2.dp else 1.dp,
+                                if (selected) accent else Color(0xFF536575)
+                            )
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text(
+                                    filter.label,
+                                    color = if (selected) Color.White else Color(0xFFD3DDE5),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    maxLines = 1
+                                )
                             }
                         }
                     }
                 }
 
-                Surface(
-                    color = Color(0xFF1D2A38),
-                    shape = MaterialTheme.shapes.medium
-                ) {
-                    Text(
-                        message,
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
-                        color = Color(0xFFD4E1EB),
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                }
-
-                Text(
-                    "أدوات تحديد الورقة",
-                    color = Color(0xFFEAF2F8),
-                    style = MaterialTheme.typography.labelLarge
-                )
                 Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    CropToolButton(
-                        label = "تلقائي",
-                        enabled = !busy,
-                        modifier = Modifier.weight(1f),
-                        onClick = onAutoDetect
-                    ) {
-                        Icon(Icons.Filled.AutoFixHigh, contentDescription = null, modifier = Modifier.size(23.dp))
-                    }
-                    CropToolButton(
-                        label = "كامل الصورة",
-                        enabled = !busy,
-                        modifier = Modifier.weight(1f),
-                        onClick = onResetCrop
-                    ) {
-                        Icon(Icons.Filled.CropFree, contentDescription = null, modifier = Modifier.size(23.dp))
-                    }
-                    CropToolButton(
-                        label = "تدوير",
-                        enabled = !busy,
-                        modifier = Modifier.weight(1f),
-                        onClick = onRotate
-                    ) {
-                        Icon(Icons.Filled.RotateRight, contentDescription = null, modifier = Modifier.size(23.dp))
-                    }
-                }
-
-                Text(
-                    "تحسين مظهر المستند",
-                    color = Color(0xFFEAF2F8),
-                    style = MaterialTheme.typography.labelLarge
-                )
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    DocumentScanFilter.values().forEach { filter ->
-                        FilterChip(
-                            selected = selectedFilter == filter,
-                            onClick = { onFilterSelected(filter) },
-                            enabled = !busy,
-                            modifier = Modifier.weight(1f),
-                            label = {
-                                Text(filter.label, style = MaterialTheme.typography.labelSmall, maxLines = 1)
-                            }
-                        )
-                    }
-                }
-
-                Row(
-                    Modifier.fillMaxWidth(),
+                    Modifier.fillMaxWidth().height(54.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    CropToolButton(
-                        label = "الصورة كاملة",
+                    OutlinedButton(
+                        onClick = onUseFullPage,
                         enabled = !busy,
-                        modifier = Modifier.weight(0.85f),
-                        onClick = onUseFullPage
+                        modifier = Modifier.weight(0.85f).fillMaxHeight(),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp)
                     ) {
-                        Icon(Icons.Filled.CropFree, contentDescription = null, modifier = Modifier.size(21.dp))
+                        Text("الصورة كاملة", maxLines = 1, style = MaterialTheme.typography.labelMedium)
                     }
                     Button(
                         onClick = onApplyCrop,
                         enabled = !busy,
-                        modifier = Modifier.weight(1.15f).height(68.dp),
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 8.dp)
+                        modifier = Modifier.weight(1.15f).fillMaxHeight(),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp)
                     ) {
-                        if (busy) {
-                            CircularProgressIndicator(Modifier.size(20.dp), color = Color.White)
-                        } else {
-                            Icon(Icons.Filled.CheckCircle, contentDescription = null, modifier = Modifier.size(21.dp))
-                            Spacer(Modifier.width(7.dp))
-                            Text("اعتماد القص", style = MaterialTheme.typography.labelLarge, maxLines = 1)
-                        }
-                    }
-                }
-
-                if (busy) {
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        CircularProgressIndicator(Modifier.size(20.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text("جارٍ تجهيز الصفحة...", color = Color.White)
+                        Icon(Icons.Filled.CheckCircle, contentDescription = null, modifier = Modifier.size(20.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("اعتماد القص", maxLines = 1)
                     }
                 }
             }

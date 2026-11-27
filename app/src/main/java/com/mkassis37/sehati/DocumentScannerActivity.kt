@@ -1324,7 +1324,7 @@ private fun CropToolButton(
         enabled = enabled,
         modifier = modifier.height(68.dp),
         shape = androidx.compose.foundation.shape.RoundedCornerShape(18.dp),
-        colors = androidx.compose.material3.OutlinedButtonDefaults.colors(
+        colors = androidx.compose.material3.ButtonDefaults.outlinedButtonColors(
             contentColor = Color(0xFF8FE7DC),
             disabledContentColor = Color(0xFF647482)
         ),

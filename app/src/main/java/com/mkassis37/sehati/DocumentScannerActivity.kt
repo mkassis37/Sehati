@@ -116,6 +116,7 @@ internal class DocumentScannerActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
 
         if (!OpenCVLoader.initLocal()) {
             finishWithError("تعذر تشغيل محرك معالجة الصور المدمج.")
@@ -183,12 +184,17 @@ internal class DocumentScannerActivity : ComponentActivity() {
                                         ".jpg",
                                         medicalShareDirectory(this@DocumentScannerActivity)
                                     )
-                                    FileOutputStream(target).use { stream ->
-                                        check(bitmap.compress(Bitmap.CompressFormat.JPEG, 93, stream)) {
-                                            "تعذر ضغط الصفحة."
+                                    try {
+                                        FileOutputStream(target).use { stream ->
+                                            check(bitmap.compress(Bitmap.CompressFormat.JPEG, 93, stream)) {
+                                                "تعذر ضغط الصفحة."
+                                            }
                                         }
+                                        target
+                                    } catch (error: Exception) {
+                                        target.delete()
+                                        throw error
                                     }
-                                    target
                                 } finally {
                                     bitmap.recycle()
                                 }
@@ -377,8 +383,17 @@ internal class DocumentScannerActivity : ComponentActivity() {
     }
 
     private fun decodeOrientedBitmap(file: File): Bitmap {
-        val bitmap = BitmapFactory.decodeFile(file.absolutePath)
-            ?: throw IllegalArgumentException("ملف الصورة غير صالح.")
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(file.absolutePath, bounds)
+        require(bounds.outWidth > 0 && bounds.outHeight > 0) { "ملف الصورة غير صالح." }
+        var sampleSize = 1
+        while (max(bounds.outWidth / sampleSize, bounds.outHeight / sampleSize) > MAX_IMAGE_DIMENSION * 2) {
+            sampleSize *= 2
+        }
+        val bitmap = BitmapFactory.decodeFile(
+            file.absolutePath,
+            BitmapFactory.Options().apply { inSampleSize = sampleSize }
+        ) ?: throw IllegalArgumentException("ملف الصورة غير صالح.")
         val orientation = runCatching {
             ExifInterface(file.absolutePath).getAttributeInt(
                 ExifInterface.TAG_ORIENTATION,

@@ -1098,7 +1098,7 @@ private fun CropEditorDialog(
                             var activeCorner = -1
                             detectDragGestures(
                                 onDragStart = { position ->
-                                    val rect = scannerImageRect(size.width, size.height, bitmap.width, bitmap.height)
+                                    val rect = scannerImageRect(size.width.toFloat(), size.height.toFloat(), bitmap.width, bitmap.height)
                                     val handles = currentCorners.map { point ->
                                         Offset(rect.left + point.x * rect.width(), rect.top + point.y * rect.height())
                                     }
@@ -1115,7 +1115,7 @@ private fun CropEditorDialog(
                                 },
                                 onDrag = { change, _ ->
                                     if (activeCorner >= 0) {
-                                        val rect = scannerImageRect(size.width, size.height, bitmap.width, bitmap.height)
+                                        val rect = scannerImageRect(size.width.toFloat(), size.height.toFloat(), bitmap.width, bitmap.height)
                                         if (rect.width() > 0f && rect.height() > 0f) {
                                             val point = Offset(
                                                 ((change.position.x - rect.left) / rect.width()).coerceIn(0f, 1f),
@@ -1131,7 +1131,7 @@ private fun CropEditorDialog(
                             )
                         }
                     ) {
-                        val rect = scannerImageRect(size.width, size.height, bitmap.width, bitmap.height)
+                        val rect = scannerImageRect(size.width.toFloat(), size.height.toFloat(), bitmap.width, bitmap.height)
                         val points = corners.map { point ->
                             Offset(rect.left + point.x * rect.width(), rect.top + point.y * rect.height())
                         }

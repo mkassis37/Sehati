@@ -935,80 +935,180 @@ private fun DocumentScannerUi(
     onFinish: () -> Unit,
     onCancel: () -> Unit
 ) {
-    Surface(modifier = Modifier.fillMaxSize(), color = Color.Black) {
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = Color(0xFF0B1118)
+    ) {
         Column(
-            Modifier.fillMaxSize().background(Color.Black)
-                .windowInsetsPadding(WindowInsets.systemBars)
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color(0xFF0B1118))
+                // Keep every control inside the safe display area, above Android's
+                // gesture/three-button navigation region and below the status bar.
+                .windowInsetsPadding(WindowInsets.safeDrawing)
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("ماسح المستندات", color = Color.White, style = MaterialTheme.typography.titleLarge)
-                TextButton(onClick = onCancel, enabled = !busy && draftBitmap == null) {
-                    Text("إلغاء", color = Color.White)
-                }
-            }
-
-            if (permissionGranted) {
-                CameraXPreview(
-                    modifier = Modifier.weight(1f).fillMaxWidth(),
-                    onCaptureReady = onCaptureReady,
-                    onError = onCameraError
-                )
-            } else {
-                Box(
-                    Modifier.weight(1f).fillMaxWidth().background(Color(0xFF202124)),
-                    contentAlignment = Alignment.Center
+                androidx.compose.material3.IconButton(
+                    onClick = onCancel,
+                    enabled = !busy && draftBitmap == null,
+                    modifier = Modifier.size(44.dp)
                 ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                            if (permissionDenied) "يلزم السماح للكاميرا حتى نتمكن من مسح المستندات."
-                            else "نحتاج إذن الكاميرا لبدء المسح.",
-                            color = Color.White
+                    Icon(
+                        androidx.compose.material.icons.Icons.Filled.Close,
+                        contentDescription = "إغلاق الماسح",
+                        tint = Color.White
+                    )
+                }
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Text(
+                        "مسح مستند طبي",
+                        color = Color.White,
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                    Text(
+                        "صوّري الورقة ثم راجعي حدودها",
+                        color = Color(0xFF9EAFBF),
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                }
+                Surface(
+                    color = Color(0xFF1B2B37),
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(50)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            androidx.compose.material.icons.Icons.Filled.Description,
+                            contentDescription = null,
+                            tint = Color(0xFF83DCCF),
+                            modifier = Modifier.size(17.dp)
                         )
-                        Spacer(Modifier.height(12.dp))
-                        Button(onClick = onRequestPermission) { Text("السماح بالكاميرا") }
+                        Text(
+                            "$pageCount / 20",
+                            color = Color.White,
+                            style = MaterialTheme.typography.labelMedium
+                        )
                     }
                 }
             }
 
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(26.dp))
+                    .background(Color(0xFF18232E))
             ) {
-                Text("الصفحات: $pageCount / 20", color = Color.White)
-                Text("اضغطي على أي صفحة لتعديلها", color = Color(0xFFB8C7C5), style = MaterialTheme.typography.bodySmall)
-            }
+                if (permissionGranted) {
+                    CameraXPreview(
+                        modifier = Modifier.fillMaxSize(),
+                        onCaptureReady = onCaptureReady,
+                        onError = onCameraError
+                    )
 
-            if (pageThumbnails.isNotEmpty()) {
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    itemsIndexed(pageThumbnails) { index, bitmap ->
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier.background(Color(0xFF202124), MaterialTheme.shapes.small).padding(4.dp)
+                    Surface(
+                        modifier = Modifier.align(Alignment.TopStart).padding(12.dp),
+                        color = Color(0xCC111A23),
+                        shape = androidx.compose.foundation.shape.RoundedCornerShape(50)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 11.dp, vertical = 7.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Image(
-                                bitmap.asImageBitmap(),
-                                contentDescription = "تعديل الصفحة ${index + 1}",
-                                modifier = Modifier.size(66.dp).clickable { onEditPage(index) },
-                                contentScale = ContentScale.Fit
+                            Icon(
+                                androidx.compose.material.icons.Icons.Filled.CameraAlt,
+                                contentDescription = null,
+                                tint = Color(0xFF83DCCF),
+                                modifier = Modifier.size(16.dp)
                             )
-                            Text("${index + 1}", color = Color.White, style = MaterialTheme.typography.labelSmall)
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                TextButton(onClick = { onMovePage(index, index - 1) }, enabled = !busy && index > 0) {
-                                    Text("←")
-                                }
-                                TextButton(onClick = { onMovePage(index, index + 1) }, enabled = !busy && index < pageThumbnails.lastIndex) {
-                                    Text("→")
-                                }
-                                TextButton(onClick = { onRemovePage(index) }, enabled = !busy) {
-                                    Text("حذف", color = Color(0xFFFFB4AB))
-                                }
+                            Text(
+                                "الكاميرا الخلفية",
+                                color = Color.White,
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                        }
+                    }
+
+                    Surface(
+                        modifier = Modifier.align(Alignment.BottomCenter).padding(12.dp),
+                        color = Color(0xCC111A23),
+                        shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp)
+                    ) {
+                        Text(
+                            "ضعي الورقة داخل الإطار واجعلي الإضاءة واضحة",
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
+                            color = Color.White,
+                            style = MaterialTheme.typography.labelMedium
+                        )
+                    }
+                } else {
+                    Column(
+                        modifier = Modifier.fillMaxSize().padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            androidx.compose.material.icons.Icons.Filled.CameraAlt,
+                            contentDescription = null,
+                            tint = Color(0xFF83DCCF),
+                            modifier = Modifier.size(54.dp)
+                        )
+                        Spacer(Modifier.height(14.dp))
+                        Text(
+                            if (permissionDenied) {
+                                "يلزم السماح باستخدام الكاميرا لمسح المستندات."
+                            } else {
+                                "نحتاج إلى إذن الكاميرا لبدء المسح."
+                            },
+                            color = Color.White,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        Spacer(Modifier.height(14.dp))
+                        Button(onClick = onRequestPermission) {
+                            Icon(
+                                androidx.compose.material.icons.Icons.Filled.CameraAlt,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text("السماح بالكاميرا")
+                        }
+                    }
+                }
+
+                if (busy) {
+                    Box(
+                        modifier = Modifier.fillMaxSize().background(Color(0x66000000)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Surface(
+                            color = Color(0xEE17232E),
+                            shape = androidx.compose.foundation.shape.RoundedCornerShape(18.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 18.dp, vertical = 14.dp),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(21.dp),
+                                    color = Color(0xFF83DCCF),
+                                    strokeWidth = 2.dp
+                                )
+                                Text("جارٍ تجهيز الصفحة...", color = Color.White)
                             }
                         }
                     }
@@ -1016,26 +1116,160 @@ private fun DocumentScannerUi(
             }
 
             if (errorMessage.isNotBlank()) {
-                Text(errorMessage, color = Color(0xFFFFB4AB))
+                Surface(
+                    color = Color(0xFF3A2025),
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp)
+                ) {
+                    Text(
+                        errorMessage,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 9.dp),
+                        color = Color(0xFFFFC7C7),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+
+            if (pageThumbnails.isNotEmpty()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "الصفحات المضافة",
+                        color = Color(0xFFEAF2F8),
+                        style = MaterialTheme.typography.labelLarge
+                    )
+                    Text(
+                        "اضغطي على الصورة لتعديلها",
+                        color = Color(0xFF9EAFBF),
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                }
+
+                LazyRow(
+                    modifier = Modifier.fillMaxWidth().height(108.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    itemsIndexed(pageThumbnails) { index, bitmap ->
+                        Column(
+                            modifier = Modifier
+                                .width(88.dp)
+                                .clip(androidx.compose.foundation.shape.RoundedCornerShape(14.dp))
+                                .background(Color(0xFF1B2935))
+                                .padding(6.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(61.dp)
+                                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(9.dp))
+                                    .clickable(enabled = !busy) { onEditPage(index) }
+                            ) {
+                                Image(
+                                    bitmap.asImageBitmap(),
+                                    contentDescription = "تعديل الصفحة ${index + 1}",
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Crop
+                                )
+                                Surface(
+                                    modifier = Modifier.align(Alignment.TopStart).padding(4.dp),
+                                    color = Color(0xDD101820),
+                                    shape = androidx.compose.foundation.shape.RoundedCornerShape(7.dp)
+                                ) {
+                                    Text(
+                                        "${index + 1}",
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                        color = Color.White,
+                                        style = MaterialTheme.typography.labelSmall
+                                    )
+                                }
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth().height(30.dp),
+                                horizontalArrangement = Arrangement.SpaceEvenly,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                androidx.compose.material3.IconButton(
+                                    onClick = { onMovePage(index, index - 1) },
+                                    enabled = !busy && index > 0,
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Icon(
+                                        androidx.compose.material.icons.Icons.Filled.KeyboardArrowUp,
+                                        contentDescription = "تحريك الصفحة للأعلى",
+                                        tint = if (index > 0) Color(0xFFB8C8D5) else Color(0xFF56636F),
+                                        modifier = Modifier.size(19.dp)
+                                    )
+                                }
+                                androidx.compose.material3.IconButton(
+                                    onClick = { onMovePage(index, index + 1) },
+                                    enabled = !busy && index < pageThumbnails.lastIndex,
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Icon(
+                                        androidx.compose.material.icons.Icons.Filled.KeyboardArrowDown,
+                                        contentDescription = "تحريك الصفحة للأسفل",
+                                        tint = if (index < pageThumbnails.lastIndex) Color(0xFFB8C8D5) else Color(0xFF56636F),
+                                        modifier = Modifier.size(19.dp)
+                                    )
+                                }
+                                androidx.compose.material3.IconButton(
+                                    onClick = { onRemovePage(index) },
+                                    enabled = !busy,
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Icon(
+                                        androidx.compose.material.icons.Icons.Filled.DeleteOutline,
+                                        contentDescription = "حذف الصفحة",
+                                        tint = Color(0xFFFF9D9D),
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
             Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                OutlinedButton(
+                    onClick = onFinish,
+                    enabled = pageCount > 0 && !busy && draftBitmap == null,
+                    modifier = Modifier.weight(1f).height(58.dp),
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(18.dp),
+                    colors = androidx.compose.material3.ButtonDefaults.outlinedButtonColors(
+                        contentColor = Color(0xFFB6EEE5),
+                        disabledContentColor = Color(0xFF657481)
+                    )
+                ) {
+                    Icon(
+                        androidx.compose.material.icons.Icons.Filled.PictureAsPdf,
+                        contentDescription = null,
+                        modifier = Modifier.size(21.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text("حفظ PDF", maxLines = 1)
+                }
+
                 Button(
                     onClick = onCapture,
                     enabled = permissionGranted && !busy && draftBitmap == null && pageCount < 20,
-                    modifier = Modifier.weight(1f)
-                ) { Text("●  تصوير صفحة") }
-                Button(
-                    onClick = onFinish,
-                    enabled = pageCount > 0 && !busy && draftBitmap == null,
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.weight(1.15f).height(58.dp),
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(18.dp)
                 ) {
-                    if (busy) CircularProgressIndicator(Modifier.size(18.dp))
-                    else Text("إنشاء PDF وحفظ")
+                    Icon(
+                        androidx.compose.material.icons.Icons.Filled.CameraAlt,
+                        contentDescription = null,
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text("تصوير صفحة", maxLines = 1)
                 }
             }
         }
@@ -1085,7 +1319,7 @@ private fun CropEditorDialog(
         Surface(Modifier.fillMaxSize(), color = Color(0xFF111A24)) {
             Column(
                 Modifier.fillMaxSize()
-                    .windowInsetsPadding(WindowInsets.systemBars)
+                    .windowInsetsPadding(WindowInsets.safeDrawing)
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)

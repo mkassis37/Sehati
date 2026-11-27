@@ -190,7 +190,7 @@ internal fun rememberDocumentLibrary(
                     else -> if (stagedName?.startsWith("sehati-scan-") == true) ".pdf" else if (stagedName?.startsWith("sehati-camera-") == true) ".jpg" else ""
                 }
                 val cleanName = requestedName.trim().ifBlank { sourceName }
-                    .replace(Regex("[\\\\/:*?\\"<>|]"), "_")
+                    .replace(Regex("""[\\/:*?"<>|]"""), "_")
                     .take(150)
                 val name = cleanName + if (cleanName.substringAfterLast('.', "").isBlank()) extension else ""
                 val document = store.save(pending.uri, pending.memberId, name)

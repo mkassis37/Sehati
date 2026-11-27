@@ -82,6 +82,12 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 
+internal enum class DocumentScanFilter(val label: String) {
+    COLOR("ملون"),
+    GRAYSCALE("رمادي"),
+    BLACK_WHITE("أبيض وأسود")
+}
+
 internal class DocumentScannerActivity : ComponentActivity() {
 
     companion object {
@@ -95,7 +101,7 @@ internal class DocumentScannerActivity : ComponentActivity() {
     private var cameraPermissionDenied by mutableStateOf(false)
     private var busy by mutableStateOf(false)
     private var errorMessage by mutableStateOf("")
-    private var selectedFilter by mutableStateOf(DocumentScanFilter.COLOR)
+    private var selectedFilter by mutableStateOf(DocumentDocumentScanFilter.COLOR)
     private var imageCapture by mutableStateOf<ImageCapture?>(null)
     private val pages = mutableStateListOf<ScannedPage>()
     private var resultPdf: File? = null
@@ -305,19 +311,13 @@ internal class DocumentScannerActivity : ComponentActivity() {
 
     private data class ScannedPage(val file: File, val thumbnail: Bitmap)
 
-    internal enum class DocumentScanFilter(val label: String) {
-        COLOR("ملون"),
-        GRAYSCALE("رمادي"),
-        BLACK_WHITE("أبيض وأسود")
-    }
-
     private fun decodeThumbnail(file: File): Bitmap {
         val options = BitmapFactory.Options().apply { inSampleSize = 8 }
         return BitmapFactory.decodeFile(file.absolutePath, options)
             ?: throw IllegalStateException("تعذر إنشاء معاينة الصفحة.")
     }
 
-    private fun processDocumentImage(file: File, filter: ScanFilter): Bitmap {
+    private fun processDocumentImage(file: File, filter: DocumentScanFilter): Bitmap {
         val decoded = BitmapFactory.decodeFile(file.absolutePath)
             ?: throw IllegalArgumentException("ملف الصورة غير صالح.")
         val sourceBitmap = resizeBitmap(decoded, MAX_IMAGE_DIMENSION)
@@ -467,7 +467,7 @@ internal class DocumentScannerActivity : ComponentActivity() {
     private fun applyFilter(source: Mat, output: Mat, filter: ScanFilter) {
         when (filter) {
             ScanFilter.COLOR -> source.copyTo(output)
-            ScanFilter.GRAYSCALE -> {
+            DocumentScanFilter.GRAYSCALE -> {
                 val gray = Mat()
                 try {
                     Imgproc.cvtColor(source, gray, Imgproc.COLOR_RGBA2GRAY)
@@ -476,7 +476,7 @@ internal class DocumentScannerActivity : ComponentActivity() {
                     gray.release()
                 }
             }
-            ScanFilter.BLACK_WHITE -> {
+            DocumentScanFilter.BLACK_WHITE -> {
                 val gray = Mat()
                 val clean = Mat()
                 try {
@@ -510,7 +510,7 @@ private fun DocumentScannerUi(
     errorMessage: String,
     selectedFilter: DocumentScanFilter,
     onRequestPermission: () -> Unit,
-    onFilterSelected: (DocumentScannerActivity.ScanFilter) -> Unit,
+    onFilterSelected: (DocumentScanFilter) -> Unit,
     onCapture: () -> Unit,
     onRemovePage: (Int) -> Unit,
     onFinish: () -> Unit,
@@ -558,7 +558,7 @@ private fun DocumentScannerUi(
                 Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                DocumentScannerActivity.ScanFilter.values().forEach { filter ->
+                DocumentScanFilter.values().forEach { filter ->
                     FilterChip(
                         selected = selectedFilter == filter,
                         onClick = { onFilterSelected(filter) },

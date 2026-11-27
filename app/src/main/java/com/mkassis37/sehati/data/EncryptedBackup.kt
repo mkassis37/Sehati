@@ -164,8 +164,10 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
     suspend fun preview(resolver: ContentResolver, uri: Uri, password: CharArray): BackupPreview = withContext(Dispatchers.IO) {
         var stagedFile: File? = null
         var stagedKey: ByteArray? = null
+        var openedInput: InputStream? = null
         try {
             val source = resolver.openInputStream(uri) ?: throw IOException("تعذر فتح ملف النسخة الاحتياطية.")
+            openedInput = source
             val pushback = PushbackInputStream(source, 5)
             val prefix = ByteArray(5)
             readFully(pushback, prefix)
@@ -220,6 +222,7 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
             stagedFile?.delete()
             throw error
         } finally {
+            runCatching { openedInput?.close() }
             password.fill('\u0000')
         }
     }

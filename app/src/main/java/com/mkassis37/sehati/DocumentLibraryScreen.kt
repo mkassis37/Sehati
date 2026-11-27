@@ -174,7 +174,20 @@ internal fun DocumentLibraryScreen(
                         Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.End
                     ) {
-                        TextButton(onClick = { actions.open(document) }) { Text("معاينة") }
+                        TextButton(
+                            enabled = actions.openingDocumentId == null,
+                            onClick = { actions.open(document) }
+                        ) {
+                            if (actions.openingDocumentId == document.id) {
+                                Row(verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                                    Text("جاري التحضير")
+                                }
+                            } else {
+                                Text("معاينة")
+                            }
+                        }
                         TextButton(onClick = { delete = document }) { Text("حذف", color = MaterialTheme.colorScheme.error) }
                     }
                 }

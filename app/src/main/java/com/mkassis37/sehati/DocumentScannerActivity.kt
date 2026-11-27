@@ -551,6 +551,8 @@ private fun DocumentScannerUi(
     selectedFilter: DocumentScanFilter,
     onRequestPermission: () -> Unit,
     onFilterSelected: (DocumentScanFilter) -> Unit,
+    onCaptureReady: (ImageCapture?) -> Unit,
+    onCameraError: (String) -> Unit,
     onCapture: () -> Unit,
     onRemovePage: (Int) -> Unit,
     onFinish: () -> Unit,

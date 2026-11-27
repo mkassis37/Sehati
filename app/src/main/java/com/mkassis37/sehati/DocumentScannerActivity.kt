@@ -17,6 +17,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -24,6 +25,10 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -50,6 +55,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -104,6 +111,7 @@ internal class DocumentScannerActivity : ComponentActivity() {
     private var busy by mutableStateOf(false)
     private var errorMessage by mutableStateOf("")
     private var selectedFilter by mutableStateOf(DocumentScanFilter.COLOR)
+    private var previewPageIndex by mutableStateOf<Int?>(null)
     private var imageCapture by mutableStateOf<ImageCapture?>(null)
     private val pages = mutableStateListOf<ScannedPage>()
     private var cameraInitializationError by mutableStateOf("")
@@ -137,6 +145,9 @@ internal class DocumentScannerActivity : ComponentActivity() {
                     permissionDenied = cameraPermissionDenied,
                     pageCount = pages.size,
                     pageThumbnails = pages.map { it.thumbnail },
+                    previewPageIndex = previewPageIndex,
+                    onPreviewPage = { previewPageIndex = it },
+                    onDismissPreview = { previewPageIndex = null },
                     busy = busy,
                     errorMessage = errorMessage.ifBlank { cameraInitializationError },
                     selectedFilter = selectedFilter,
@@ -347,14 +358,14 @@ internal class DocumentScannerActivity : ComponentActivity() {
             Imgproc.cvtColor(source, gray, Imgproc.COLOR_RGBA2GRAY)
             Imgproc.GaussianBlur(gray, blurred, Size(5.0, 5.0), 0.0)
             Imgproc.Canny(blurred, edges, 55.0, 165.0)
-            Imgproc.dilate(edges, edges, kernel)
+            Imgproc.morphologyEx(edges, edges, Imgproc.MORPH_CLOSE, kernel)
 
             val contours = ArrayList<MatOfPoint>()
             Imgproc.findContours(
                 edges,
                 contours,
                 hierarchy,
-                Imgproc.RETR_LIST,
+                Imgproc.RETR_EXTERNAL,
                 Imgproc.CHAIN_APPROX_SIMPLE
             )
             val corners = findDocumentCorners(contours, source.cols(), source.rows())
@@ -432,7 +443,7 @@ internal class DocumentScannerActivity : ComponentActivity() {
         imageWidth: Int,
         imageHeight: Int
     ): Array<Point>? {
-        val minArea = imageWidth.toDouble() * imageHeight * 0.12
+        val minArea = imageWidth.toDouble() * imageHeight * 0.16
         return try {
             contours.asSequence()
                 .sortedByDescending { Imgproc.contourArea(it) }
@@ -548,6 +559,9 @@ private fun DocumentScannerUi(
     permissionDenied: Boolean,
     pageCount: Int,
     pageThumbnails: List<Bitmap>,
+    previewPageIndex: Int?,
+    onPreviewPage: (Int) -> Unit,
+    onDismissPreview: () -> Unit,
     busy: Boolean,
     errorMessage: String,
     selectedFilter: DocumentScanFilter,
@@ -562,7 +576,9 @@ private fun DocumentScannerUi(
 ) {
     Surface(modifier = Modifier.fillMaxSize(), color = Color.Black) {
         Column(
-            Modifier.fillMaxSize().background(Color.Black).padding(12.dp),
+            Modifier.fillMaxSize().background(Color.Black)
+                .windowInsetsPadding(WindowInsets.systemBars)
+                .padding(horizontal = 12.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Row(
@@ -618,7 +634,8 @@ private fun DocumentScannerUi(
                             Image(
                                 bitmap.asImageBitmap(),
                                 contentDescription = "الصفحة ${index + 1}",
-                                modifier = Modifier.size(64.dp)
+                                modifier = Modifier.size(76.dp).clickable { onPreviewPage(index) },
+                                contentScale = ContentScale.Fit
                             )
                             TextButton(onClick = { onRemovePage(index) }, enabled = !busy) {
                                 Text("حذف")
@@ -637,11 +654,11 @@ private fun DocumentScannerUi(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                OutlinedButton(
+                Button(
                     onClick = onCapture,
                     enabled = permissionGranted && !busy && pageCount < 20,
                     modifier = Modifier.weight(1f)
-                ) { Text("تصوير صفحة") }
+                ) { Text("●  تصوير") }
                 Button(
                     onClick = onFinish,
                     enabled = pageCount > 0 && !busy,
@@ -653,6 +670,36 @@ private fun DocumentScannerUi(
             }
         }
     }
+        previewPageIndex?.let { index ->
+            val bitmap = pageThumbnails.getOrNull(index)
+            if (bitmap != null) {
+                Dialog(onDismissRequest = onDismissPreview) {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth().fillMaxHeight(0.88f),
+                        color = Color(0xFF202124),
+                        shape = MaterialTheme.shapes.large
+                    ) {
+                        Column(
+                            Modifier.fillMaxSize().padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text("معاينة الصفحة ${index + 1}", color = Color.White,
+                                style = MaterialTheme.typography.titleMedium)
+                            Image(
+                                bitmap.asImageBitmap(),
+                                contentDescription = "معاينة كاملة للصفحة",
+                                modifier = Modifier.weight(1f).fillMaxWidth(),
+                                contentScale = ContentScale.Fit
+                            )
+                            TextButton(onClick = onDismissPreview, modifier = Modifier.align(Alignment.End)) {
+                                Text("إغلاق")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
 }
 
 @Composable

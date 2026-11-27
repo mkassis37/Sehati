@@ -183,6 +183,10 @@ internal class DocumentScannerActivity : ComponentActivity() {
                         }
                     },
                     onCornersChanged = { draftCorners = it },
+                    onResetCrop = {
+                        draftCorners = fullPageCorners()
+                        draftMessage = "تمت إعادة حدود القص إلى كامل الصورة. اسحبي الزوايا لتحديد الجزء المطلوب."
+                    },
                     onAutoDetect = ::autoDetectDraft,
                     onRotateDraft = ::rotateDraft,
                     onApplyCrop = { applyDraft(useCrop = true) },
@@ -913,6 +917,7 @@ private fun DocumentScannerUi(
     onMovePage: (Int, Int) -> Unit,
     onRemovePage: (Int) -> Unit,
     onCornersChanged: (List<Offset>) -> Unit,
+    onResetCrop: () -> Unit,
     onAutoDetect: () -> Unit,
     onRotateDraft: () -> Unit,
     onApplyCrop: () -> Unit,
@@ -1035,6 +1040,7 @@ private fun DocumentScannerUi(
             selectedFilter = selectedFilter,
             busy = busy,
             onCornersChanged = onCornersChanged,
+            onResetCrop = onResetCrop,
             onAutoDetect = onAutoDetect,
             onRotate = onRotateDraft,
             onFilterSelected = onFilterSelected,
@@ -1053,6 +1059,7 @@ private fun CropEditorDialog(
     selectedFilter: DocumentScanFilter,
     busy: Boolean,
     onCornersChanged: (List<Offset>) -> Unit,
+    onResetCrop: () -> Unit,
     onAutoDetect: () -> Unit,
     onRotate: () -> Unit,
     onFilterSelected: (DocumentScanFilter) -> Unit,
@@ -1159,6 +1166,7 @@ private fun CropEditorDialog(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     OutlinedButton(onClick = onAutoDetect, enabled = !busy) { Text("اكتشاف تلقائي") }
+                    OutlinedButton(onClick = onResetCrop, enabled = !busy) { Text("إظهار الصورة كاملة") }
                     OutlinedButton(onClick = onRotate, enabled = !busy) { Text("تدوير 90°") }
                 }
                 Row(

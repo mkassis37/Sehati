@@ -80,6 +80,9 @@ import org.opencv.android.Utils
 import org.opencv.core.Mat
 import org.opencv.core.MatOfPoint
 import org.opencv.core.MatOfPoint2f
+import org.opencv.core.Core
+import org.opencv.core.CvType
+import org.opencv.core.Scalar
 import org.opencv.core.Point
 import org.opencv.core.Size
 import org.opencv.imgproc.Imgproc
@@ -360,6 +363,8 @@ internal class DocumentScannerActivity : ComponentActivity() {
             Imgproc.Canny(blurred, edges, 55.0, 165.0)
             Imgproc.morphologyEx(edges, edges, Imgproc.MORPH_CLOSE, kernel)
 
+            // Use both strong edges and a joined bright-paper mask. This helps when
+            // a plain sheet has weak borders but the table/carpet has visible texture.
             val contours = ArrayList<MatOfPoint>()
             Imgproc.findContours(
                 edges,
@@ -368,12 +373,45 @@ internal class DocumentScannerActivity : ComponentActivity() {
                 Imgproc.RETR_EXTERNAL,
                 Imgproc.CHAIN_APPROX_SIMPLE
             )
-            val corners = findDocumentCorners(contours, source.cols(), source.rows())
-            if (corners != null) {
-                perspectiveCrop(source, warped, corners)
-            } else {
-                source.copyTo(warped)
+
+            val brightPaper = Mat()
+            val paperKernel = Imgproc.getStructuringElement(
+                Imgproc.MORPH_RECT,
+                Size(25.0, 25.0)
+            )
+            val paperHierarchy = Mat()
+            try {
+                Imgproc.threshold(
+                    gray,
+                    brightPaper,
+                    0.0,
+                    255.0,
+                    Imgproc.THRESH_BINARY or Imgproc.THRESH_OTSU
+                )
+                Imgproc.morphologyEx(
+                    brightPaper,
+                    brightPaper,
+                    Imgproc.MORPH_CLOSE,
+                    paperKernel
+                )
+                Imgproc.findContours(
+                    brightPaper,
+                    contours,
+                    paperHierarchy,
+                    Imgproc.RETR_EXTERNAL,
+                    Imgproc.CHAIN_APPROX_SIMPLE
+                )
+            } finally {
+                brightPaper.release()
+                paperKernel.release()
+                paperHierarchy.release()
             }
+
+            val corners = findDocumentCorners(contours, gray)
+                ?: throw IllegalArgumentException(
+                    "لم أتعرف على حدود الورقة. ضعيها على خلفية داكنة وواضحة واتركي فراغًا حول أطرافها ثم أعيدي التصوير."
+                )
+            perspectiveCrop(source, warped, corners)
             applyFilter(warped, filtered, filter)
             val output = Bitmap.createBitmap(
                 filtered.cols(),
@@ -440,40 +478,101 @@ internal class DocumentScannerActivity : ComponentActivity() {
 
     private fun findDocumentCorners(
         contours: List<MatOfPoint>,
-        imageWidth: Int,
-        imageHeight: Int
+        gray: Mat
     ): Array<Point>? {
-        val minArea = imageWidth.toDouble() * imageHeight * 0.16
-        return try {
-            contours.asSequence()
-                .sortedByDescending { Imgproc.contourArea(it) }
-                .take(25)
-                .mapNotNull { contour ->
-                    val area = Imgproc.contourArea(contour)
-                    if (area < minArea) return@mapNotNull null
-                    val curve = MatOfPoint2f(*contour.toArray())
-                    val approximation = MatOfPoint2f()
+        val imageWidth = gray.cols()
+        val imageHeight = gray.rows()
+        val imageArea = imageWidth.toDouble() * imageHeight
+        var bestCorners: Array<Point>? = null
+        var bestScore = Double.NEGATIVE_INFINITY
+
+        try {
+            contours.forEach { contour ->
+                val area = Imgproc.contourArea(contour)
+                val areaRatio = area / imageArea
+                if (areaRatio !in 0.18..0.90) return@forEach
+
+                val curve = MatOfPoint2f(*contour.toArray())
+                val approximation = MatOfPoint2f()
+                try {
+                    val perimeter = Imgproc.arcLength(curve, true)
+                    Imgproc.approxPolyDP(curve, approximation, perimeter * 0.025, true)
+                    if (approximation.total() != 4L) return@forEach
+
+                    val points = approximation.toArray()
+                    val polygon = MatOfPoint(*points)
                     try {
-                        val perimeter = Imgproc.arcLength(curve, true)
-                        Imgproc.approxPolyDP(curve, approximation, perimeter * 0.02, true)
-                        if (approximation.total() != 4L) return@mapNotNull null
-                        val points = approximation.toArray()
-                        val polygon = MatOfPoint(*points)
+                        if (!Imgproc.isContourConvex(polygon)) return@forEach
+                        val ordered = orderCorners(points)
+
+                        // Reject the camera frame/table outline: paper edges must have
+                        // a visible margin from all four image boundaries.
+                        val marginX = imageWidth * 0.012
+                        val marginY = imageHeight * 0.012
+                        if (ordered.any {
+                            it.x <= marginX || it.x >= imageWidth - marginX ||
+                                it.y <= marginY || it.y >= imageHeight - marginY
+                        }) return@forEach
+
+                        val width = (distance(ordered[0], ordered[1]) +
+                            distance(ordered[3], ordered[2])) / 2.0
+                        val height = (distance(ordered[0], ordered[3]) +
+                            distance(ordered[1], ordered[2])) / 2.0
+                        if (width <= 0.0 || height <= 0.0) return@forEach
+
+                        // Common paper proportions: A-series and letter-like sheets,
+                        // in portrait or landscape orientation.
+                        val ratio = min(width / height, height / width)
+                        if (ratio !in 0.48..0.96) return@forEach
+                        val aspectScore = (1.0 - kotlin.math.abs(ratio - 0.707) / 0.45)
+                            .coerceIn(0.0, 1.0)
+
+                        val insideMask = Mat.zeros(imageHeight, imageWidth, CvType.CV_8UC1)
+                        val expandedMask = Mat()
+                        val outsideMask = Mat()
+                        val ringKernel = Imgproc.getStructuringElement(
+                            Imgproc.MORPH_RECT,
+                            Size(25.0, 25.0)
+                        )
                         try {
-                            if (!Imgproc.isContourConvex(polygon)) return@mapNotNull null
+                            Imgproc.fillConvexPoly(insideMask, polygon, Scalar(255.0))
+                            Imgproc.dilate(insideMask, expandedMask, ringKernel)
+                            Core.subtract(expandedMask, insideMask, outsideMask)
+                            val paperBrightness = Core.mean(gray, insideMask).toArray()[0]
+                            val backgroundBrightness = Core.mean(gray, outsideMask).toArray()[0]
+                            val contrast = paperBrightness - backgroundBrightness
+
+                            // A true sheet should be brighter than the narrow band
+                            // immediately outside it; a table/grid contour usually is not.
+                            if (contrast < 5.0) return@forEach
+                            val contrastScore = (contrast / 55.0).coerceIn(0.0, 1.0)
+                            val areaScore = (areaRatio / 0.55).coerceIn(0.0, 1.0)
+                            val score = aspectScore * 0.30 + areaScore * 0.22 +
+                                contrastScore * 0.48
+
+                            if (score > bestScore) {
+                                bestScore = score
+                                bestCorners = ordered
+                            }
                         } finally {
-                            polygon.release()
+                            insideMask.release()
+                            expandedMask.release()
+                            outsideMask.release()
+                            ringKernel.release()
                         }
-                        orderCorners(points)
                     } finally {
-                        curve.release()
-                        approximation.release()
+                        polygon.release()
                     }
+                } finally {
+                    curve.release()
+                    approximation.release()
                 }
-                .firstOrNull()
+            }
         } finally {
             contours.forEach { it.release() }
         }
+
+        return bestCorners
     }
 
     private fun orderCorners(points: Array<Point>): Array<Point> {

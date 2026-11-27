@@ -6,14 +6,13 @@ import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
+import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.pdf.PdfDocument
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
@@ -51,11 +50,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.exifinterface.media.ExifInterface
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
@@ -104,7 +104,6 @@ internal class DocumentScannerActivity : ComponentActivity() {
     private var selectedFilter by mutableStateOf(DocumentScanFilter.COLOR)
     private var imageCapture by mutableStateOf<ImageCapture?>(null)
     private val pages = mutableStateListOf<ScannedPage>()
-    private var resultPdf: File? = null
     private var cameraInitializationError by mutableStateOf("")
 
     private val permissionLauncher = registerForActivityResult(
@@ -279,7 +278,6 @@ internal class DocumentScannerActivity : ComponentActivity() {
                         throw error
                     }
                 }
-                resultPdf = pdf
                 setResult(
                     RESULT_OK,
                     Intent().putExtra(EXTRA_RESULT_FILE_NAME, pdf.name)
@@ -318,8 +316,7 @@ internal class DocumentScannerActivity : ComponentActivity() {
     }
 
     private fun processDocumentImage(file: File, filter: DocumentScanFilter): Bitmap {
-        val decoded = BitmapFactory.decodeFile(file.absolutePath)
-            ?: throw IllegalArgumentException("ملف الصورة غير صالح.")
+        val decoded = decodeOrientedBitmap(file)
         val sourceBitmap = resizeBitmap(decoded, MAX_IMAGE_DIMENSION)
         if (sourceBitmap !== decoded) decoded.recycle()
 
@@ -371,6 +368,28 @@ internal class DocumentScannerActivity : ComponentActivity() {
             warped.release()
             filtered.release()
         }
+    }
+
+    private fun decodeOrientedBitmap(file: File): Bitmap {
+        val bitmap = BitmapFactory.decodeFile(file.absolutePath)
+            ?: throw IllegalArgumentException("ملف الصورة غير صالح.")
+        val orientation = runCatching {
+            ExifInterface(file.absolutePath).getAttributeInt(
+                ExifInterface.TAG_ORIENTATION,
+                ExifInterface.ORIENTATION_NORMAL
+            )
+        }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
+        val rotation = when (orientation) {
+            ExifInterface.ORIENTATION_ROTATE_90 -> 90f
+            ExifInterface.ORIENTATION_ROTATE_180 -> 180f
+            ExifInterface.ORIENTATION_ROTATE_270 -> 270f
+            else -> 0f
+        }
+        if (rotation == 0f) return bitmap
+
+        val matrix = Matrix().apply { postRotate(rotation) }
+        return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+            .also { if (it !== bitmap) bitmap.recycle() }
     }
 
     private fun resizeBitmap(bitmap: Bitmap, maxDimension: Int): Bitmap {
@@ -636,8 +655,10 @@ private fun CameraXPreview(
                     val preview = Preview.Builder().build().also {
                         it.setSurfaceProvider(previewView.surfaceProvider)
                     }
+                    val targetRotation = previewView.display?.rotation ?: android.view.Surface.ROTATION_0
                     val imageCapture = ImageCapture.Builder()
                         .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
+                        .setTargetRotation(targetRotation)
                         .build()
                     provider?.unbindAll()
                     provider?.bindToLifecycle(

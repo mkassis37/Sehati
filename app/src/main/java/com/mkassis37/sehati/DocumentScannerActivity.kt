@@ -1087,8 +1087,8 @@ private fun CropEditorDialog(
                 Modifier.fillMaxSize()
                     .windowInsetsPadding(WindowInsets.systemBars)
                     .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 14.dp, vertical = 10.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Row(
                     Modifier.fillMaxWidth(),
@@ -1114,7 +1114,7 @@ private fun CropEditorDialog(
 
                 Box(
                     Modifier.fillMaxWidth()
-                        .heightIn(min = 220.dp, max = 360.dp)
+                        .heightIn(min = 190.dp, max = 290.dp)
                         .background(Color(0xFF202B38), MaterialTheme.shapes.large),
                     contentAlignment = Alignment.Center
                 ) {
@@ -1227,7 +1227,7 @@ private fun CropEditorDialog(
                         Icon(Icons.Filled.AutoFixHigh, contentDescription = null, modifier = Modifier.size(23.dp))
                     }
                     CropToolButton(
-                        label = "إعادة ضبط",
+                        label = "كامل الصورة",
                         enabled = !busy,
                         modifier = Modifier.weight(1f),
                         onClick = onResetCrop
@@ -1235,7 +1235,7 @@ private fun CropEditorDialog(
                         Icon(Icons.Filled.CropFree, contentDescription = null, modifier = Modifier.size(23.dp))
                     }
                     CropToolButton(
-                        label = "تدوير 90°",
+                        label = "تدوير",
                         enabled = !busy,
                         modifier = Modifier.weight(1f),
                         onClick = onRotate
@@ -1272,7 +1272,7 @@ private fun CropEditorDialog(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     CropToolButton(
-                        label = "بدون قص",
+                        label = "الصورة كاملة",
                         enabled = !busy,
                         modifier = Modifier.weight(0.85f),
                         onClick = onUseFullPage

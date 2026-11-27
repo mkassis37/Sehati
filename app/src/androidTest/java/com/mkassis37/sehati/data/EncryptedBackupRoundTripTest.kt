@@ -32,10 +32,51 @@ class EncryptedBackupRoundTripTest {
         }
         val password = "synthetic-password-for-test"
         try {
-            val owner = source.medicalDao().addMember(FamilyMember(fullName = "Synthetic owner"))
+            val sourceDao = source.medicalDao()
+            val owner = sourceDao.addMember(FamilyMember(fullName = "Synthetic owner"))
+            sourceDao.addAllergy(AllergyRecord(
+                memberId = owner, category = "Synthetic category", substance = "Synthetic allergen",
+                reaction = "Synthetic reaction", severity = "moderate"
+            ))
+            val labId = sourceDao.addLabResult(LabResult(
+                memberId = owner, testName = "Synthetic laboratory test", value = 12.5,
+                unit = "g/L", referenceLow = 10.0, referenceHigh = 15.0, performedAt = "2026-11-25"
+            ))
+            val medicationId = sourceDao.addMedication(MedicationRecord(
+                memberId = owner, name = "Synthetic medication", startDate = "2026-11-25"
+            ))
+            val conditionId = sourceDao.addCondition(ChronicCondition(
+                memberId = owner, name = "Synthetic condition", diagnosedOn = "2026-01-01"
+            ))
+            val procedureId = sourceDao.addProcedure(MedicalProcedure(
+                memberId = owner, name = "Synthetic procedure", performedOn = "2026-02-01"
+            ))
+            val historyId = sourceDao.addHistoryEvent(MedicalHistoryEvent(
+                memberId = owner, category = "Synthetic history", title = "Synthetic event"
+            ))
+            val familyHistoryId = sourceDao.addFamilyDiseaseHistory(FamilyDiseaseHistory(
+                memberId = owner, relative = "Synthetic relative", disease = "Synthetic family condition"
+            ))
+            val measurementId = sourceDao.addBodyMeasurement(BodyMeasurement(
+                memberId = owner, measuredOn = "2026-11-25", heightCm = 170.0, weightKg = 65.0
+            ))
+            val appointmentId = sourceDao.addAppointment(MedicalAppointment(
+                memberId = owner, doctor = "Synthetic doctor", specialty = "Synthetic specialty",
+                facility = "Synthetic clinic", date = "2026-12-01", time = "10:00",
+                reason = "Synthetic reason", notes = "", status = AppointmentStatus.UPCOMING.name,
+                outcome = "", diagnosis = "", recommendations = ""
+            ))
+            assertTrue(source.recordDose(DoseLog(
+                medicationId = medicationId, memberId = owner, date = "2026-11-25", time = "08:00",
+                status = DoseStatus.TAKEN.name, updatedAt = 1234
+            ), owner))
             input.writeBytes(fixture)
             val attached = store.save(Uri.fromFile(input), owner, "Synthetic attachment.pdf")
-            source.addLinkedDocument(attached.copy(category = "LAB", documentDate = "2026-11-25"))
+            val documentId = source.addLinkedDocument(attached.copy(
+                category = "LAB", documentDate = "2026-11-25",
+                relatedProcedureId = procedureId, relatedAppointmentId = appointmentId,
+                relatedLabResultId = labId
+            ))
             target.medicalDao().addMember(FamilyMember(fullName = "Synthetic original"))
             val uri = Uri.fromFile(archive)
             EncryptedBackup(source, store).write(context.contentResolver, uri, password.toCharArray())
@@ -69,15 +110,30 @@ class EncryptedBackupRoundTripTest {
             val documents = invalidPayload.getJSONArray("documents")
             documents.put(JSONObject(documents.getJSONObject(0).toString())
                 .put("id", Long.MAX_VALUE)
-                .put("content", "aW52YWxpZA=="))
+                .put("relatedLabResultId", Long.MAX_VALUE))
             assertTrue(runCatching { restore.restore(proof.copy(payload = invalidPayload)) }.isFailure)
             assertEquals("Synthetic original", target.medicalDao().getAllMembers().single().fullName)
             assertTrue(target.medicalDao().getAllDocuments().isEmpty())
 
             restore.restore(proof)
-            val restored = target.medicalDao().getAllDocuments().single()
+            val restoredDao = target.medicalDao()
+            val restored = restoredDao.getAllDocuments().single()
+            assertEquals(documentId, restored.id)
             assertEquals("LAB", restored.category)
             assertEquals("2026-11-25", restored.documentDate)
+            assertEquals(labId, restored.relatedLabResultId)
+            assertEquals(procedureId, restored.relatedProcedureId)
+            assertEquals(appointmentId, restored.relatedAppointmentId)
+            assertEquals("Synthetic allergen", restoredDao.getAllAllergies().single().substance)
+            assertEquals(labId, restoredDao.getAllLabResults().single().id)
+            assertEquals(medicationId, restoredDao.getAllMedications().single().id)
+            assertEquals(conditionId, restoredDao.getAllConditions().single().id)
+            assertEquals(procedureId, restoredDao.getAllProcedures().single().id)
+            assertEquals(historyId, restoredDao.getAllHistoryEvents().single().id)
+            assertEquals(familyHistoryId, restoredDao.getAllFamilyDiseaseHistory().single().id)
+            assertEquals(measurementId, restoredDao.getAllBodyMeasurements().single().id)
+            assertEquals(appointmentId, restoredDao.getAllAppointments().single().id)
+            assertEquals(DoseStatus.TAKEN.name, restoredDao.getAllDoseLogs().single().status)
             val bytes = ByteArrayOutputStream().also { store.copyPlaintextTo(restored, it) }.toByteArray()
             assertArrayEquals(fixture, bytes)
             val stagedPreview = File(checkNotNull(proof.stagedArchivePath))

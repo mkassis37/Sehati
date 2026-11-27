@@ -9,6 +9,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.mkassis37.sehati.data.FamilyMember
@@ -43,21 +44,48 @@ internal fun DocumentLibraryScreen(
     var deleting by remember(member.id) { mutableStateOf(false) }
     var error by remember(member.id) { mutableStateOf("") }
     val zone = ZoneId.systemDefault()
-    val visible = if (focused) documents else documents.filter { document ->
-        val day = document.documentDate.ifBlank { Instant.ofEpochMilli(document.addedAt).atZone(zone).toLocalDate().toString() }
-        document.displayName.contains(query.trim(), true) &&
+    fun documentDay(document: MedicalDocument): String =
+        document.documentDate.ifBlank {
+            Instant.ofEpochMilli(document.addedAt).atZone(zone).toLocalDate().toString()
+        }
+    val hasFilters = query.isNotBlank() || category != null || date.isNotBlank()
+    val visible = (if (focused) documents else documents.filter { document ->
+        document.displayName.contains(query.trim(), ignoreCase = true) &&
             (category == null || document.category == category?.name) &&
-            (date.isBlank() || date == day)
-    }
+            (date.isBlank() || date == documentDay(document))
+    }).sortedByDescending(::documentDay)
     LazyColumn(modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
             Text("الملفات الطبية · ${member.fullName}", style = MaterialTheme.typography.titleLarge)
+            Card(Modifier.fillMaxWidth()) {
+                Row(
+                    Modifier.fillMaxWidth().padding(12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(if (focused) "المرفقات المرتبطة" else "ملفات هذا الفرد")
+                        Text(
+                            if (focused) "${visible.size} مرفق" else "${visible.size} من ${documents.size} ملف",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Text("${documents.size}", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary)
+                }
+            }
             if (!focused) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(onClick = { actions.pick(member.id) }) { Text("اختيار ملف") }
                     OutlinedButton(onClick = { actions.capture(member.id) }) { Text("التقاط صورة") }
                 }
-                OutlinedTextField(query, { query = it }, label = { Text("البحث باسم الملف") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    label = { Text("البحث باسم الملف") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     FilterChip(category == null, { category = null }, label = { Text("كل الأنواع") })
                     DocumentCategory.entries.forEach { option ->
@@ -65,18 +93,61 @@ internal fun DocumentLibraryScreen(
                     }
                 }
                 DatePickerField("تصفية حسب التاريخ", date, { date = it }, Modifier.fillMaxWidth())
-                if (date.isNotBlank()) TextButton(onClick = { date = "" }) { Text("كل التواريخ") }
+                if (hasFilters) {
+                    TextButton(onClick = {
+                        query = ""
+                        category = null
+                        date = ""
+                    }) { Text("مسح البحث والفلاتر") }
+                }
             }
             if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
         }
-        if (visible.isEmpty()) item { Text("لا توجد ملفات ضمن الاختيار الحالي.") }
+        if (documents.isEmpty()) {
+            item {
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("لا توجد مرفقات محفوظة لهذا الفرد بعد.", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            "يمكنك إضافة تقرير PDF أو صورة طبية. تُحفظ المرفقات داخل مساحة التطبيق الخاصة.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        if (!focused) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Button(onClick = { actions.pick(member.id) }) { Text("اختيار ملف") }
+                                OutlinedButton(onClick = { actions.capture(member.id) }) { Text("التقاط صورة") }
+                            }
+                        }
+                    }
+                }
+            }
+        } else if (visible.isEmpty()) {
+            item {
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("لا توجد نتائج مطابقة", style = MaterialTheme.typography.titleMedium)
+                        Text("جرّبي تغيير البحث أو نوع الملف أو التاريخ.", style = MaterialTheme.typography.bodySmall)
+                        TextButton(onClick = {
+                            query = ""
+                            category = null
+                            date = ""
+                        }) { Text("عرض جميع الملفات") }
+                    }
+                }
+            }
+        }
         items(visible, key = { it.id }) { document ->
             Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(document.displayName, style = MaterialTheme.typography.titleMedium)
                     val label = DocumentCategory.entries.firstOrNull { it.name == document.category }?.label ?: DocumentCategory.OTHER.label
-                    val day = document.documentDate.ifBlank { Instant.ofEpochMilli(document.addedAt).atZone(zone).toLocalDate().toString() }
-                    Text("$label · ${day.toDisplayDate()}", style = MaterialTheme.typography.bodySmall)
+                    Text("$label · ${documentDay(document).toDisplayDate()}", style = MaterialTheme.typography.bodySmall)
+                    Text(
+                        "${documentMimeLabel(document.mimeType)} · ${formatDocumentSize(document.sizeBytes)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                     val linkLabel = links.firstOrNull { link ->
                         when (link.kind) {
                             "appointment" -> link.id == document.relatedAppointmentId
@@ -85,8 +156,15 @@ internal fun DocumentLibraryScreen(
                             else -> false
                         }
                     }?.label
-                    if (linkLabel != null) Text(linkLabel, style = MaterialTheme.typography.bodySmall)
-                    Row {
+                    Text(
+                        linkLabel ?: "غير مرتبط بسجل طبي",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (linkLabel == null) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary
+                    )
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
                         TextButton(onClick = { actions.open(document) }) { Text("معاينة") }
                         TextButton(onClick = { delete = document }) { Text("حذف", color = MaterialTheme.colorScheme.error) }
                     }
@@ -122,6 +200,23 @@ internal fun DocumentLibraryScreen(
             },
             dismissButton = { TextButton(enabled = !deleting, onClick = { delete = null }) { Text("إلغاء") } }
         )
+    }
+}
+
+private fun documentMimeLabel(mimeType: String): String = when (mimeType.lowercase()) {
+    "application/pdf" -> "PDF"
+    "image/jpeg" -> "صورة JPEG"
+    "image/png" -> "صورة PNG"
+    "image/webp" -> "صورة WEBP"
+    else -> "مرفق"
+}
+
+private fun formatDocumentSize(bytes: Long): String {
+    if (bytes < 0L) return "الحجم غير معروف"
+    return when {
+        bytes < 1024L -> "$bytes بايت"
+        bytes < 1024L * 1024L -> "${String.format(java.util.Locale.US, "%.1f", bytes / 1024.0)} كيلوبايت"
+        else -> "${String.format(java.util.Locale.US, "%.1f", bytes / (1024.0 * 1024.0))} ميغابايت"
     }
 }
 

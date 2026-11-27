@@ -1,5 +1,6 @@
 package com.mkassis37.sehati
 
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
@@ -49,25 +50,41 @@ internal fun rememberDocumentLibrary(
     var openingPreview by remember { mutableStateOf(false) }
     var openedTemporaryPath by rememberSaveable { mutableStateOf<String?>(null) }
     fun clearOpenedPreview() {
-        openedTemporaryPath?.takeIf { it == File(it).name && it.startsWith("sehati-preview-") }?.let { name ->
-            val file = File(medicalShareDirectory(context), name)
-            try {
-                val uri = FileProvider.getUriForFile(context, context.packageName + ".fileprovider", file)
-                context.revokeUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            } finally {
-                file.delete()
-            }
-        }
+        // Clear state first so a failed cleanup can never block future previews.
+        val name = openedTemporaryPath
         openedTemporaryPath = null
+        if (name.isNullOrBlank() || File(name).name != name || !name.startsWith("sehati-preview-")) return
+
+        // Only accept a generated filename and keep cleanup inside our private cache folder.
+        val file = File(File(context.cacheDir, "medical-share"), name)
+        runCatching {
+            val contentUri = FileProvider.getUriForFile(
+                context,
+                context.packageName + ".fileprovider",
+                file
+            )
+            context.revokeUriPermission(contentUri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        // Deletion is attempted even when URI permission revocation fails.
+        runCatching { file.delete() }
     }
     val viewer = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         clearOpenedPreview()
     }
     fun clear() {
-        cameraPath?.let { File(medicalShareDirectory(context), it).delete() }
+        val capturedName = cameraPath
         cameraPath = null
         owner = null
         uri = null
+
+        if (!capturedName.isNullOrBlank() &&
+            File(capturedName).name == capturedName &&
+            capturedName.startsWith("sehati-camera-")
+        ) {
+            runCatching {
+                File(File(context.cacheDir, "medical-share"), capturedName).delete()
+            }
+        }
     }
     fun complete(picked: Uri?) {
         val memberId = owner ?: return
@@ -144,6 +161,13 @@ internal fun rememberDocumentLibrary(
                     pendingFile = null
                 } catch (cancelled: CancellationException) {
                     throw cancelled
+                } catch (_: ActivityNotFoundException) {
+                    clearOpenedPreview()
+                    Toast.makeText(
+                        context,
+                        "لا يوجد تطبيق مثبت لفتح هذا الملف. يلزم قارئ PDF أو عارض صور مناسب.",
+                        Toast.LENGTH_LONG
+                    ).show()
                 } catch (_: Exception) {
                     clearOpenedPreview()
                     Toast.makeText(context, "تعذر معاينة الملف.", Toast.LENGTH_SHORT).show()

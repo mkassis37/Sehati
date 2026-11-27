@@ -181,9 +181,21 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
                 STREAMING_CONTAINER_VERSION -> {
                     val archive = documentStore.createBackupPreviewFile()
                     stagedFile = archive
+                    val previewContext = currentCoroutineContext()
                     pushback.use { input ->
                         FileOutputStream(archive).use { output ->
-                            input.copyTo(BackupLimitOutput(output), STREAM_BUFFER_SIZE)
+                            val bounded = BackupLimitOutput(output)
+                            val buffer = ByteArray(STREAM_BUFFER_SIZE)
+                            try {
+                                while (true) {
+                                    previewContext.ensureActive()
+                                    val count = input.read(buffer)
+                                    if (count < 0) break
+                                    if (count > 0) bounded.write(buffer, 0, count)
+                                }
+                            } finally {
+                                buffer.fill(0)
+                            }
                         }
                     }
                     val parsed = readVersionTwoManifest(archive, password)
@@ -440,7 +452,8 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
 
     private data class V2Manifest(val root: JSONObject, val keyBytes: ByteArray, val manifestDigest: String, val manifestCipherLength: Int)
 
-    private fun writeVersionTwo(resolver: ContentResolver, uri: Uri, payload: JSONObject, documents: List<MedicalDocument>, password: CharArray) {
+    private suspend fun writeVersionTwo(resolver: ContentResolver, uri: Uri, payload: JSONObject, documents: List<MedicalDocument>, password: CharArray) {
+        val exportContext = currentCoroutineContext()
         require(password.size >= 10)
         val manifest = payload.toString().toByteArray(Charsets.UTF_8)
         require(manifest.size <= MAX_MANIFEST_BYTES)
@@ -464,8 +477,11 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
                 encryptedManifest.fill(0)
                 manifestIv.fill(0)
                 documents.forEachIndexed { index, document ->
+                    exportContext.ensureActive()
                     require(document.sizeBytes in 1..MAX_DOCUMENT_BYTES)
-                    val chunked = ChunkedGcmOutputStream(output, keyBytes, document, index)
+                    val chunked = ChunkedGcmOutputStream(output, keyBytes, document, index) {
+                        exportContext.ensureActive()
+                    }
                     try {
                         documentStore.copyPlaintextTo(document, chunked)
                         chunked.finish()
@@ -477,7 +493,20 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
             }
             if (staging.length() > MAX_BACKUP_BYTES) throw BackupSizeLimitException()
             checkNotNull(resolver.openOutputStream(uri, "wt")).buffered().use { destination ->
-                FileInputStream(staging).use { it.copyTo(BackupLimitOutput(destination), STREAM_BUFFER_SIZE) }
+                FileInputStream(staging).use { input ->
+                    val bounded = BackupLimitOutput(destination)
+                    val buffer = ByteArray(STREAM_BUFFER_SIZE)
+                    try {
+                        while (true) {
+                            exportContext.ensureActive()
+                            val count = input.read(buffer)
+                            if (count < 0) break
+                            if (count > 0) bounded.write(buffer, 0, count)
+                        }
+                    } finally {
+                        buffer.fill(0)
+                    }
+                }
             }
         } finally {
             keyBytes.fill(0)
@@ -605,7 +634,8 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
         private val output: DataOutputStream,
         private val keyBytes: ByteArray,
         private val document: MedicalDocument,
-        private val documentIndex: Int
+        private val documentIndex: Int,
+        private val checkActive: () -> Unit
     ) : OutputStream() {
         private val buffer = ByteArray(STREAM_CHUNK_BYTES)
         private var buffered = 0
@@ -614,6 +644,7 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
         private var finished = false
 
         override fun write(value: Int) {
+            checkActive()
             check(!finished) { "Attachment stream is already finished." }
             buffer[buffered++] = value.toByte()
             total++
@@ -621,6 +652,7 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
         }
 
         override fun write(source: ByteArray, offset: Int, length: Int) {
+            checkActive()
             check(!finished) { "Attachment stream is already finished." }
             var position = offset
             var remaining = length
@@ -636,6 +668,7 @@ class EncryptedBackup(private val database: SehatiDatabase, private val document
         }
 
         private fun flushChunk() {
+            checkActive()
             if (buffered == 0) return
             val iv = ByteArray(12).also(SecureRandom()::nextBytes)
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")

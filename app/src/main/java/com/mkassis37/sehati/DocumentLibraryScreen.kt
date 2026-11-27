@@ -195,7 +195,12 @@ internal fun DocumentLibraryScreen(
         }
     }
     actions.pending?.takeIf { it.memberId == member.id }?.let {
-        DocumentImportDialog(it.uri.toString(), links, actions.cancel, actions.save)
+        DocumentImportDialog(
+            it.uri.toString(),
+            links,
+            actions.cancel,
+            actions.save
+        )
     }
     delete?.let { document ->
         AlertDialog(
@@ -248,11 +253,12 @@ private fun DocumentImportDialog(
     importKey: String,
     links: List<DocumentLink>,
     onCancel: () -> Unit,
-    onSave: suspend (DocumentCategory, String, DocumentLink?) -> Unit
+    onSave: suspend (DocumentCategory, String, DocumentLink?, String) -> Unit
 ) {
     val scope = rememberCoroutineScope()
     var category by rememberSaveable(importKey) { mutableStateOf(DocumentCategory.OTHER) }
     var date by rememberSaveable(importKey) { mutableStateOf(LocalDate.now().toString()) }
+    var documentName by rememberSaveable(importKey) { mutableStateOf("مستند طبي") }
     var activeLink by rememberSaveable(importKey) { mutableStateOf<String?>(null) }
     var showLinks by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
@@ -270,6 +276,14 @@ private fun DocumentImportDialog(
                         }
                     }
                 }
+                OutlinedTextField(
+                    value = documentName,
+                    onValueChange = { documentName = it },
+                    label = { Text("اسم الملف") },
+                    placeholder = { Text("مثال: تحليل وظائف الكبد - 27/11/2026") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
                 DatePickerField("تاريخ الملف", date, { date = it }, Modifier.fillMaxWidth())
                 ExposedDropdownMenuBox(expanded = showLinks, onExpandedChange = { showLinks = it }) {
                     OutlinedTextField(selected?.label ?: "بدون ربط", {}, readOnly = true,
@@ -289,7 +303,7 @@ private fun DocumentImportDialog(
                 busy = true
                 scope.launch {
                     try {
-                        onSave(category, date, selected)
+                        onSave(category, date, selected, documentName)
                     } catch (cancelled: CancellationException) {
                         throw cancelled
                     } catch (_: Exception) {

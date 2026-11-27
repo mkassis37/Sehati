@@ -29,6 +29,7 @@ internal data class PendingDocument(val memberId: Long, val uri: Uri)
 
 internal data class DocumentLibraryActions(
     val pending: PendingDocument?,
+    val openingDocumentId: Long?,
     val pick: (Long) -> Unit,
     val capture: (Long) -> Unit,
     val scan: (Long) -> Unit,
@@ -50,6 +51,7 @@ internal fun rememberDocumentLibrary(
     var uri by rememberSaveable { mutableStateOf<Uri?>(null) }
     var cameraPath by rememberSaveable { mutableStateOf<String?>(null) }
     var openingPreview by remember { mutableStateOf(false) }
+    var openingDocumentId by remember { mutableStateOf<Long?>(null) }
     var openedTemporaryPath by rememberSaveable { mutableStateOf<String?>(null) }
     fun clearOpenedPreview() {
         // Clear state first so a failed cleanup can never block future previews.
@@ -133,6 +135,7 @@ internal fun rememberDocumentLibrary(
     val pending = owner?.let { memberId -> uri?.let { PendingDocument(memberId, it) } }
     return DocumentLibraryActions(
         pending = pending,
+        openingDocumentId = openingDocumentId,
         pick = { memberId ->
             if (owner == null) {
                 owner = memberId
@@ -198,6 +201,7 @@ internal fun rememberDocumentLibrary(
         open = { document ->
             if (!openingPreview && openedTemporaryPath == null) scope.launch {
                 openingPreview = true
+                openingDocumentId = document.id
                 var pendingFile: File? = null
                 try {
                     val file = withContext(NonCancellable) { store.createTemporaryFile(document) }
@@ -222,6 +226,7 @@ internal fun rememberDocumentLibrary(
                     Toast.makeText(context, "تعذر معاينة الملف.", Toast.LENGTH_SHORT).show()
                 } finally {
                     pendingFile?.delete()
+                    openingDocumentId = null
                     openingPreview = false
                 }
             }

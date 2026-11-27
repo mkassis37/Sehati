@@ -116,6 +116,7 @@ internal fun rememberDocumentLibrary(
             if (scannedFile == null || !scannedFile.isFile ||
                 scannedFile.length() !in 1..MAX_SCANNED_DOCUMENT_BYTES
             ) {
+                scannedFile?.delete()
                 clear()
                 Toast.makeText(context, "ملف المسح غير صالح أو حجمه أكبر من 25 MB.", Toast.LENGTH_LONG).show()
             } else {
@@ -236,3 +237,4 @@ internal fun rememberDocumentLibrary(
     )
 }
 
+private const val MAX_SCANNED_DOCUMENT_BYTES = 25L * 1024L * 1024L

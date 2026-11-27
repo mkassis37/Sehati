@@ -75,9 +75,24 @@ internal fun DocumentLibraryScreen(
                 }
             }
             if (!focused) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = { actions.pick(member.id) }) { Text("اختيار ملف") }
-                    OutlinedButton(onClick = { actions.capture(member.id) }) { Text("التقاط صورة") }
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Button(
+                        onClick = { actions.pick(member.id) },
+                        modifier = Modifier.weight(1f)
+                    ) { Text("اختيار ملف") }
+                    OutlinedButton(
+                        onClick = { actions.capture(member.id) },
+                        modifier = Modifier.weight(1f)
+                    ) { Text("التقاط صورة") }
+                }
+                OutlinedButton(
+                    onClick = { actions.scan(member.id) },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("مسح مستند ضوئيًا · PDF متعدد الصفحات")
                 }
                 OutlinedTextField(
                     value = query,

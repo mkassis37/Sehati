@@ -89,7 +89,7 @@ object LabReportParser {
             return null
         }
 
-        fun add(nameRaw: String, resultRaw: String, referenceRaw: String?, unitRaw: String, source: String) {
+        fun add(nameRaw: String, resultRaw: String, referenceRaw: String?, unitRaw: String, source: String, flagRaw: String? = null) {
             val name = canonicalTestName(nameRaw.trim().trim(':', '-', '•'))
             val normalizedName = name.lowercase(java.util.Locale.ROOT).replace(Regex("\\s+"), " ")
             // Reject OCR status/reference labels and page furniture as test names.
@@ -112,10 +112,142 @@ object LabReportParser {
             if (name.length !in 2..70 || name.none { it.isLetter() } ||
                 unit.length > 24) return
             val candidate = LabReportCandidate(name, value, unit, ref?.first, ref?.second,
-                result?.groupValues?.get(2).orEmpty(), reportDate, source, qualitative)
+                flagRaw?.trim()?.takeIf { it.isNotEmpty() } ?: result?.groupValues?.get(2).orEmpty(), reportDate, source, qualitative)
             val key = listOf(name.lowercase(), value, qualitative?.lowercase(), unit,
                 ref?.first, ref?.second, candidate.flag).joinToString("\u0000")
             found.putIfAbsent(key, candidate)
+        }
+
+        // Header-aware table parsing: supports reordered columns and common lab-specific labels.
+        fun splitColumns(line: String): List<String> {
+            val separator = when {
+                line.contains('|') -> Regex("\\s*\\|\\s*")
+                line.contains('\t') -> Regex("\\t+")
+                Regex("\\s{2,}").containsMatchIn(line) -> Regex("\\s{2,}")
+                else -> return emptyList()
+            }
+            return line.trim().split(separator).map(String::trim)
+        }
+
+        fun headerSchema(cells: List<String>): TableSchema? {
+            if (cells.size < 3) return null
+            fun norm(value: String) = value.lowercase(java.util.Locale.ROOT)
+                .replace('.', ' ').replace(':', ' ').replace(Regex("\\s+"), " ").trim()
+            val headers = cells.map(::norm)
+            val testIndex = headers.indexOfFirst {
+                it.matches(Regex(".*\\b(test|test name|procedure|investigation|analyte|parameter|اسم الفحص|الفحص|التحليل)\\b.*"))
+            }
+            val refIndex = headers.indexOfFirst {
+                it.contains("reference") || it.contains("ref range") || it.contains("normal range") ||
+                    it.contains("المدى الطبيعي") || it.contains("المعدل الطبيعي")
+            }
+            val unitIndex = headers.indexOfFirst {
+                it == "unit" || it == "units" || it.contains("unit ") || it.contains("الوحدة")
+            }
+            val flagIndex = headers.indexOfFirst {
+                it == "flag" || it == "abn" || it.contains("abnormal flag") ||
+                    it.contains("علامة") || it.contains("الحالة")
+            }
+            val resultIndices = headers.indices.filter { index ->
+                val h = headers[index]
+                index != testIndex && index != refIndex && index != unitIndex && index != flagIndex &&
+                    (h.contains("result") || h == "value" || h.contains("result value") ||
+                        h.contains("normal result") || h.contains("abnormal result") ||
+                        h == "normal" || h == "abnormal" || h.contains("النتيجة"))
+            }
+            if (testIndex < 0 || resultIndices.isEmpty()) return null
+            return TableSchema(testIndex, resultIndices, refIndex, unitIndex, flagIndex, cells.size)
+        }
+
+        fun looksLikeResult(value: String): Boolean =
+            numericResult.matches(value.trim()) || value.trim().lowercase(java.util.Locale.ROOT) in qualitativeValues
+
+        fun likelyUnit(value: String): Boolean {
+            val v = value.trim()
+            return v.length in 1..24 &&
+                v.any { it.isLetter() || it == 'µ' || it == 'μ' || it == '%' } &&
+                !reference(v).let { it != null } &&
+                !looksLikeResult(v) &&
+                !v.equals("high", true) && !v.equals("low", true) &&
+                !v.equals("normal", true) && !v.equals("abnormal", true)
+        }
+
+        val consumedTableLines = mutableSetOf<Int>()
+        var activeSchema: TableSchema? = null
+        lines.forEachIndexed { lineIndex, line ->
+            val cells = splitColumns(line)
+            if (cells.size < 3) return@forEachIndexed
+            val detected = headerSchema(cells)
+            if (detected != null) {
+                activeSchema = detected
+                consumedTableLines += lineIndex
+                return@forEachIndexed
+            }
+            val schema = activeSchema
+            if (schema != null && cells.size >= schema.columnCount) {
+                val row = cells.take(schema.columnCount)
+                val testName = row.getOrNull(schema.testIndex).orEmpty()
+                val resultCell = schema.resultIndices.asSequence()
+                    .mapNotNull { row.getOrNull(it)?.takeIf(String::isNotBlank) }
+                    .firstOrNull(::looksLikeResult)
+                if (testName.isNotBlank() && resultCell != null) {
+                    val refCell = row.getOrNull(schema.referenceIndex)?.takeIf(String::isNotBlank)
+                    val unitCell = row.getOrNull(schema.unitIndex).orEmpty()
+                    val flagCell = row.getOrNull(schema.flagIndex)
+                    add(testName, resultCell, refCell, unitCell, line, flagCell)
+                    consumedTableLines += lineIndex
+                    return@forEachIndexed
+                }
+            }
+
+            // Headerless delimited row: infer cells conservatively by their content.
+            if (schema == null) {
+                val resultIndex = cells.indexOfFirst(::looksLikeResult)
+                if (resultIndex > 0) {
+                    val testName = cells.take(resultIndex).joinToString(" ").trim()
+                    val tail = cells.drop(resultIndex + 1)
+                    val refCell = tail.firstOrNull { reference(it) != null }
+                    val flagCell = tail.firstOrNull {
+                        it.equals("H", true) || it.equals("L", true) ||
+                            it.equals("A", true) || it.equals("*") || it.equals("ABN", true)
+                    }
+                    val unitCell = tail.firstOrNull { it != refCell && it != flagCell && likelyUnit(it) }.orEmpty()
+                    if (testName.isNotBlank()) {
+                        add(testName, cells[resultIndex], refCell, unitCell, line, flagCell)
+                        consumedTableLines += lineIndex
+                    }
+                }
+            }
+        }
+
+        // Some PDF generators expose a row as four or five consecutive cells in
+        // varying order. Only accept a complete, unambiguous group; never guess
+        // a missing unit or range from a neighboring test.
+        var cellIndex = 0
+        while (cellIndex + 3 < lines.size) {
+            if ((cellIndex..(cellIndex + 3)).any { it in consumedTableLines }) {
+                cellIndex++
+                continue
+            }
+            val groupSize = if (cellIndex + 4 < lines.size &&
+                (cellIndex..(cellIndex + 4)).none { it in consumedTableLines }) 5 else 4
+            val group = lines.subList(cellIndex, cellIndex + groupSize)
+            val resultCells = group.filter(::looksLikeResult)
+            val refCells = group.filter { reference(it) != null }
+            val unitCells = group.filter(::likelyUnit)
+            val nameCells = group.filter { cell ->
+                cell.isNotBlank() && !looksLikeResult(cell) && reference(cell) == null &&
+                    !likelyUnit(cell) && !cell.equals("high", true) && !cell.equals("low", true)
+            }
+            if (resultCells.size == 1 && refCells.size == 1 && unitCells.size == 1 && nameCells.size == 1) {
+                val flagCell = group.firstOrNull { it.equals("H", true) || it.equals("L", true) || it.equals("A", true) || it == "*" }
+                add(nameCells.single(), resultCells.single(), refCells.single(), unitCells.single(),
+                    group.joinToString(" | "), flagCell)
+                consumedTableLines.addAll(cellIndex until cellIndex + groupSize)
+                cellIndex += groupSize
+            } else {
+                cellIndex++
+            }
         }
 
         // Typical PDF text layer: each cell appears on its own line.
@@ -216,4 +348,13 @@ object LabReportParser {
         }
         return null
     }
+    private data class TableSchema(
+        val testIndex: Int,
+        val resultIndices: List<Int>,
+        val referenceIndex: Int,
+        val unitIndex: Int,
+        val flagIndex: Int,
+        val columnCount: Int
+    )
+
 }

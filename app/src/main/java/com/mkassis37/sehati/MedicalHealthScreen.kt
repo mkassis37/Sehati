@@ -3,6 +3,7 @@ package com.mkassis37.sehati
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -42,6 +43,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.mkassis37.sehati.data.AllergyRecord
@@ -130,10 +134,15 @@ internal fun MedicalHealthScreen(
                         add = { editor = EditorState("family", null) }, edit = { editor = EditorState("family", it.id) }, delete = { row -> scope.launch { onDeleteFamilyHistory(row.id) } })
                 }
             }
-            5 -> RecordListPanel("الطول والوزن", "احتفظي بقياسات مؤرخة لمتابعة التغير مع الوقت.", measurements,
-                titleOf = { "${it.measuredOn.toDisplayDate()} • ${it.heightCm?.let { v -> "$v سم" } ?: "الطول —"} • ${it.weightKg?.let { v -> "$v كغ" } ?: "الوزن —"}" },
-                detailOf = { it.notes }, add = { editor = EditorState("measurement", null) }, edit = { editor = EditorState("measurement", it.id) },
-                delete = { row -> scope.launch { onDeleteMeasurement(row.id) } })
+            5 -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("متابعة القياسات عبر الزمن", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = 16.dp))
+                MeasurementTrendChart("الوزن", measurements.mapNotNull { row -> row.weightKg?.let { row.measuredOn to it } }, "كغ")
+                MeasurementTrendChart("الطول", measurements.mapNotNull { row -> row.heightCm?.let { row.measuredOn to it } }, "سم")
+                RecordListPanel("الطول والوزن", "احتفظي بقياسات مؤرخة لمتابعة التغير مع الوقت.", measurements,
+                    titleOf = { "${it.measuredOn.toDisplayDate()} • ${it.heightCm?.let { v -> "$v سم" } ?: "الطول —"} • ${it.weightKg?.let { v -> "$v كغ" } ?: "الوزن —"}" },
+                    detailOf = { it.notes }, add = { editor = EditorState("measurement", null) }, edit = { editor = EditorState("measurement", it.id) },
+                    delete = { row -> scope.launch { onDeleteMeasurement(row.id) } })
+            }
             6 -> EmergencyPanel(member, allergies, medications, conditions, onEdit = { emergencyEditor = true })
             else -> TimelinePanel(buildTimeline(conditions, procedures, history, familyHistory, allergies, medications, labResults, documents, measurements, appointments), onOpen = onOpenTimelineRecord)
         }
@@ -373,6 +382,56 @@ private fun EmergencyPanel(member: FamilyMember, allergies: List<AllergyRecord>,
         Button(onClick = onEdit, modifier = Modifier.fillMaxWidth()) { Text("تعديل البطاقة ومعلومات العرض") }
     }
 }
+
+@Composable
+private fun MeasurementTrendChart(title: String, points: List<Pair<String, Double>>, unit: String) {
+    val ordered = points.mapNotNull { (date, value) ->
+        runCatching { LocalDate.parse(date) }.getOrNull()?.let { it to value }
+    }.sortedBy { it.first }
+    Card(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(title, style = MaterialTheme.typography.titleSmall)
+            if (ordered.isEmpty()) {
+                Text("أضيفي قياسين مؤرخين على الأقل لعرض المنحنى.", style = MaterialTheme.typography.bodySmall)
+            } else {
+                val lineColor = MaterialTheme.colorScheme.primary
+                val gridColor = MaterialTheme.colorScheme.outlineVariant
+                Canvas(Modifier.fillMaxWidth().heightIn(min = 120.dp, max = 150.dp)) {
+                    val left = 12f
+                    val right = size.width - 12f
+                    val top = 12f
+                    val bottom = size.height - 12f
+                    repeat(3) { index ->
+                        val y = top + (bottom - top) * index / 2f
+                        drawLine(gridColor, Offset(left, y), Offset(right, y), strokeWidth = 1f)
+                    }
+                    if (ordered.size >= 2) {
+                        val values = ordered.map { it.second }
+                        val minValue = values.minOrNull() ?: 0.0
+                        val maxValue = values.maxOrNull() ?: 1.0
+                        val range = (maxValue - minValue).takeIf { it > 0.0 } ?: 1.0
+                        val path = Path()
+                        ordered.forEachIndexed { index, item ->
+                            val x = left + (right - left) * index / (ordered.size - 1).toFloat()
+                            val y = bottom - ((item.second - minValue) / range).toFloat() * (bottom - top)
+                            if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
+                            drawCircle(lineColor, radius = 4f, center = Offset(x, y))
+                        }
+                        drawPath(path, lineColor, style = Stroke(width = 3f))
+                    } else {
+                        drawCircle(lineColor, radius = 5f, center = Offset((left + right) / 2f, (top + bottom) / 2f))
+                    }
+                }
+                val first = ordered.first()
+                val last = ordered.last()
+                Text("الأقدم: ${first.second} $unit • ${first.first}", style = MaterialTheme.typography.bodySmall)
+                Text("الأحدث: ${last.second} $unit • ${last.first}", style = MaterialTheme.typography.bodySmall)
+                if (ordered.size == 1) Text("يلزم قياس آخر لإظهار اتجاه التغير.", style = MaterialTheme.typography.bodySmall)
+            }
+        }
+    }
+}
+
 @Composable
 private fun TimelinePanel(items: List<MedicalTimelineItem>, onOpen: (String, Long) -> Unit) {
     Column(Modifier.fillMaxSize().padding(16.dp)) {

@@ -45,7 +45,19 @@ jobs:
       - name: Run unit tests
         run: gradle --no-daemon testDebugUnitTest
 
+      - name: Upload unit test reports (including failures)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sehati-unit-test-reports
+          path: |
+            app/build/test-results/testDebugUnitTest/
+            app/build/reports/tests/testDebugUnitTest/
+          if-no-files-found: warn
+          retention-days: 14
+
       - name: Run Android lint
+        if: always()
         run: gradle --no-daemon lintDebug
 
       - name: Build Android instrumentation APK

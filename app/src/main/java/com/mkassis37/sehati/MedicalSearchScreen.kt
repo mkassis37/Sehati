@@ -15,7 +15,8 @@ import kotlinx.coroutines.flow.Flow
 private val searchLabels = mapOf(
     "MEMBER" to "فرد", "ALLERGY" to "حساسية", "LAB" to "فحص", "MEDICATION" to "دواء",
     "VISIT" to "زيارة", "DOCUMENT" to "وثيقة", "PROCEDURE" to "إجراء", "HISTORY" to "حدث طبي",
-    "CONDITION" to "حالة مزمنة", "FAMILY_HISTORY" to "تاريخ عائلي"
+    "CONDITION" to "حالة مزمنة", "FAMILY_HISTORY" to "تاريخ عائلي",
+    "BODY_MEASUREMENT" to "قياس جسدي", "DOSE_LOG" to "سجل جرعة"
 )
 
 @OptIn(ExperimentalMaterial3Api::class)

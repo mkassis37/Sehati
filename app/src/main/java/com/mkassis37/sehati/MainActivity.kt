@@ -64,6 +64,8 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import com.mkassis37.sehati.data.AllergyRecord
+import com.mkassis37.sehati.data.isLifeThreateningAllergySeverity
+import com.mkassis37.sehati.data.isSevereAllergySeverity
 import com.mkassis37.sehati.data.AppointmentStatus
 import com.mkassis37.sehati.data.displayValue
 import com.mkassis37.sehati.data.FamilyMember
@@ -1196,42 +1198,50 @@ private fun AllergyScreen(
     var showDialog by rememberSaveable(member.id) { mutableStateOf(false) }
     var editingId by rememberSaveable(member.id) { mutableStateOf<Long?>(null) }
     val recordToEdit = records.firstOrNull { it.id == editingId }
+    var pendingDelete by remember(member.id) { mutableStateOf<AllergyRecord?>(null) }
+    val orderedRecords = records.sortedWith(compareBy<AllergyRecord> {
+        when { it.severity.isLifeThreateningAllergySeverity() -> 0; it.severity.isSevereAllergySeverity() -> 1; else -> 2 }
+    }.thenByDescending { it.createdAt })
+    val lifeThreateningCount = records.count { it.severity.isLifeThreateningAllergySeverity() }
     Column(modifier.fillMaxSize().padding(16.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Column {
-                Text("حساسيات ${member.fullName}", style = MaterialTheme.typography.titleLarge)
-                Text("هذا السجل خاص بهذا الفرد", style = MaterialTheme.typography.bodySmall)
-            }
+            Column { Text("حساسيات ${member.fullName}", style = MaterialTheme.typography.titleLarge); Text("هذا السجل خاص بهذا الفرد", style = MaterialTheme.typography.bodySmall); Text("عدد السجلات: ${records.size}", style = MaterialTheme.typography.labelSmall) }
             Button(onClick = { editingId = null; showDialog = true }) { Icon(Icons.Outlined.Add, null); Text("إضافة") }
         }
         Spacer(Modifier.height(12.dp))
-        if (records.isEmpty()) {
-            Card(Modifier.fillMaxWidth()) { Text("لا توجد حساسيات مسجلة لهذا الفرد.", Modifier.padding(20.dp)) }
-        } else {
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                items(records, key = { it.id }) { record ->
-                    Card(Modifier.fillMaxWidth()) {
-                        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text(record.commercialName.ifBlank { record.substance }, style = MaterialTheme.typography.titleMedium)
-                            if (record.category.contains("دواء", ignoreCase = true)) {
-                                if (record.commercialName.isNotBlank()) Text("الاسم التجاري: ${record.commercialName}")
-                                if (record.activeIngredient.isNotBlank()) Text("المركب العلمي: ${record.activeIngredient}")
-                                if (record.substance.isNotBlank()) Text("المادة المسجلة: ${record.substance}")
-                            }
-                            Text("النوع: ${record.category}")
-                            Text("الأعراض: ${record.reaction}")
-                            Text("الشدة: ${record.severity}")
-                            if (record.notes.isNotBlank()) Text(record.notes)
-                            Row {
-                                TextButton(onClick = { editingId = record.id; showDialog = true }) { Text("تعديل") }
-                                TextButton(onClick = { scope.launch { deleteAllergy(record.id) } }) { Text("حذف السجل") }
-                            }
-                        }
+        if (lifeThreateningCount > 0) Card(Modifier.fillMaxWidth(), colors = MaterialTheme.colorScheme.errorContainer.let { CardDefaults.cardColors(containerColor = it) }) {
+            Row(Modifier.fillMaxWidth().padding(14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Outlined.WarningAmber, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                Column(Modifier.weight(1f)) {
+                    Text("تنبيه مهم: حساسية مهددة للحياة", color = MaterialTheme.colorScheme.onErrorContainer, style = MaterialTheme.typography.titleMedium)
+                    Text("يوجد $lifeThreateningCount سجل مصنّف بأنه مهدد للحياة. يظهر في مقدمة القائمة وبطاقة الطوارئ.", color = MaterialTheme.colorScheme.onErrorContainer, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+        if (orderedRecords.isEmpty()) Card(Modifier.fillMaxWidth()) { Text("لا توجد حساسيات مسجلة لهذا الفرد.", Modifier.padding(20.dp)) }
+        else LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            items(orderedRecords, key = { it.id }) { record ->
+                val lifeThreatening = record.severity.isLifeThreateningAllergySeverity()
+                val severe = record.severity.isSevereAllergySeverity()
+                Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = if (lifeThreatening) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surface)) {
+                    Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                        if (lifeThreatening) Row(horizontalArrangement = Arrangement.spacedBy(7.dp), verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Outlined.WarningAmber, contentDescription = null, tint = MaterialTheme.colorScheme.error); Text("تحذير: مهددة للحياة", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.titleSmall) }
+                        else if (severe) Text("حساسية شديدة", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelLarge)
+                        Text(record.substance.ifBlank { record.commercialName.ifBlank { record.activeIngredient.ifBlank { "حساسية دون اسم محدد" } } }, style = MaterialTheme.typography.titleMedium)
+                        Text("المادة المسببة: ${record.substance.ifBlank { "غير مسجلة" }}")
+                        if (record.commercialName.isNotBlank()) Text("الاسم التجاري: ${record.commercialName}")
+                        if (record.activeIngredient.isNotBlank()) Text("المادة الفعالة: ${record.activeIngredient}")
+                        Text("التصنيف: ${record.category.ifBlank { "غير محدد" }}")
+                        Text("رد الفعل أو الأعراض: ${record.reaction.ifBlank { "غير مسجل" }}")
+                        Text("درجة الخطورة: ${record.severity.ifBlank { "غير محددة" }}", color = if (severe) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
+                        if (record.notes.isNotBlank()) Text("ملاحظات: ${record.notes}")
+                        Row { TextButton(onClick = { editingId = record.id; showDialog = true }) { Text("تعديل") }; TextButton(onClick = { pendingDelete = record }) { Text("حذف السجل", color = MaterialTheme.colorScheme.error) } }
                     }
                 }
             }
         }
     }
+    pendingDelete?.let { record -> AlertDialog(onDismissRequest = { pendingDelete = null }, title = { Text(if (record.severity.isLifeThreateningAllergySeverity()) "حذف حساسية مهددة للحياة؟" else "حذف سجل الحساسية؟") }, text = { Text("سيُحذف سجل ${record.substance.ifBlank { record.commercialName.ifBlank { "الحساسية" } }} نهائيًا من ملف ${member.fullName}. لا يمكن التراجع عن الحذف.") }, confirmButton = { TextButton(onClick = { pendingDelete = null; scope.launch { deleteAllergy(record.id) } }) { Text("حذف نهائي", color = MaterialTheme.colorScheme.error) } }, dismissButton = { TextButton(onClick = { pendingDelete = null }) { Text("إلغاء") } }) }
     if (showDialog && (editingId == null || recordToEdit != null)) {
         AllergyDialog(member.id, initial = recordToEdit, onDismiss = { showDialog = false }, onSave = { record ->
             scope.launch { if (recordToEdit == null) addAllergy(record) else updateAllergy(record) }
@@ -1244,7 +1254,7 @@ private fun AllergyScreen(
 @Composable
 private fun AllergyDialog(memberId: Long, initial: AllergyRecord?, onDismiss: () -> Unit, onSave: (AllergyRecord) -> Unit) {
     val knownCategories = listOf("دواء", "طعام", "حساسية أخرى", "مسبب آخر", "مادة بيئية", "لسعة أو لدغة حشرة")
-    val knownSeverities = listOf("خفيفة", "متوسطة", "شديدة", "مهددة للحياة", "غير معروفة")
+    val knownSeverities = listOf("مهددة للحياة", "شديدة", "متوسطة", "خفيفة", "غير معروفة")
     var category by rememberSaveable(initial?.id) { mutableStateOf(initial?.category?.takeIf { it in knownCategories } ?: if (initial == null) "دواء" else "أخرى") }
     var categoryMenuExpanded by rememberSaveable { mutableStateOf(false) }
     var customCategory by rememberSaveable(initial?.id) { mutableStateOf(initial?.category?.takeIf { it !in knownCategories }.orEmpty()) }
@@ -1301,6 +1311,14 @@ private fun AllergyDialog(memberId: Long, initial: AllergyRecord?, onDismiss: ()
                                 severity = if (option.startsWith("أخرى")) "أخرى" else option
                                 severityMenuExpanded = false
                             })
+                        }
+                    }
+                }
+                if ((if (severity == "أخرى") customSeverity else severity).isLifeThreateningAllergySeverity()) {
+                    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
+                        Row(Modifier.padding(10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Outlined.WarningAmber, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                            Text("سيظهر هذا السجل بتحذير واضح في مقدمة سجل الحساسيات، وسيبقى ظاهراً في بطاقة الطوارئ.", color = MaterialTheme.colorScheme.onErrorContainer, style = MaterialTheme.typography.bodySmall)
                         }
                     }
                 }

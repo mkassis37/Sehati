@@ -105,11 +105,15 @@ class MainActivity : FragmentActivity() {
             }
             return
         }
-        window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        val screenshotPreferences = getSharedPreferences("sehati_privacy", MODE_PRIVATE)
+        val screenshotsInitiallyAllowed = screenshotPreferences.getBoolean("allow_screenshots", false)
+        if (screenshotsInitiallyAllowed) window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        else window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         if (savedInstanceState == null) window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
         setContent {
             val appearanceStore = remember { AppearanceSettingsStore(applicationContext) }
             val appearance by appearanceStore.settings.collectAsState(initial = AppearanceSettings())
+            var allowScreenshots by rememberSaveable { mutableStateOf(screenshotsInitiallyAllowed) }
             val appearanceScope = rememberCoroutineScope()
             var showSplash by remember { mutableStateOf(savedInstanceState == null) }
             SehatiTheme(appearance = appearance) {
@@ -125,6 +129,13 @@ class MainActivity : FragmentActivity() {
                         SehatiApp(
                             db = db,
                             appearance = appearance,
+                            allowScreenshots = allowScreenshots,
+                            onAllowScreenshots = { enabled ->
+                                screenshotPreferences.edit().putBoolean("allow_screenshots", enabled).apply()
+                                allowScreenshots = enabled
+                                if (enabled) window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                                else window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                            },
                             onPaletteSelected = { palette -> appearanceScope.launch { appearanceStore.updatePalette(palette) } },
                             onThemeModeSelected = { mode -> appearanceScope.launch { appearanceStore.updateMode(mode) } },
                             onResetAppearance = { appearanceScope.launch { appearanceStore.reset() } }
@@ -143,6 +154,8 @@ private enum class Screen { MEMBERS, DETAILS, FORM, HEALTH_RECORDS, ALLERGIES, L
 private fun SehatiApp(
     db: SehatiDatabase,
     appearance: AppearanceSettings,
+    allowScreenshots: Boolean,
+    onAllowScreenshots: (Boolean) -> Unit,
     onPaletteSelected: (SehatiPalette) -> Unit,
     onThemeModeSelected: (ThemeMode) -> Unit,
     onResetAppearance: () -> Unit
@@ -699,6 +712,8 @@ private fun SehatiApp(
                     onThemeModeSelected = onThemeModeSelected,
                     onResetAppearance = onResetAppearance,
                     lockEnabled = lockStore.isEnabled(),
+                    allowScreenshots = allowScreenshots,
+                    onAllowScreenshots = onAllowScreenshots,
                     biometricEnabled = lockStore.isBiometricEnabled(),
                     biometricAvailable = biometricAvailable,
                     onLockNow = {

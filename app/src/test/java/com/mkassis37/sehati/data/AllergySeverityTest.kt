@@ -14,7 +14,10 @@ class AllergySeverityTest {
         assertTrue("مُهَدِّدَةٌ لِلْحَيَاة".isLifeThreateningAllergySeverity())
         assertTrue("حساسية مهددة-للحياة".isLifeThreateningAllergySeverity())
         assertTrue("صدمة تحسسية".isLifeThreateningAllergySeverity())
+        assertTrue("صدمة الحساسية".isLifeThreateningAllergySeverity())
         assertTrue("تأق".isLifeThreateningAllergySeverity())
+        assertTrue("تاق".isLifeThreateningAllergySeverity())
+        assertTrue("خطر على الحياة".isLifeThreateningAllergySeverity())
     }
 
     @Test
@@ -40,6 +43,11 @@ class AllergySeverityTest {
         assertFalse("غير معروفة".isLifeThreateningAllergySeverity())
         assertFalse("غير مهددة للحياة".isLifeThreateningAllergySeverity())
         assertFalse("ليست مهددة للحياة".isLifeThreateningAllergySeverity())
+        assertFalse("غير مهدد للحياة".isLifeThreateningAllergySeverity())
+        assertFalse("غير مهدده للحياه".isLifeThreateningAllergySeverity())
+        assertFalse("لا تهدد الحياة".isLifeThreateningAllergySeverity())
+        assertFalse("not anaphylactic".isLifeThreateningAllergySeverity())
+        assertFalse("no anaphylaxis".isLifeThreateningAllergySeverity())
         assertFalse("not life-threatening".isLifeThreateningAllergySeverity())
         assertFalse("متوسطة".isSevereAllergySeverity())
         assertFalse("غير معروفة".isSevereAllergySeverity())

@@ -1199,6 +1199,8 @@ private fun AllergyScreen(
     var editingId by rememberSaveable(member.id) { mutableStateOf<Long?>(null) }
     val recordToEdit = records.firstOrNull { it.id == editingId }
     var pendingDelete by remember(member.id) { mutableStateOf<AllergyRecord?>(null) }
+    var saving by rememberSaveable(member.id) { mutableStateOf(false) }
+    var operationError by rememberSaveable(member.id) { mutableStateOf("") }
     val orderedRecords = records.sortedWith(compareBy<AllergyRecord> {
         when { it.severity.isLifeThreateningAllergySeverity() -> 0; it.severity.isSevereAllergySeverity() -> 1; else -> 2 }
     }.thenByDescending { it.createdAt })
@@ -1241,18 +1243,43 @@ private fun AllergyScreen(
             }
         }
     }
-    pendingDelete?.let { record -> AlertDialog(onDismissRequest = { pendingDelete = null }, title = { Text(if (record.severity.isLifeThreateningAllergySeverity()) "حذف حساسية مهددة للحياة؟" else "حذف سجل الحساسية؟") }, text = { Text("سيُحذف سجل ${record.substance.ifBlank { record.commercialName.ifBlank { "الحساسية" } }} نهائيًا من ملف ${member.fullName}. لا يمكن التراجع عن الحذف.") }, confirmButton = { TextButton(onClick = { pendingDelete = null; scope.launch { deleteAllergy(record.id) } }) { Text("حذف نهائي", color = MaterialTheme.colorScheme.error) } }, dismissButton = { TextButton(onClick = { pendingDelete = null }) { Text("إلغاء") } }) }
+    if (operationError.isNotBlank()) Text(operationError, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
+    pendingDelete?.let { record ->
+        AlertDialog(
+            onDismissRequest = { if (!saving) pendingDelete = null },
+            title = { Text(if (record.severity.isLifeThreateningAllergySeverity()) "حذف حساسية مهددة للحياة؟" else "حذف سجل الحساسية؟") },
+            text = { Text("سيُحذف سجل ${record.substance.ifBlank { record.commercialName.ifBlank { "الحساسية" } }} نهائيًا من ملف ${member.fullName}. لا يمكن التراجع عن الحذف.") },
+            confirmButton = { TextButton(enabled = !saving, onClick = {
+                scope.launch {
+                    saving = true; operationError = ""
+                    runCatching { deleteAllergy(record.id) }
+                        .onSuccess { pendingDelete = null }
+                        .onFailure { operationError = "تعذر حذف سجل الحساسية. لم يُغلق التنبيه؛ حاولي مرة أخرى." }
+                    saving = false
+                }
+            }) { Text(if (saving) "جارٍ الحذف..." else "حذف نهائي", color = MaterialTheme.colorScheme.error) } },
+            dismissButton = { TextButton(enabled = !saving, onClick = { pendingDelete = null }) { Text("إلغاء") } }
+        )
+    }
     if (showDialog && (editingId == null || recordToEdit != null)) {
-        AllergyDialog(member.id, initial = recordToEdit, onDismiss = { showDialog = false }, onSave = { record ->
-            scope.launch { if (recordToEdit == null) addAllergy(record) else updateAllergy(record) }
-            showDialog = false
-        })
+        AllergyDialog(member.id, initial = recordToEdit, saving = saving,
+            onDismiss = { if (!saving) showDialog = false },
+            onSave = { record ->
+                scope.launch {
+                    saving = true; operationError = ""
+                    runCatching { if (recordToEdit == null) addAllergy(record) else updateAllergy(record) }
+                        .onSuccess { showDialog = false; editingId = null }
+                        .onFailure { operationError = "تعذر حفظ سجل الحساسية. بقي النموذج مفتوحًا؛ حاولي مرة أخرى." }
+                    saving = false
+                }
+            }
+        )
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun AllergyDialog(memberId: Long, initial: AllergyRecord?, onDismiss: () -> Unit, onSave: (AllergyRecord) -> Unit) {
+private fun AllergyDialog(memberId: Long, initial: AllergyRecord?, saving: Boolean = false, onDismiss: () -> Unit, onSave: (AllergyRecord) -> Unit) {
     val knownCategories = listOf("دواء", "طعام", "حساسية أخرى", "مسبب آخر", "مادة بيئية", "لسعة أو لدغة حشرة")
     val knownSeverities = listOf("مهددة للحياة", "شديدة", "متوسطة", "خفيفة", "غير معروفة")
     var category by rememberSaveable(initial?.id) { mutableStateOf(initial?.category?.takeIf { it in knownCategories } ?: if (initial == null) "دواء" else "أخرى") }
@@ -1328,14 +1355,14 @@ private fun AllergyDialog(memberId: Long, initial: AllergyRecord?, onDismiss: ()
             }
         },
         confirmButton = {
-            Button(enabled = substance.isNotBlank() || commercialName.isNotBlank() || activeIngredient.isNotBlank(), onClick = {
+            Button(enabled = !saving && (substance.isNotBlank() || commercialName.isNotBlank() || activeIngredient.isNotBlank()), onClick = {
                 onSave(AllergyRecord(id = initial?.id ?: 0, memberId = memberId,
                     category = if (category == "أخرى") customCategory.trim().ifBlank { "أخرى" } else category.trim().ifBlank { "غير محدد" }, substance = substance.trim(),
                     commercialName = commercialName.trim(), activeIngredient = activeIngredient.trim(),
                     reaction = reaction.trim(), severity = if (severity == "أخرى") customSeverity.trim().ifBlank { "أخرى" } else severity.trim(), notes = notes.trim(), createdAt = initial?.createdAt ?: System.currentTimeMillis()))
-            }) { Text("حفظ") }
+            }) { Text(if (saving) "جارٍ الحفظ..." else "حفظ") }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("إلغاء") } }
+        dismissButton = { TextButton(enabled = !saving, onClick = onDismiss) { Text("إلغاء") } }
     )
 }
 

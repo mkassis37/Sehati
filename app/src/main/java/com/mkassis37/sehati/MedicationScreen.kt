@@ -169,7 +169,7 @@ private fun MedicationEditor(
             if (name.isBlank()) error = "أدخل اسم الدواء أو العلاج."
             else if (!validStart || !validEnd) error = "استخدم صيغة التاريخ YYYY-MM-DD."
             else if (end.isNotBlank() && end < start) error = "تاريخ الانتهاء يجب ألا يسبق البداية."
-            else if (times.isNotBlank() && times.split(',', '،', ';', '؛', '\\n').map(String::trim).filter(String::isNotBlank).any { parseDoseTimes(it).size != 1 }) {
+            else if (times.isNotBlank() && times.split(',', '،', ';', '؛', '\n').map(String::trim).filter(String::isNotBlank).any { parseDoseTimes(it).size != 1 }) {
                 error = "أوقات الجرعات غير صحيحة. استخدم صيغة 08:00 أو 20:00 وافصل بينها بفاصلة."
             }
             else onSave(MedicationRecord(

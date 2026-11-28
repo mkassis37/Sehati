@@ -17,15 +17,15 @@ val sourceCommit = providers.environmentVariable("GITHUB_SHA")
 
 android {
     namespace = "com.mkassis37.sehati"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.mkassis37.sehati"
         minSdk = 26
-        targetSdk = 35
-        versionCode = 8
-        versionName = "0.4.4"
-        buildConfigField("String", "SOURCE_COMMIT", "\"${sourceCommit.get()}\"")
+        targetSdk = 36
+        versionCode = 9
+        versionName = "0.4.5"
+        buildConfigField("String", "SOURCE_COMMIT", "\"\${sourceCommit.get()}\"")
         buildConfigField("boolean", "GOOGLE_DRIVE_ENABLED", googleDriveEnabled.get().toString())
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

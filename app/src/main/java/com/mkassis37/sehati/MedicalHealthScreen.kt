@@ -134,7 +134,7 @@ internal fun MedicalHealthScreen(
                         add = { editor = EditorState("family", null) }, edit = { editor = EditorState("family", it.id) }, delete = { row -> scope.launch { onDeleteFamilyHistory(row.id) } })
                 }
             }
-            5 -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            5 -> Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text("متابعة القياسات عبر الزمن", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = 16.dp))
                 MeasurementTrendChart("الوزن", measurements.mapNotNull { row -> row.weightKg?.let { row.measuredOn to it } }, "كغ")
                 MeasurementTrendChart("الطول", measurements.mapNotNull { row -> row.heightCm?.let { row.measuredOn to it } }, "سم")

@@ -173,7 +173,7 @@ object LabReportParser {
             )
             val hasUnitSyntax = v.contains('/') || v.contains('%') ||
                 v.contains('µ') || v.contains('μ') ||
-                Regex("""^x?10\\^?\\d+/.+$""", RegexOption.IGNORE_CASE).matches(v)
+                Regex("""^x?10\^?\d+/.+$""", RegexOption.IGNORE_CASE).matches(v)
             return v.length in 1..24 && (hasUnitSyntax || lower in knownStandaloneUnits) &&
                 reference(v) == null && !looksLikeResult(v)
         }

@@ -30,7 +30,7 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: "8.9"
+          gradle-version: "8.11.1"
 
       - name: Verify bundled offline Arabic OCR model
         run: |
@@ -74,7 +74,7 @@ jobs:
         run: |
           APK="app/build/outputs/apk/release/app-release.apk"
           test -s "$APK"
-          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK"
+          BUILD_TOOLS="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"\n          "$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$APK"\n          "$BUILD_TOOLS/zipalign" -c -P 16 -v 4 "$APK"
 
       - name: Prepare build artifacts
         run: |

@@ -186,4 +186,68 @@ class LabReportParserTest {
         assertEquals(141.0, rows.single().value!!, 0.0001)
     }
 
+
+    @Test
+    fun parsesProcedureResultFlagReferenceAndUnitLayoutSeenInPublicSampleReports() {
+        val rows = LabReportParser.parse(
+            "PROCEDURE | RESULT VALUES | ABN | REFERENCE RANGES | UNITS\n" +
+            "Sodium | 141 | | 136 - 145 | mEq/L\n" +
+            "Potassium | 4.8 | | 3.5 - 5.0 | mEq/L\n" +
+            "Hgb | 10.9 | L | 12 - 16 | g/dL\n" +
+            "Rapid strep screen | Positive | | |"
+        )
+        assertEquals(4, rows.size)
+        assertEquals(141.0, rows.single { it.testName == "Sodium" }.value!!, 0.0001)
+        assertEquals("mEq/L", rows.single { it.testName == "Potassium" }.unit)
+        val hgb = rows.single { it.testName == "Hgb" }
+        assertEquals(10.9, hgb.value!!, 0.0001)
+        assertEquals("L", hgb.flag)
+        assertEquals(12.0, hgb.referenceLow!!, 0.0001)
+        assertEquals(16.0, hgb.referenceHigh!!, 0.0001)
+        assertEquals("Positive", rows.single { it.testName == "Rapid strep screen" }.qualitativeValue)
+    }
+
+    @Test
+    fun parsesExpandedReportWithSeparateNormalAndAbnormalColumnsAndFlags() {
+        val rows = LabReportParser.parse(
+            "Test | Normal | Abnormal | Flag | Units | Reference Range\n" +
+            "Sodium | | 124 | L | mEq/L | 136-145\n" +
+            "Carbon Dioxide | 25 | | | mEq/L | 23-29\n" +
+            "Glucose | | 107 | H | mg/dL | 74-100"
+        )
+        assertEquals(3, rows.size)
+        assertEquals(124.0, rows.single { it.testName == "Sodium" }.value!!, 0.0001)
+        assertEquals("L", rows.single { it.testName == "Sodium" }.flag)
+        assertEquals(25.0, rows.single { it.testName == "Carbon Dioxide" }.value!!, 0.0001)
+        assertEquals("H", rows.single { it.testName == "Glucose" }.flag)
+        assertEquals(100.0, rows.single { it.testName == "Glucose" }.referenceHigh!!, 0.0001)
+    }
+
+    @Test
+    fun supportsInvestigationSpecimenAndReferenceIntervalHeadings() {
+        val rows = LabReportParser.parse(
+            "INVESTIGATION / SPECIMEN | RESULT | UNIT | REFERENCE INTERVAL\n" +
+            "TSH | 2.29 | uIU/mL | 0.25 - 5.00\n" +
+            "T4 | 89.76 | nmol/L | 60.00 - 120.00"
+        )
+        assertEquals(2, rows.size)
+        assertEquals("TSH", rows[0].testName)
+        assertEquals("uIU/mL", rows[0].unit)
+        assertEquals(0.25, rows[0].referenceLow!!, 0.0001)
+        assertEquals(5.0, rows[0].referenceHigh!!, 0.0001)
+    }
+
+    @Test
+    fun retainsArabicCommentsInSourceTextWithoutTreatingThemAsTestRows() {
+        val text = (
+            "TEST | RESULT | UNIT | REFERENCE RANGE\n" +
+            "Glucose | 107 | mg/dL | 74-100\n" +
+            "ملاحظة المختبر: العينة غير صائمة، يرجى مراجعة الطبيب.\n"
+        )
+        val rows = LabReportParser.parse(text)
+        assertEquals(1, rows.size)
+        assertEquals("Glucose", rows.single().testName)
+        assertTrue(text.contains("العينة غير صائمة"))
+    }
+
 }

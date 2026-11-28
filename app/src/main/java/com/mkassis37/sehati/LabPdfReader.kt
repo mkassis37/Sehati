@@ -39,6 +39,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.Text
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import kotlinx.coroutines.CancellationException
@@ -139,10 +140,12 @@ fun LabPdfReader(onExtractedText: (String) -> Unit, onCandidateSelected: (LabRep
                                         text.append("\n").append(recognizeLabBitmap(
                                             recognizeArabic = {
                                                 tess.value?.setImage(bitmap)
-                                                tess.value?.getUTF8Text().orEmpty()
+                                                val hocr = runCatching { tess.value?.getHOCRText(0).orEmpty() }.getOrDefault("")
+                                                val fallback = if (hocr.isBlank()) tess.value?.getUTF8Text().orEmpty() else ""
+                                                ArabicHocrResult(hocr, fallback)
                                             },
                                             recognizeLatin = {
-                                                recognizer.value.process(InputImage.fromBitmap(bitmap, 0)).awaitResult().text
+                                                recognizer.value.process(InputImage.fromBitmap(bitmap, 0)).awaitResult()
                                             }
                                         ))
                                     } finally {
@@ -291,12 +294,17 @@ private suspend fun recognizeLabImage(context: android.content.Context, bitmap: 
     val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
     val tess = runCatching { createArabicTesseract(context) }.getOrNull()
     try {
-        return recognizeLabBitmap( recognizeArabic = {
-            tess?.setImage(bitmap)
-            tess?.getUTF8Text().orEmpty()
-        }, recognizeLatin = {
-            recognizer.process(InputImage.fromBitmap(bitmap, 0)).awaitResult().text
-        })
+        return recognizeLabBitmap(
+            recognizeArabic = {
+                tess?.setImage(bitmap)
+                val hocr = runCatching { tess?.getHOCRText(0).orEmpty() }.getOrDefault("")
+                val fallback = if (hocr.isBlank()) tess?.getUTF8Text().orEmpty() else ""
+                ArabicHocrResult(hocr, fallback)
+            },
+            recognizeLatin = {
+                recognizer.process(InputImage.fromBitmap(bitmap, 0)).awaitResult()
+            }
+        )
     } finally {
         tess?.recycle()
         recognizer.close()
@@ -304,18 +312,15 @@ private suspend fun recognizeLabImage(context: android.content.Context, bitmap: 
 }
 
 private suspend fun recognizeLabBitmap(
-    recognizeArabic: () -> String,
-    recognizeLatin: suspend () -> String
+    recognizeArabic: () -> ArabicHocrResult?,
+    recognizeLatin: suspend () -> Text
 ): String {
-    val arabic = runCatching(recognizeArabic).getOrDefault("")
-    // Keep the supplied bitmap alive until ML Kit finishes reading it.
+    val arabic = runCatching(recognizeArabic).getOrNull()
+    // Keep the bitmap alive until ML Kit has returned its positioned text elements.
     val latin = try { withContext(NonCancellable) { recognizeLatin() } }
     catch (cancelled: CancellationException) { throw cancelled }
-    catch (_: Exception) { "" }
-    val arabicLines = arabic.lineSequence()
-        .filter { line -> line.any { it in '\u0600'..'\u06FF' } }
-        .joinToString("\n")
-    return latin.take(MAX_LAB_PAGE_TEXT) + "\n" + arabicLines.take(MAX_LAB_PAGE_TEXT)
+    catch (_: Exception) { null }
+    return combineLabOcr(arabic, latin)
 }
 
 private fun createArabicTesseract(context: android.content.Context): TessBaseAPI {

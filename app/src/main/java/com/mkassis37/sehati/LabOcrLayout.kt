@@ -12,7 +12,7 @@ internal data class LabOcrToken(
 ) {
     val height: Int get() = (bottom - top).coerceAtLeast(1)
     val centerY: Float get() = (top + bottom) / 2f
-    val isArabic: Boolean get() = text.any { it in '\u0600'..'\u06FF' }
+    val isArabic: Boolean get() = text.any { it in '\u0600'..'\u06FF' || it in '\u06F0'..'\u06F9' }
 }
 
 internal fun parseArabicHocrWords(hocr: String): List<LabOcrToken> {
@@ -30,7 +30,7 @@ internal fun parseArabicHocrWords(hocr: String): List<LabOcrToken> {
             .replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
             .replace("&quot;", "\"").replace("&#39;", "'").replace("&apos;", "'")
             .replace(Regex("[\u200e\u200f\u202a-\u202e]"), "").trim()
-        if (text.isBlank() || text.none { it in '\u0600'..'\u06FF' || it in '\u0660'..'\u0669' }) {
+        if (text.isBlank() || text.none { it in '\u0600'..'\u06FF' || it in '\u0660'..'\u0669' || it in '\u06F0'..'\u06F9' }) {
             return@mapNotNull null
         }
         LabOcrToken(
@@ -47,7 +47,7 @@ internal fun extractLatinOcrTokens(result: Text): List<LabOcrToken> =
     result.textBlocks.flatMap { it.lines }.flatMap { it.elements }.mapNotNull { element ->
         val box = element.boundingBox ?: return@mapNotNull null
         val value = element.text.trim()
-        if (value.isBlank() || value.any { it in '\u0600'..'\u06FF' }) return@mapNotNull null
+        if (value.isBlank() || value.any { it in '\u0600'..'\u06FF' || it in '\u06F0'..'\u06F9' }) return@mapNotNull null
         if (value.none { it in 'A'..'Z' || it in 'a'..'z' || it.isDigit() || it == 'µ' || it == 'μ' || it == '%' }) {
             return@mapNotNull null
         }

@@ -145,7 +145,7 @@ object LabReportParser {
                 Regex("\\s{2,}").containsMatchIn(line) -> Regex("\\s{2,}")
                 else -> return emptyList()
             }
-            return line.trim().split(separator).map(String::trim)
+            return line.trim().split(separator, limit = Int.MAX_VALUE).map(String::trim)
         }
 
         fun headerSchema(cells: List<String>): TableSchema? {

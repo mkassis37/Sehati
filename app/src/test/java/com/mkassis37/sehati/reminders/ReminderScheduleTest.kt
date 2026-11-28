@@ -32,6 +32,24 @@ class ReminderScheduleTest {
     }
 
     @Test
+    fun doseRemindersRespectFutureStartAndPastEndDates() {
+        val current = Instant.parse("2026-11-25T05:10:00Z")
+        val futureStart = MedicationRecord(memberId = 1, name = "Future treatment",
+            scheduledTimes = "08:00", startDate = "2026-11-26")
+        val expired = MedicationRecord(memberId = 1, name = "Expired treatment",
+            scheduledTimes = "08:00", startDate = "2026-11-20", endDate = "2026-11-24")
+        assertNull(nextReminder(ReminderKind.DOSE, current, zone, listOf(futureStart), emptyList()))
+        assertNull(nextReminder(ReminderKind.DOSE, current, zone, listOf(expired), emptyList()))
+    }
+
+    @Test
+    fun doseTimeParserAcceptsValidArabicDigitsAndRejectsInvalidValues() {
+        assertEquals(listOf(LocalTime.of(8, 0)), parseDoseTimes("٨:٠٠"))
+        assertEquals(emptyList<LocalTime>(), parseDoseTimes("24:00"))
+        assertEquals(emptyList<LocalTime>(), parseDoseTimes("بعد الغداء"))
+    }
+
+    @Test
     fun appointmentReminderIsThirtyMinutesEarlierAndCancelledVisitsAreExcluded() {
         val current = Instant.parse("2026-11-25T05:00:00Z")
         val visit = MedicalAppointment(memberId = 1, doctor = "Synthetic office", specialty = "",

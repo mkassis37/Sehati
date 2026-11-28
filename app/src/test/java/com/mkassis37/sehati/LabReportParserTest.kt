@@ -250,4 +250,37 @@ class LabReportParserTest {
         assertTrue(text.contains("العينة غير صائمة"))
     }
 
+
+    @Test
+    fun parsesConventionalTestResultUnitsReferenceRangeLayout() {
+        val rows = LabReportParser.parse(
+            "Test | Result | Units | Reference Range\n" +
+            "RED BLOOD CELLS | 5.8 | x 10^12/L | 4.5 - 6.5\n" +
+            "HAEMOGLOBIN | 15.2 | g/dL | 13.8 - 18.8\n" +
+            "ALT | 10.9 | IU/L | 0 - 40"
+        )
+        assertEquals(3, rows.size)
+        assertEquals("x 10^12/L", rows.single { it.testName == "RED BLOOD CELLS" }.unit)
+        assertEquals(15.2, rows.single { it.testName == "HAEMOGLOBIN" }.value!!, 0.0001)
+        assertEquals("IU/L", rows.single { it.testName == "ALT" }.unit)
+    }
+
+    @Test
+    fun parsesQualitativeUrineValuesAndKeepsReferenceTextSeparate() {
+        val rows = LabReportParser.parse(
+            "PROCEDURE | RESULT VALUES | ABN | REFERENCE RANGES | UNITS\n" +
+            "Appearance | Clear | | Clear |\n" +
+            "Glucose | Negative | | Negative |\n" +
+            "Bacteria | Absent | | Absent | /HPF\n" +
+            "Protein | Trace | A | Negative |"
+        )
+        assertEquals(4, rows.size)
+        assertEquals("Clear", rows.single { it.testName == "Appearance" }.qualitativeValue)
+        assertEquals("Negative", rows.single { it.testName == "Glucose" }.qualitativeValue)
+        assertEquals("Absent", rows.single { it.testName == "Bacteria" }.qualitativeValue)
+        assertEquals("/HPF", rows.single { it.testName == "Bacteria" }.unit)
+        assertEquals("Trace", rows.single { it.testName == "Protein" }.qualitativeValue)
+        assertEquals("A", rows.single { it.testName == "Protein" }.flag)
+    }
+
 }

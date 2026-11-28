@@ -62,6 +62,18 @@ class LabReportParserTest {
 
 
     @Test
+    fun translatesCommonArabicLabNamesToEnglishCanonicalNames() {
+        val rows = LabReportParser.parse(
+            "الهيموجلوبين\\n13.2\\n12 - 16\\ng/dL\\n" +
+            "فيتامين د\\n25\\n20 - 50\\nng/mL\\n" +
+            "السكر التراكمي\\n5.6\\n4 - 5.7\\n%"
+        )
+        assertTrue(rows.any { it.testName == "Hemoglobin" })
+        assertTrue(rows.any { it.testName == "Vitamin D" })
+        assertTrue(rows.any { it.testName == "Hemoglobin A1c (HbA1c)" })
+    }
+
+    @Test
     fun keepsEnglishTestNamesAndRejectsNormalReferenceLabels() {
         val rows = LabReportParser.parse(
             "Hemoglobin Level 13.8 g/dl (11.7 - 15.5)\n" +

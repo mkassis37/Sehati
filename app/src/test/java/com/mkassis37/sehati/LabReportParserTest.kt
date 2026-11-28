@@ -283,4 +283,31 @@ class LabReportParserTest {
         assertEquals("A", rows.single { it.testName == "Protein" }.flag)
     }
 
+
+    @Test
+    fun combinesSeparateLowAndHighReferenceColumns() {
+        val rows = LabReportParser.parse(
+            "TEST | RESULT | UNITS | LOW LIMIT | HIGH LIMIT\n" +
+            "TSH | 2.29 | uIU/mL | 0.25 | 5.00"
+        )
+        assertEquals(1, rows.size)
+        val tsh = rows.single()
+        assertEquals(2.29, tsh.value!!, 0.0001)
+        assertEquals("uIU/mL", tsh.unit)
+        assertEquals(0.25, tsh.referenceLow!!, 0.0001)
+        assertEquals(5.0, tsh.referenceHigh!!, 0.0001)
+    }
+
+    @Test
+    fun skipsAmbiguousRowsWhenBothNormalAndAbnormalResultCellsAreFilled() {
+        val rows = LabReportParser.parse(
+            "TEST | RESULT NORMAL | RESULT ABNORMAL | UNITS | REFERENCE RANGE\n" +
+            "Glucose | 87 | 107 | mg/dL | 74-100\n" +
+            "Sodium | 141 | | mmol/L | 136-145"
+        )
+        assertEquals(1, rows.size)
+        assertEquals("Sodium", rows.single().testName)
+        assertEquals(141.0, rows.single().value!!, 0.0001)
+    }
+
 }

@@ -134,14 +134,14 @@ internal fun MedicalHealthScreen(
                         add = { editor = EditorState("family", null) }, edit = { editor = EditorState("family", it.id) }, delete = { row -> scope.launch { onDeleteFamilyHistory(row.id) } })
                 }
             }
-            5 -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            5 -> Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text("متابعة القياسات عبر الزمن", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = 16.dp))
                 MeasurementTrendChart("الوزن", measurements.mapNotNull { row -> row.weightKg?.let { row.measuredOn to it } }, "كغ")
                 MeasurementTrendChart("الطول", measurements.mapNotNull { row -> row.heightCm?.let { row.measuredOn to it } }, "سم")
                 RecordListPanel("الطول والوزن", "احتفظي بقياسات مؤرخة لمتابعة التغير مع الوقت.", measurements,
                     titleOf = { "${it.measuredOn.toDisplayDate()} • ${it.heightCm?.let { v -> "$v سم" } ?: "الطول —"} • ${it.weightKg?.let { v -> "$v كغ" } ?: "الوزن —"}" },
                     detailOf = { it.notes }, add = { editor = EditorState("measurement", null) }, edit = { editor = EditorState("measurement", it.id) },
-                    delete = { row -> scope.launch { onDeleteMeasurement(row.id) } })
+                    delete = { row -> scope.launch { onDeleteMeasurement(row.id) } }, modifier = Modifier.weight(1f))
             }
             6 -> EmergencyPanel(member, allergies, medications, conditions, onEdit = { emergencyEditor = true })
             else -> TimelinePanel(buildTimeline(conditions, procedures, history, familyHistory, allergies, medications, labResults, documents, measurements, appointments), onOpen = onOpenTimelineRecord)
@@ -271,9 +271,9 @@ private fun SummaryPanel(member: FamilyMember, conditions: List<ChronicCondition
 }
 
 @Composable
-private fun <T> RecordListPanel(title: String, empty: String, rows: List<T>, titleOf: (T) -> String, detailOf: (T) -> String, add: () -> Unit, edit: (T) -> Unit, delete: (T) -> Unit) {
+private fun <T> RecordListPanel(title: String, empty: String, rows: List<T>, titleOf: (T) -> String, detailOf: (T) -> String, add: () -> Unit, edit: (T) -> Unit, delete: (T) -> Unit, modifier: Modifier = Modifier) {
     var pendingDelete by remember(rows) { mutableStateOf<T?>(null) }
-    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+    Column(modifier.fillMaxSize().padding(horizontal = 16.dp)) {
         Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Text(title, style = MaterialTheme.typography.titleLarge)
             Button(onClick = add) { Text("إضافة") }

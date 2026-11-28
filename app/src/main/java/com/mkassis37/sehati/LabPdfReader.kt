@@ -141,7 +141,7 @@ fun LabPdfReader(onExtractedText: (String) -> Unit, onCandidateSelected: (LabRep
                                             recognizeArabic = {
                                                 tess.value?.setImage(bitmap)
                                                 val hocr = runCatching { tess.value?.getHOCRText(0).orEmpty() }.getOrDefault("")
-                                                val fallback = if (hocr.isBlank()) tess.value?.getUTF8Text().orEmpty() else ""
+                                                val fallback = runCatching { tess.value?.getUTF8Text().orEmpty() }.getOrDefault("")
                                                 ArabicHocrResult(hocr, fallback)
                                             },
                                             recognizeLatin = {
@@ -298,7 +298,7 @@ private suspend fun recognizeLabImage(context: android.content.Context, bitmap: 
             recognizeArabic = {
                 tess?.setImage(bitmap)
                 val hocr = runCatching { tess?.getHOCRText(0).orEmpty() }.getOrDefault("")
-                val fallback = if (hocr.isBlank()) tess?.getUTF8Text().orEmpty() else ""
+                val fallback = runCatching { tess?.getUTF8Text().orEmpty() }.getOrDefault("")
                 ArabicHocrResult(hocr, fallback)
             },
             recognizeLatin = {

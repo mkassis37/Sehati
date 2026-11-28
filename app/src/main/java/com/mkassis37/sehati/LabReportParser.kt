@@ -47,8 +47,12 @@ object LabReportParser {
             normalized == key
         }?.value ?: cleaned
     }
-    private val qualitativeValues = setOf("positive", "negative", "nil", "hazy", "trace",
-        "إيجابي", "سلبي", "عكر", "آثار")
+    private val qualitativeValues = setOf(
+        "positive", "negative", "pos", "neg", "nil", "hazy", "trace",
+        "absent", "present", "clear", "yellow", "straw", "normal",
+        "not detected", "not seen", "few", "many", "no growth",
+        "إيجابي", "ايجابي", "سلبي", "موجب", "سالب", "عكر", "آثار", "صافي"
+    )
     private val isoDate = Regex("""\b(\d{4}-\d{2}-\d{2})\b""")
     private val monthDate = Regex("""\b([A-Za-z]{3,9})\s+(\d{1,2}),\s*(\d{4})\b""")
     private val numericResult = Regex("""^([+-]?(?:\d+(?:[.,]\d*)?|[.,]\d+))\s*([LH*])?$""")
@@ -286,7 +290,7 @@ object LabReportParser {
             RegexOption.IGNORE_CASE
         )
         val qualitativeRow = Regex(
-            """^(.+?)\s+(Positive|Negative|Nil|Hazy|Trace|إيجابي|سلبي|عكر|آثار)\s+(.+?)$""",
+            """^(.+?)\s+(Positive|Negative|Pos|Neg|Nil|Hazy|Trace|Absent|Present|Clear|Yellow|Straw|Normal|Not detected|Not seen|Few|Many|No growth|إيجابي|ايجابي|سلبي|موجب|سالب|عكر|آثار|صافي)\s+(.+?)$""",
             RegexOption.IGNORE_CASE
         )
         lines.forEach { line ->

@@ -143,10 +143,22 @@ object LabReportParser {
                     it.contains("investigation") || it.contains("analyte") || it.contains("parameter") ||
                     it.contains("اسم الفحص") || it == "الفحص" || it.contains("التحليل")
             }
-            val refIndex = headers.indexOfFirst {
-                it.contains("reference") || it.contains("ref range") || it.contains("normal range") ||
-                    it.contains("المدى الطبيعي") || it.contains("المعدل الطبيعي")
+            val refLowIndex = headers.indexOfFirst {
+                (it.contains("reference") || it.contains("ref ") || it.contains("normal") || it.contains("limit")) &&
+                    (it.contains("low") || it.contains("lower") || it.contains("minimum") ||
+                        it.contains("min ") || it.contains("الحد الأدنى") || it.contains("أدنى"))
             }
+            val refHighIndex = headers.indexOfFirst {
+                (it.contains("reference") || it.contains("ref ") || it.contains("normal") || it.contains("limit")) &&
+                    (it.contains("high") || it.contains("upper") || it.contains("maximum") ||
+                        it.contains("max ") || it.contains("الحد الأعلى") || it.contains("أعلى"))
+            }
+            val refIndex = headers.indices.firstOrNull { index ->
+                index != refLowIndex && index != refHighIndex &&
+                    (headers[index].contains("reference") || headers[index].contains("ref range") ||
+                        headers[index].contains("normal range") || headers[index].contains("المدى الطبيعي") ||
+                        headers[index].contains("المعدل الطبيعي"))
+            } ?: -1
             val unitIndex = headers.indexOfFirst {
                 it == "unit" || it == "units" || it.contains("unit ") || it.contains("الوحدة")
             }
@@ -162,7 +174,7 @@ object LabReportParser {
                         h == "normal" || h == "abnormal" || h.contains("النتيجة"))
             }
             if (testIndex < 0 || resultIndices.isEmpty()) return null
-            return TableSchema(testIndex, resultIndices, refIndex, unitIndex, flagIndex, cells.size)
+            return TableSchema(testIndex, resultIndices, refIndex, refLowIndex, refHighIndex, unitIndex, flagIndex, cells.size)
         }
 
         fun looksLikeResult(value: String): Boolean =
@@ -197,15 +209,25 @@ object LabReportParser {
             if (schema != null && cells.size >= schema.columnCount) {
                 val row = cells.take(schema.columnCount)
                 val testName = row.getOrNull(schema.testIndex).orEmpty()
-                val resultCell = schema.resultIndices.asSequence()
+                val resultCells = schema.resultIndices.asSequence()
                     .mapNotNull { row.getOrNull(it)?.takeIf(String::isNotBlank) }
-                    .firstOrNull(::looksLikeResult)
-                if (testName.isNotBlank() && resultCell != null) {
-                    val refCell = row.getOrNull(schema.referenceIndex)?.takeIf(String::isNotBlank)
+                    .filter(::looksLikeResult).toList()
+                // If both "normal" and "abnormal" result columns contain values,
+                // the row is ambiguous. Keep it visible in the raw text, but do
+                // not guess which value belongs in the medical record.
+                consumedTableLines += lineIndex
+                if (testName.isNotBlank() && resultCells.size == 1) {
+                    val lowCell = row.getOrNull(schema.referenceLowIndex).orEmpty().trim()
+                    val highCell = row.getOrNull(schema.referenceHighIndex).orEmpty().trim()
+                    val refCell = when {
+                        lowCell.isNotBlank() && highCell.isNotBlank() -> "$lowCell - $highCell"
+                        lowCell.isNotBlank() -> ">= $lowCell"
+                        highCell.isNotBlank() -> "<= $highCell"
+                        else -> row.getOrNull(schema.referenceIndex)?.takeIf(String::isNotBlank)
+                    }
                     val unitCell = row.getOrNull(schema.unitIndex).orEmpty()
                     val flagCell = row.getOrNull(schema.flagIndex)
-                    add(testName, resultCell, refCell, unitCell, line, flagCell)
-                    consumedTableLines += lineIndex
+                    add(testName, resultCells.single(), refCell, unitCell, line, flagCell)
                     return@forEachIndexed
                 }
             }
@@ -366,6 +388,8 @@ object LabReportParser {
         val testIndex: Int,
         val resultIndices: List<Int>,
         val referenceIndex: Int,
+        val referenceLowIndex: Int,
+        val referenceHighIndex: Int,
         val unitIndex: Int,
         val flagIndex: Int,
         val columnCount: Int

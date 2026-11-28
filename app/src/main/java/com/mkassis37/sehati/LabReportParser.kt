@@ -135,7 +135,9 @@ object LabReportParser {
                 .replace('.', ' ').replace(':', ' ').replace(Regex("\\s+"), " ").trim()
             val headers = cells.map(::norm)
             val testIndex = headers.indexOfFirst {
-                it.matches(Regex(".*\\b(test|test name|procedure|investigation|analyte|parameter|اسم الفحص|الفحص|التحليل)\\b.*"))
+                it == "test" || it.contains("test name") || it.contains("procedure") ||
+                    it.contains("investigation") || it.contains("analyte") || it.contains("parameter") ||
+                    it.contains("اسم الفحص") || it == "الفحص" || it.contains("التحليل")
             }
             val refIndex = headers.indexOfFirst {
                 it.contains("reference") || it.contains("ref range") || it.contains("normal range") ||
@@ -164,12 +166,16 @@ object LabReportParser {
 
         fun likelyUnit(value: String): Boolean {
             val v = value.trim()
-            return v.length in 1..24 &&
-                v.any { it.isLetter() || it == 'µ' || it == 'μ' || it == '%' } &&
-                reference(v) == null &&
-                !looksLikeResult(v) &&
-                !v.equals("high", true) && !v.equals("low", true) &&
-                !v.equals("normal", true) && !v.equals("abnormal", true)
+            val lower = v.lowercase(java.util.Locale.ROOT)
+            val knownStandaloneUnits = setOf(
+                "fl", "pg", "sec", "secs", "second", "seconds", "mmhg",
+                "mosm/kg", "mosm/l", "iu", "m iu", "copies"
+            )
+            val hasUnitSyntax = v.contains('/') || v.contains('%') ||
+                v.contains('µ') || v.contains('μ') ||
+                Regex("""^x?10\\^?\\d+/.+$""", RegexOption.IGNORE_CASE).matches(v)
+            return v.length in 1..24 && (hasUnitSyntax || lower in knownStandaloneUnits) &&
+                reference(v) == null && !looksLikeResult(v)
         }
 
         val consumedTableLines = mutableSetOf<Int>()

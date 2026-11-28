@@ -26,7 +26,7 @@ class LabOcrLayoutTest {
             LabOcrToken("HbA1c", 180, 10, 220, 26),
             LabOcrToken("5.6", 120, 10, 145, 26),
             LabOcrToken("الهيموغلوبين", 300, 10, 390, 26),
-            LabOcrToken("%", 82, 10, 92, 26),
+            LabOcrToken("%", 81, 10, 85, 26),
             LabOcrToken("4.0-5.7", 5, 10, 52, 26)
         )
         val output = mergeLabOcrTokens(tokens)

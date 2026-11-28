@@ -32,6 +32,14 @@ interface MedicalDao {
                      disease || ' ' || relative || ' ' || notes FROM family_disease_history
               UNION ALL SELECT id, memberId, 'PROCEDURE', name, performedOn,
                      name || ' ' || facility || ' ' || doctor || ' ' || reason || ' ' || complications || ' ' || notes FROM medical_procedures
+              UNION ALL SELECT id, memberId, 'BODY_MEASUREMENT', 'قياس الطول والوزن', measuredOn,
+                     'قياس الطول والوزن ' || measuredOn || ' ' || COALESCE(CAST(heightCm AS TEXT), '') || ' ' ||
+                     COALESCE(CAST(weightKg AS TEXT), '') || ' ' || notes FROM body_measurements
+              UNION ALL SELECT dl.rowid, dl.memberId, 'DOSE_LOG', 'جرعة: ' || med.name,
+                     dl.date || ' ' || dl.time,
+                     med.name || ' ' || dl.date || ' ' || dl.time || ' ' || dl.status
+                FROM dose_logs AS dl JOIN medication_records AS med
+                  ON med.id = dl.medicationId AND med.memberId = dl.memberId
           ) AS records JOIN family_members AS m ON records.ownerId = m.id
          WHERE (:memberId IS NULL OR m.id = :memberId)
            AND instr(lower(records.terms), lower(:query)) > 0

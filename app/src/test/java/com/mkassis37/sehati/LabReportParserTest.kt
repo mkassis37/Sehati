@@ -42,7 +42,7 @@ class LabReportParserTest {
     fun supportsDecimalCommaAndArabicText() {
         val rows = LabReportParser.parse("فيتامين د\n22,3\n20 - 50\nng/mL")
         assertEquals(1, rows.size)
-        assertEquals("فيتامين د", rows[0].testName)
+        assertEquals("Vitamin D", rows[0].testName)
         assertEquals(22.3, rows[0].value!!, 0.0001)
     }
 
@@ -57,9 +57,21 @@ class LabReportParserTest {
         assertEquals("Hazy", rows.first { it.testName == "Urine appearance" }.qualitativeValue)
         assertEquals(null, rows.first { it.testName == "Ketones" }.value)
         assertEquals("Negative", rows.first { it.testName == "Ketones" }.qualitativeValue)
-        assertEquals(22.3, rows.first { it.testName == "فيتامين د" }.value!!, 0.0001)
+        assertEquals(22.3, rows.first { it.testName == "Vitamin D" }.value!!, 0.0001)
     }
 
+
+    @Test
+    fun translatesCommonArabicLabNamesToEnglishCanonicalNames() {
+        val rows = LabReportParser.parse(
+            "الهيموجلوبين\n13.2\n12 - 16\ng/dL\n" +
+            "فيتامين د\n25\n20 - 50\nng/mL\n" +
+            "السكر التراكمي\n5.6\n4 - 5.7\n%"
+        )
+        assertTrue(rows.any { it.testName == "Hemoglobin" })
+        assertTrue(rows.any { it.testName == "Vitamin D" })
+        assertTrue(rows.any { it.testName == "Hemoglobin A1c (HbA1c)" })
+    }
 
     @Test
     fun keepsEnglishTestNamesAndRejectsNormalReferenceLabels() {

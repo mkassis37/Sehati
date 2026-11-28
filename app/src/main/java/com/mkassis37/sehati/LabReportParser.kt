@@ -18,6 +18,35 @@ data class LabReportCandidate(
 )
 
 object LabReportParser {
+    private val arabicTestNames = mapOf(
+        "الهيموجلوبين" to "Hemoglobin", "الهيموغلوبين" to "Hemoglobin",
+        "صورة الدم الكاملة" to "Complete Blood Count (CBC)", "تعداد الدم الكامل" to "Complete Blood Count (CBC)",
+        "كريات الدم البيضاء" to "White Blood Cell Count (WBC)", "خلايا الدم البيضاء" to "White Blood Cell Count (WBC)",
+        "كريات الدم الحمراء" to "Red Blood Cell Count (RBC)", "خلايا الدم الحمراء" to "Red Blood Cell Count (RBC)",
+        "الصفائح الدموية" to "Platelet Count", "الصفائح" to "Platelet Count",
+        "السكر الصائم" to "Fasting Blood Glucose", "سكر الدم الصائم" to "Fasting Blood Glucose",
+        "السكر التراكمي" to "Hemoglobin A1c (HbA1c)", "الهيموجلوبين السكري" to "Hemoglobin A1c (HbA1c)",
+        "فيتامين د" to "Vitamin D", "فيتامين ب١٢" to "Vitamin B12", "فيتامين ب12" to "Vitamin B12",
+        "الكوليسترول الكلي" to "Total Cholesterol", "الكوليسترول" to "Cholesterol",
+        "الدهون الثلاثية" to "Triglycerides", "الكرياتينين" to "Creatinine",
+        "اليوريا" to "Urea", "حمض اليوريك" to "Uric Acid",
+        "إنزيم الكبد alt" to "ALT", "انزيم الكبد alt" to "ALT",
+        "إنزيم الكبد ast" to "AST", "انزيم الكبد ast" to "AST",
+        "هرمون الغدة الدرقية tsh" to "Thyroid Stimulating Hormone (TSH)",
+        "تحليل البول" to "Urinalysis", "البول" to "Urinalysis"
+    )
+
+    private fun canonicalTestName(raw: String): String {
+        val cleaned = raw.trim().replace(Regex("\\s+"), " ")
+        val normalized = cleaned.lowercase(java.util.Locale.ROOT)
+            .replace('أ', 'ا').replace('إ', 'ا').replace('آ', 'ا')
+            .replace('ى', 'ي')
+        return arabicTestNames.entries.firstOrNull { (arabic, _) ->
+            val key = arabic.lowercase(java.util.Locale.ROOT)
+                .replace('أ', 'ا').replace('إ', 'ا').replace('آ', 'ا').replace('ى', 'ي')
+            normalized == key
+        }?.value ?: cleaned
+    }
     private val qualitativeValues = setOf("positive", "negative", "nil", "hazy", "trace",
         "إيجابي", "سلبي", "عكر", "آثار")
     private val isoDate = Regex("""\b(\d{4}-\d{2}-\d{2})\b""")
@@ -61,7 +90,7 @@ object LabReportParser {
         }
 
         fun add(nameRaw: String, resultRaw: String, referenceRaw: String?, unitRaw: String, source: String) {
-            val name = nameRaw.trim().trim(':', '-', '•')
+            val name = canonicalTestName(nameRaw.trim().trim(':', '-', '•'))
             val normalizedName = name.lowercase(java.util.Locale.ROOT).replace(Regex("\\s+"), " ")
             // Reject OCR status/reference labels and page furniture as test names.
             val rejectedName = normalizedName in setOf(

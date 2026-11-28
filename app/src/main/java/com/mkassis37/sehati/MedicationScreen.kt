@@ -15,6 +15,8 @@ import androidx.compose.ui.unit.dp
 import com.mkassis37.sehati.data.DoseLog
 import com.mkassis37.sehati.data.FamilyMember
 import com.mkassis37.sehati.data.MedicationRecord
+import com.mkassis37.sehati.data.isCurrentlyActiveOn
+import com.mkassis37.sehati.reminders.parseDoseTimes
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 
@@ -37,7 +39,8 @@ internal fun MedicationScreen(
     val editing = records.firstOrNull { it.id == editingId }
     var showForm by rememberSaveable(member.id) { mutableStateOf(false) }
     var showInactive by rememberSaveable(member.id) { mutableStateOf(initiallyShowInactive) }
-    val active = records.filter { it.isActive && !it.completed && (it.endDate.isEmpty() || it.endDate >= LocalDate.now().toString()) }
+    val today = LocalDate.now()
+    val active = records.filter { it.isCurrentlyActiveOn(today) }
     val visible = if (showInactive) records else active
     Column(modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("أدوية وعلاجات ${member.fullName}", style = MaterialTheme.typography.titleLarge)
@@ -63,9 +66,10 @@ internal fun MedicationScreen(
                                     if (record.strength.isNotBlank()) Text(record.strength, style = MaterialTheme.typography.bodySmall)
                                 }
                                 val treatmentStatus = when {
-                                    record.completed || (record.endDate.isNotBlank() && record.endDate < LocalDate.now().toString()) -> "مكتمل"
-                                    record.isActive -> "نشط"
-                                    else -> "متوقف"
+                                    record.completed || (record.endDate.isNotBlank() && runCatching { LocalDate.parse(record.endDate).isBefore(today) }.getOrDefault(false)) -> "مكتمل"
+                                    record.isCurrentlyActiveOn(today) -> "نشط"
+                                    record.isActive && record.startDate.isNotBlank() && runCatching { LocalDate.parse(record.startDate).isAfter(today) }.getOrDefault(false) -> "لم يبدأ بعد"
+                                    else -> "متوقف أو تاريخ غير صالح"
                                 }
                                 Text(treatmentStatus, style = MaterialTheme.typography.labelMedium)
                             }
@@ -165,6 +169,9 @@ private fun MedicationEditor(
             if (name.isBlank()) error = "أدخل اسم الدواء أو العلاج."
             else if (!validStart || !validEnd) error = "استخدم صيغة التاريخ YYYY-MM-DD."
             else if (end.isNotBlank() && end < start) error = "تاريخ الانتهاء يجب ألا يسبق البداية."
+            else if (times.isNotBlank() && times.split(',', '،', ';', '؛', '\n').map(String::trim).filter(String::isNotBlank).any { parseDoseTimes(it).size != 1 }) {
+                error = "أوقات الجرعات غير صحيحة. استخدم صيغة 08:00 أو 20:00 وافصل بينها بفاصلة."
+            }
             else onSave(MedicationRecord(
                 id = initial?.id ?: 0, memberId = memberId, name = name.trim(),
                 strength = strength.trim(), dosage = dosage.trim(), form = form.trim(),

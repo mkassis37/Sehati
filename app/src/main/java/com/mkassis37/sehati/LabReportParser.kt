@@ -166,7 +166,7 @@ object LabReportParser {
             val v = value.trim()
             return v.length in 1..24 &&
                 v.any { it.isLetter() || it == 'µ' || it == 'μ' || it == '%' } &&
-                !reference(v).let { it != null } &&
+                reference(v) == null &&
                 !looksLikeResult(v) &&
                 !v.equals("high", true) && !v.equals("low", true) &&
                 !v.equals("normal", true) && !v.equals("abnormal", true)
@@ -253,6 +253,10 @@ object LabReportParser {
         // Typical PDF text layer: each cell appears on its own line.
         var i = 0
         while (i + 3 < lines.size) {
+            if ((i..(i + 3)).any { it in consumedTableLines }) {
+                i++
+                continue
+            }
             val name = lines[i]
             val result = lines[i + 1]
             val ref = lines[i + 2]

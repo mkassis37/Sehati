@@ -16,6 +16,7 @@ import com.mkassis37.sehati.data.DoseLog
 import com.mkassis37.sehati.data.FamilyMember
 import com.mkassis37.sehati.data.MedicationRecord
 import com.mkassis37.sehati.data.isCurrentlyActiveOn
+import com.mkassis37.sehati.reminders.parseDoseTimes
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 
@@ -168,6 +169,9 @@ private fun MedicationEditor(
             if (name.isBlank()) error = "أدخل اسم الدواء أو العلاج."
             else if (!validStart || !validEnd) error = "استخدم صيغة التاريخ YYYY-MM-DD."
             else if (end.isNotBlank() && end < start) error = "تاريخ الانتهاء يجب ألا يسبق البداية."
+            else if (times.isNotBlank() && times.split(',', '،', ';', '؛', '\\n').map(String::trim).filter(String::isNotBlank).any { parseDoseTimes(it).size != 1 }) {
+                error = "أوقات الجرعات غير صحيحة. استخدم صيغة 08:00 أو 20:00 وافصل بينها بفاصلة."
+            }
             else onSave(MedicationRecord(
                 id = initial?.id ?: 0, memberId = memberId, name = name.trim(),
                 strength = strength.trim(), dosage = dosage.trim(), form = form.trim(),

@@ -1,5 +1,8 @@
 package com.mkassis37.sehati
 
+import android.content.Intent
+import android.net.Uri
+import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -36,6 +39,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.mkassis37.sehati.data.EncryptedBackup
 import com.mkassis37.sehati.drive.DriveAuthorization
@@ -60,6 +64,7 @@ internal enum class SettingsSection(val title: String, val subtitle: String) {
     MEDICATIONS("الأدوية والعلاجات", "الانتقال إلى سجل أدوية الفرد"),
     UPDATES("التحديثات والإصدار", "الإصدار الحالي وفحص التحديثات"),
     ABOUT("معلومات التطبيق", "النسخة والدعم والخصوصية"),
+    SUPPORT("الدعم المالي", "ساهم اختيارياً في استمرار تطوير صحتي"),
     DIAGNOSTICS("التطوير والتشخيص", "حالة الخدمات التقنية دون بيانات طبية")
 }
 
@@ -105,6 +110,7 @@ private fun SettingsSection.icon(): ImageVector = when (this) {
     SettingsSection.MEDICATIONS -> Icons.Outlined.Medication
     SettingsSection.UPDATES -> Icons.Outlined.SystemUpdateAlt
     SettingsSection.ABOUT -> Icons.Outlined.Info
+    SettingsSection.SUPPORT -> Icons.Outlined.Info
     SettingsSection.DIAGNOSTICS -> Icons.Outlined.BugReport
 }
 
@@ -169,6 +175,7 @@ internal fun SettingsSectionScreen(
             SettingsSection.MEDICATIONS -> MedicationSettingsSection(selectedMemberName, onOpenMedications, onSelectMember)
             SettingsSection.UPDATES -> UpdatesSection(updateStatus, updateBusy, onCheckUpdates)
             SettingsSection.ABOUT -> AboutSection()
+            SettingsSection.SUPPORT -> SupportSection()
             SettingsSection.DIAGNOSTICS -> DiagnosticsSection(backupLastSuccessAt)
         }
     }
@@ -287,6 +294,33 @@ private fun UpdatesSection(status: String, busy: Boolean, onCheck: () -> Unit) {
         Text(status, style = MaterialTheme.typography.bodySmall)
         OutlinedButton(enabled = !busy, onClick = onCheck) { Text(if (busy) "جارٍ الفحص…" else "فحص التحديثات") }
         Text("يتحقق المثبت من SHA-256 قبل فتح ملف التحديث. فحص الإصدارات متاح في بناء Release.", style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+@Composable
+private fun SupportSection() {
+    val context = LocalContext.current
+    InfoCard("ادعم تطوير صحتي") {
+        Text("إذا كان التطبيق مفيدًا لك ولعائلتك، يمكنك المساهمة اختياريًا في استمرار تطويره وتحسين ميزاته.")
+        Text("PayPal", style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.primary)
+        Button(
+            onClick = {
+                val paymentUri = Uri.parse("https://www.paypal.me/mkkwork")
+                runCatching {
+                    context.startActivity(Intent(Intent.ACTION_VIEW, paymentUri))
+                }.onFailure {
+                    Toast.makeText(context, "تعذر فتح PayPal. تحقق من اتصال الإنترنت أو وجود متصفح.", Toast.LENGTH_LONG).show()
+                }
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("ادعمنا عبر PayPal")
+        }
+        Text(
+            "المساهمة اختيارية وتتم على موقع PayPal. لا يجمع صحتي أي بيانات دفع ولا يخزن معلومات البطاقة أو الحساب.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 

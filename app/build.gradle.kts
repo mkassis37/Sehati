@@ -25,7 +25,7 @@ android {
         targetSdk = 36
         versionCode = 9
         versionName = "0.4.5"
-        buildConfigField("String", "SOURCE_COMMIT", "\"\${sourceCommit.get()}\"")
+        buildConfigField("String", "SOURCE_COMMIT", "\"${sourceCommit.get()}\"")
         buildConfigField("boolean", "GOOGLE_DRIVE_ENABLED", googleDriveEnabled.get().toString())
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

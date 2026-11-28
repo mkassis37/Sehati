@@ -310,4 +310,54 @@ class LabReportParserTest {
         assertEquals(141.0, rows.single().value!!, 0.0001)
     }
 
+
+    @Test
+    fun keepsMicroscopyResultRangesAndReferenceUnitsAsText() {
+        val rows = LabReportParser.parse(
+            "Pus Cells 2-3 0-5/HPF\n" +
+            "Red Cells 1-3 0-5/HPF"
+        )
+        assertEquals(2, rows.size)
+        val pus = rows.single { it.testName == "Pus Cells" }
+        assertEquals("2-3", pus.qualitativeValue)
+        assertEquals("/HPF", pus.unit)
+        assertEquals(0.0, pus.referenceLow!!, 0.0001)
+        assertEquals(5.0, pus.referenceHigh!!, 0.0001)
+        val red = rows.single { it.testName == "Red Cells" }
+        assertEquals("1-3", red.qualitativeValue)
+        assertEquals("/HPF", red.unit)
+    }
+
+    @Test
+    fun parsesComparisonResultWithoutDiscardingItsOperator() {
+        val rows = LabReportParser.parse(
+            "Specific Gravity <=1.005 1.015 - 1.025"
+        )
+        assertEquals(1, rows.size)
+        val result = rows.single()
+        assertEquals("<=1.005", result.qualitativeValue)
+        assertEquals(1.015, result.referenceLow!!, 0.0001)
+        assertEquals(1.025, result.referenceHigh!!, 0.0001)
+    }
+
+    @Test
+    fun readsHighAndLowFlagsPlacedBeforeTheResultValue() {
+        val rows = LabReportParser.parse(
+            "Lymphocytes H 45.3 % 18 - 44\n" +
+            "MPV L 6.8 fL 7.5 - 11.5\n" +
+            "HDL (High-density Lipoprotein) L 41.5 mg/dL 45.0 - 65.0"
+        )
+        assertEquals(3, rows.size)
+        val lymphocytes = rows.single { it.testName == "Lymphocytes" }
+        assertEquals(45.3, lymphocytes.value!!, 0.0001)
+        assertEquals("H", lymphocytes.flag)
+        val mpv = rows.single { it.testName == "MPV" }
+        assertEquals(6.8, mpv.value!!, 0.0001)
+        assertEquals("L", mpv.flag)
+        val hdl = rows.single { it.testName.startsWith("HDL") }
+        assertEquals(41.5, hdl.value!!, 0.0001)
+        assertEquals("L", hdl.flag)
+        assertEquals(45.0, hdl.referenceLow!!, 0.0001)
+    }
+
 }

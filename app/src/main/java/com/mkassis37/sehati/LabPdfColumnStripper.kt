@@ -28,7 +28,7 @@ internal fun reconstructLabPdfLine(glyphs: List<PositionedLabGlyph>): String {
             if (prior != null) {
                 val gap = glyph.left - prior
                 when {
-                    gap >= typicalHeight * 1.8f -> append('\t')
+                    gap >= typicalHeight * 1.5f -> append('\t')
                     gap >= typicalHeight * 0.28f -> append(' ')
                 }
             }

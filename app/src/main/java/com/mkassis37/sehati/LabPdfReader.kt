@@ -7,7 +7,6 @@ import android.graphics.pdf.PdfRenderer
 import com.googlecode.tesseract.android.TessBaseAPI
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import com.tom_roush.pdfbox.pdmodel.PDDocument
-import com.tom_roush.pdfbox.text.PDFTextStripper
 import java.io.File
 import android.net.Uri
 import android.os.ParcelFileDescriptor
@@ -113,7 +112,7 @@ fun LabPdfReader(onExtractedText: (String) -> Unit, onCandidateSelected: (LabRep
                         val pageTexts = context.contentResolver.openInputStream(uri)?.use { input ->
                             runCatching {
                                 PDDocument.load(input).use { document ->
-                                    val stripper = PDFTextStripper()
+                                    val stripper = LabColumnAwareTextStripper()
                                     List(pages) { index ->
                                         ensureActive()
                                         stripper.startPage = index + 1

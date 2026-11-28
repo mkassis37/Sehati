@@ -6,10 +6,10 @@ import org.junit.Test
 
 class SettingsSectionTest {
     @Test
-    fun settingsHubContainsTenDistinctSections() {
+    fun settingsHubContainsElevenDistinctSections() {
         val sections = SettingsSection.entries
-        assertEquals(10, sections.size)
-        assertEquals(10, sections.map { it.title }.distinct().size)
+        assertEquals(11, sections.size)
+        assertEquals(11, sections.map { it.title }.distinct().size)
         assertTrue(sections.all { it.title.isNotBlank() && it.subtitle.isNotBlank() })
     }
 }

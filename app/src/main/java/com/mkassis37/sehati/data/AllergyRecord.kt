@@ -31,8 +31,9 @@ fun String.isLifeThreateningAllergySeverity(): Boolean {
     // Explicit negation must not be promoted to a life-threatening warning.
     val negations = listOf(
         "غير مهددة للحياة", "غير مهدده للحياه", "ليست مهددة للحياة",
-        "ليست مهدده للحياه", "not life threatening", "non life threatening",
-        "not anaphylactic", "no anaphylaxis"
+        "ليست مهدده للحياه", "غير مهدد للحياة", "غير مهدد للحياه",
+        "لا تهدد الحياة", "لا تهدد الحياه", "not life threatening",
+        "non life threatening", "not anaphylactic", "no anaphylaxis"
     )
     if (negations.any(normalized::contains)) return false
 

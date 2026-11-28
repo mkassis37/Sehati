@@ -64,8 +64,9 @@ internal fun mergeLabOcrTokens(tokens: List<LabOcrToken>): String {
         }?.takeIf { existing ->
             val center = existing.map { it.centerY }.average().toFloat()
             val typicalHeight = existing.map { it.height }.sorted()[existing.size / 2]
-            val verticalOverlap = existing.maxOf { minOf(it.bottom, token.bottom) } -
-                existing.minOf { maxOf(it.top, token.top) }
+            val verticalOverlap = existing.maxOf { candidate ->
+                (minOf(candidate.bottom, token.bottom) - maxOf(candidate.top, token.top)).coerceAtLeast(0)
+            }
             val minimumHeight = minOf(existing.minOf { it.height }, token.height).coerceAtLeast(1)
             verticalOverlap.toFloat() / minimumHeight >= 0.30f ||
                 kotlin.math.abs(center - token.centerY) <= maxOf(typicalHeight, token.height) * 0.45f

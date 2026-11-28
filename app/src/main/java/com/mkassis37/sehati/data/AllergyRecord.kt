@@ -37,10 +37,13 @@ fun String.isLifeThreateningAllergySeverity(): Boolean {
     )
     if (negations.any(normalized::contains)) return false
 
+    // normalizeAllergySeverity maps Arabic alif maqsura (ى) to ya (ي),
+    // so "على" is normalized to "علي" before matching.
     val phrases = listOf(
         "مهددة للحياة", "مهدده للحياه", "مهددة للحياه", "مهدده للحياة",
         "مهدد للحياة", "مهدد للحياه", "تهدد الحياة", "تهدد الحياه",
-        "خطر على الحياة", "صدمة تحسسية", "صدمة الحساسية", "تاق",
+        "خطر علي الحياة", "خطر علي الحياه",
+        "صدمة تحسسية", "صدمة الحساسية", "تاق",
         "life threatening", "anaphylaxis", "anaphylactic shock", "anaphylactic"
     )
     return phrases.any(normalized::contains)

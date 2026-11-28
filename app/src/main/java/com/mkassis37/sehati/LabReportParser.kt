@@ -139,13 +139,15 @@ object LabReportParser {
 
         // Header-aware table parsing: supports reordered columns and common lab-specific labels.
         fun splitColumns(line: String): List<String> {
-            val separator = when {
-                line.contains('|') -> Regex("\\s*\\|\\s*")
-                line.contains('\t') -> Regex("\\t+")
-                Regex("\\s{2,}").containsMatchIn(line) -> Regex("\\s{2,}")
-                else -> return emptyList()
+            // Use literal delimiters for pipe/tab tables. This preserves empty
+            // result/flag cells and avoids regex whitespace consuming cell edges.
+            return when {
+                line.contains('|') -> line.split('|', ignoreCase = false, limit = Int.MAX_VALUE).map(String::trim)
+                line.contains('\t') -> line.split('\t', ignoreCase = false, limit = Int.MAX_VALUE).map(String::trim)
+                Regex("\\s{2,}").containsMatchIn(line) ->
+                    line.trim().split(Regex("\\s{2,}"), limit = Int.MAX_VALUE).map(String::trim)
+                else -> emptyList()
             }
-            return line.trim().split(separator, limit = Int.MAX_VALUE).map(String::trim)
         }
 
         fun headerSchema(cells: List<String>): TableSchema? {
@@ -171,7 +173,7 @@ object LabReportParser {
             val refIndex = headers.indices.firstOrNull { index ->
                 index != refLowIndex && index != refHighIndex &&
                     (headers[index].contains("reference") || headers[index].contains("ref range") ||
-                        headers[index].contains("normal range") || headers[index].contains("المدى الطبيعي") ||
+                        headers[index].contains("normal range") || headers[index].contains("reference interval") || headers[index].contains("المدى الطبيعي") ||
                         headers[index].contains("المعدل الطبيعي"))
             } ?: -1
             val unitIndex = headers.indexOfFirst {

@@ -74,16 +74,21 @@ internal fun mergeLabOcrTokens(tokens: List<LabOcrToken>): String {
     }
 
     return rows.sortedBy { row -> row.map { it.centerY }.average() }.joinToString("\n") { row ->
-        val arabicCount = row.count { it.isArabic }
-        val latinCount = row.size - arabicCount
-        val ordered = if (arabicCount > latinCount) row.sortedByDescending { it.left }
+        val arabicTokens = row.filter { it.isArabic }
+        val rowMidpoint = row.map { (it.left + it.right) / 2f }.average().toFloat()
+        val arabicMidpoint = arabicTokens.takeIf { it.isNotEmpty() }
+            ?.map { (it.left + it.right) / 2f }?.average()?.toFloat()
+        // Infer row direction from where Arabic text sits in the table, rather
+        // than from the total number of Latin digits and unit tokens.
+        val rightToLeft = arabicMidpoint != null && arabicMidpoint > rowMidpoint
+        val ordered = if (rightToLeft) row.sortedByDescending { it.left }
             else row.sortedBy { it.left }
         val typicalHeight = ordered.map { it.height }.sorted()[ordered.size / 2].coerceAtLeast(1)
         buildString {
             var previous: LabOcrToken? = null
             ordered.forEach { token ->
                 previous?.let { prior ->
-                    val gap = if (arabicCount > latinCount) prior.left - token.right
+                    val gap = if (rightToLeft) prior.left - token.right
                         else token.left - prior.right
                     when {
                         gap >= typicalHeight * 1.8f -> append('\t')

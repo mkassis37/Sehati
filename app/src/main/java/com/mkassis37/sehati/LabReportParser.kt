@@ -185,7 +185,9 @@ object LabReportParser {
             val lower = v.lowercase(java.util.Locale.ROOT)
             val knownStandaloneUnits = setOf(
                 "fl", "pg", "sec", "secs", "second", "seconds", "mmhg",
-                "mosm/kg", "mosm/l", "iu", "m iu", "copies"
+                "ml", "l", "dl", "g", "mg", "ug", "mcg", "mmol", "umol",
+                "nmol", "pmol", "mol", "meq", "iu", "miu", "uiu", "cells", "cell",
+                "mosm/kg", "mosm/l", "copies"
             )
             val hasUnitSyntax = v.contains('/') || v.contains('%') ||
                 v.contains('µ') || v.contains('μ') ||

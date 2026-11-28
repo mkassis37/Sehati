@@ -57,6 +57,11 @@ object LabReportParser {
     private val monthDate = Regex("""\b([A-Za-z]{3,9})\s+(\d{1,2}),\s*(\d{4})\b""")
     private val numericResult = Regex("""^([+-]?(?:\d+(?:[.,]\d*)?|[.,]\d+))\s*([LH*])?$""")
     private val numericRange = Regex("""^([+-]?(?:\d+(?:[.,]\d*)?|[.,]\d+))\s*[-–]\s*([+-]?(?:\d+(?:[.,]\d*)?|[.,]\d+))$""")
+    private val comparatorResult = Regex("""^(?:<=?|>=?)\s*[+-]?(?:\d+(?:[.,]\d*)?|[.,]\d+)$""")
+    private val referenceWithUnit = Regex(
+        """^((?:[+-]?(?:\d+(?:[.,]\d*)?|[.,]\d+)\s*[-–]\s*[+-]?(?:\d+(?:[.,]\d*)?|[.,]\d+))|(?:<=?|>=?)\s*[+-]?(?:\d+(?:[.,]\d*)?|[.,]\d+))\s*/\s*([A-Za-zµμ0-9^]+)$""",
+        RegexOption.IGNORE_CASE
+    )
     private val upperLimit = Regex("""^(?:Ref\s*:\s*)?<=?\s*([+-]?(?:\d+(?:[.,]\d*)?|[.,]\d+))$""", RegexOption.IGNORE_CASE)
     private val lowerLimit = Regex("""^(?:Ref\s*:\s*)?>=?\s*([+-]?(?:\d+(?:[.,]\d*)?|[.,]\d+))$""", RegexOption.IGNORE_CASE)
     private val inlineRow = Regex(
@@ -93,6 +98,12 @@ object LabReportParser {
             return null
         }
 
+        fun splitReferenceUnit(raw: String?): Pair<String?, String?> {
+            val value = raw?.trim().orEmpty()
+            val match = referenceWithUnit.matchEntire(value) ?: return value.takeIf { it.isNotBlank() } to null
+            return match.groupValues[1] to "/" + match.groupValues[2]
+        }
+
         fun add(nameRaw: String, resultRaw: String, referenceRaw: String?, unitRaw: String, source: String, flagRaw: String? = null) {
             val name = canonicalTestName(nameRaw.trim().trim(':', '-', '•'))
             val normalizedName = name.lowercase(java.util.Locale.ROOT).replace(Regex("\\s+"), " ")
@@ -109,9 +120,13 @@ object LabReportParser {
             val resultText = resultRaw.trim()
             val result = numericResult.matchEntire(resultText)
             val value = result?.groupValues?.get(1)?.let(::numeric)
-            val qualitative = resultText.takeIf { it.lowercase() in qualitativeValues }
+            val lowerResult = resultText.lowercase(java.util.Locale.ROOT)
+            val qualitative = resultText.takeIf {
+                lowerResult in qualitativeValues || numericRange.matches(resultText) ||
+                    comparatorResult.matches(resultText)
+            }
             if (value == null && qualitative == null) return
-            val ref = if (qualitative == null) reference(referenceRaw) else null
+            val ref = reference(referenceRaw)
             val unit = unitRaw.trim()
             if (name.length !in 2..70 || name.none { it.isLetter() } ||
                 unit.length > 24) return
@@ -177,8 +192,11 @@ object LabReportParser {
             return TableSchema(testIndex, resultIndices, refIndex, refLowIndex, refHighIndex, unitIndex, flagIndex, cells.size)
         }
 
-        fun looksLikeResult(value: String): Boolean =
-            numericResult.matches(value.trim()) || value.trim().lowercase(java.util.Locale.ROOT) in qualitativeValues
+        fun looksLikeResult(value: String): Boolean {
+            val clean = value.trim()
+            return numericResult.matches(clean) || numericRange.matches(clean) ||
+                comparatorResult.matches(clean) || clean.lowercase(java.util.Locale.ROOT) in qualitativeValues
+        }
 
         fun likelyUnit(value: String): Boolean {
             val v = value.trim()
@@ -221,13 +239,14 @@ object LabReportParser {
                 if (testName.isNotBlank() && resultCells.size == 1) {
                     val lowCell = row.getOrNull(schema.referenceLowIndex).orEmpty().trim()
                     val highCell = row.getOrNull(schema.referenceHighIndex).orEmpty().trim()
-                    val refCell = when {
+                    val refCellRaw = when {
                         lowCell.isNotBlank() && highCell.isNotBlank() -> "$lowCell - $highCell"
                         lowCell.isNotBlank() -> ">= $lowCell"
                         highCell.isNotBlank() -> "<= $highCell"
                         else -> row.getOrNull(schema.referenceIndex)?.takeIf(String::isNotBlank)
                     }
-                    val unitCell = row.getOrNull(schema.unitIndex).orEmpty()
+                    val (refCell, unitFromReference) = splitReferenceUnit(refCellRaw)
+                    val unitCell = row.getOrNull(schema.unitIndex).orEmpty().ifBlank { unitFromReference.orEmpty() }
                     val flagCell = row.getOrNull(schema.flagIndex)
                     add(testName, resultCells.single(), refCell, unitCell, line, flagCell)
                     return@forEachIndexed
@@ -240,12 +259,16 @@ object LabReportParser {
                 if (resultIndex > 0) {
                     val testName = cells.take(resultIndex).joinToString(" ").trim()
                     val tail = cells.drop(resultIndex + 1)
-                    val refCell = tail.firstOrNull { reference(it) != null }
+                    val refCandidate = tail.firstOrNull {
+                        reference(it) != null || reference(splitReferenceUnit(it).first) != null
+                    }
+                    val (refCell, unitFromReference) = splitReferenceUnit(refCandidate)
                     val flagCell = tail.firstOrNull {
                         it.equals("H", true) || it.equals("L", true) ||
                             it.equals("A", true) || it.equals("*") || it.equals("ABN", true)
                     }
-                    val unitCell = tail.firstOrNull { it != refCell && it != flagCell && likelyUnit(it) }.orEmpty()
+                    val unitCell = tail.firstOrNull { it != refCandidate && it != flagCell && likelyUnit(it) }
+                        ?: unitFromReference.orEmpty()
                     if (testName.isNotBlank()) {
                         add(testName, cells[resultIndex], refCell, unitCell, line, flagCell)
                         consumedTableLines += lineIndex
@@ -297,10 +320,10 @@ object LabReportParser {
             val unit = lines[i + 3]
             val isHeader = name.contains("test name", true) || name.equals("result", true) ||
                 name.contains("laboratory report", true) || name.contains("reference", true)
-            if (!isHeader && numericResult.matches(result) &&
-                (numericRange.matches(ref.removeSurrounding("(", ")")) ||
-                    upperLimit.matches(ref) || lowerLimit.matches(ref))) {
-                add(name, result, ref, unit, listOf(name, result, ref, unit).joinToString(" | "))
+            val (referenceValue, unitFromReference) = splitReferenceUnit(ref)
+            if (!isHeader && looksLikeResult(result) && reference(referenceValue) != null) {
+                add(name, result, referenceValue, unit.ifBlank { unitFromReference.orEmpty() },
+                    listOf(name, result, ref, unit).joinToString(" | "))
                 i += 4
             } else {
                 i++
@@ -317,10 +340,35 @@ object LabReportParser {
             """^(.+?)\s+(Positive|Negative|Pos|Neg|Nil|Hazy|Trace|Absent|Present|Clear|Yellow|Straw|Normal|Not detected|Not seen|Few|Many|No growth|إيجابي|ايجابي|سلبي|موجب|سالب|عكر|آثار|صافي)\s+(.+?)$""",
             RegexOption.IGNORE_CASE
         )
+        val inlinePrefixFlagResult = Regex(
+            """^(.+?)\\s+([LH*])\\s+([+-]?(?:\\d+(?:[.,]\\d*)?|[.,]\\d+))\\s+([A-Za-zµμ/%0-9'._/-]+)\\s+(.+)$""",
+            RegexOption.IGNORE_CASE
+        )
+        val microscopyRangeRow = Regex(
+            """^(.+?)\\s+((?:[+-]?(?:\\d+(?:[.,]\\d*)?|[.,]\\d+)\\s*[-–]\\s*[+-]?(?:\\d+(?:[.,]\\d*)?|[.,]\\d+)))\\s+((?:[+-]?(?:\\d+(?:[.,]\\d*)?|[.,]\\d+)\\s*[-–]\\s*[+-]?(?:\\d+(?:[.,]\\d*)?|[.,]\\d+)))(?:\\s*/\\s*([A-Za-zµμ0-9^]+))?$"""
+        )
+        val comparatorResultRow = Regex(
+            """^(.+?)\\s+(<=?|>=?)\\s*([+-]?(?:\\d+(?:[.,]\\d*)?|[.,]\\d+))\\s+((?:[+-]?(?:\\d+(?:[.,]\\d*)?|[.,]\\d+)\\s*[-–]\\s*[+-]?(?:\\d+(?:[.,]\\d*)?|[.,]\\d+))|(?:<=?|>=?)\\s*[+-]?(?:\\d+(?:[.,]\\d*)?|[.,]\\d+))$"""
+        )
+
         lines.forEach { line ->
+            inlinePrefixFlagResult.matchEntire(line)?.let { match ->
+                val (refValue, unitFromReference) = splitReferenceUnit(match.groupValues[5])
+                add(match.groupValues[1], match.groupValues[3], refValue,
+                    match.groupValues[4].ifBlank { unitFromReference.orEmpty() }, line, match.groupValues[2])
+            }
             resultUnitReference.matchEntire(line)?.let { match ->
+                val (refValue, unitFromReference) = splitReferenceUnit(match.groupValues[5])
                 add(match.groupValues[1], match.groupValues[2] + match.groupValues[3],
-                    match.groupValues[5], match.groupValues[4], line)
+                    refValue, match.groupValues[4].ifBlank { unitFromReference.orEmpty() }, line)
+            }
+            microscopyRangeRow.matchEntire(line)?.let { match ->
+                val unit = match.groupValues[4].takeIf { it.isNotBlank() }?.let { "/$it" }.orEmpty()
+                add(match.groupValues[1], match.groupValues[2], match.groupValues[3], unit, line)
+            }
+            comparatorResultRow.matchEntire(line)?.let { match ->
+                add(match.groupValues[1], match.groupValues[2] + match.groupValues[3],
+                    match.groupValues[4], "", line)
             }
             qualitativeRow.matchEntire(line)?.let { match ->
                 add(match.groupValues[1], match.groupValues[2], null, "", line)

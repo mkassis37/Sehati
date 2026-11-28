@@ -2,6 +2,7 @@ package com.mkassis37.sehati
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.content.Intent
 import android.graphics.pdf.PdfRenderer
 import com.googlecode.tesseract.android.TessBaseAPI
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
@@ -217,6 +218,21 @@ fun LabPdfReader(onExtractedText: (String) -> Unit, onCandidateSelected: (LabRep
                         finally { savingPdf = false }
                     }
                 }) { Text(if (pdfSaved) "تم حفظ التقرير" else if (savingPdf) "جارٍ حفظ التقرير..." else "حفظ الملف الأصلي") }
+            }
+            if (selectedUri != null) {
+                Button(enabled = !busy && !savingPdf, onClick = {
+                    val uri = selectedUri ?: return@Button
+                    val mimeType = context.contentResolver.getType(uri)
+                        ?: if (isImage) "image/*" else "application/pdf"
+                    val send = Intent(Intent.ACTION_SEND).setType(mimeType)
+                        .putExtra(Intent.EXTRA_STREAM, uri)
+                        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    runCatching {
+                        context.startActivity(Intent.createChooser(send, "مشاركة تقرير المختبر"))
+                    }.onFailure {
+                        status = "تعذرت مشاركة الملف. احفظيه أولًا ثم حاولي مشاركته من الملفات."
+                    }
+                }) { Text("مشاركة التقرير الأصلي") }
             }
             Text(status, style = MaterialTheme.typography.bodySmall)
             if (busy) CircularProgressIndicator()

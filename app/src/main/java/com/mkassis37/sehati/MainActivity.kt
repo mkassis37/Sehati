@@ -1248,7 +1248,7 @@ private fun AllergyScreen(
         AlertDialog(
             onDismissRequest = { if (!saving) pendingDelete = null },
             title = { Text(if (record.severity.isLifeThreateningAllergySeverity()) "حذف حساسية مهددة للحياة؟" else "حذف سجل الحساسية؟") },
-            text = { Text("سيُحذف سجل ${record.substance.ifBlank { record.commercialName.ifBlank { "الحساسية" } }} نهائيًا من ملف ${member.fullName}. لا يمكن التراجع عن الحذف.") },
+            text = { Column { Text("سيُحذف سجل ${record.substance.ifBlank { record.commercialName.ifBlank { "الحساسية" } }} نهائيًا من ملف ${member.fullName}. لا يمكن التراجع عن الحذف."); if (operationError.isNotBlank()) Text(operationError, color = MaterialTheme.colorScheme.error) } },
             confirmButton = { TextButton(enabled = !saving, onClick = {
                 scope.launch {
                     saving = true; operationError = ""
@@ -1262,7 +1262,7 @@ private fun AllergyScreen(
         )
     }
     if (showDialog && (editingId == null || recordToEdit != null)) {
-        AllergyDialog(member.id, initial = recordToEdit, saving = saving,
+        AllergyDialog(member.id, initial = recordToEdit, saving = saving, error = operationError,
             onDismiss = { if (!saving) showDialog = false },
             onSave = { record ->
                 scope.launch {
@@ -1279,7 +1279,7 @@ private fun AllergyScreen(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun AllergyDialog(memberId: Long, initial: AllergyRecord?, saving: Boolean = false, onDismiss: () -> Unit, onSave: (AllergyRecord) -> Unit) {
+private fun AllergyDialog(memberId: Long, initial: AllergyRecord?, saving: Boolean = false, error: String = "", onDismiss: () -> Unit, onSave: (AllergyRecord) -> Unit) {
     val knownCategories = listOf("دواء", "طعام", "حساسية أخرى", "مسبب آخر", "مادة بيئية", "لسعة أو لدغة حشرة")
     val knownSeverities = listOf("مهددة للحياة", "شديدة", "متوسطة", "خفيفة", "غير معروفة")
     var category by rememberSaveable(initial?.id) { mutableStateOf(initial?.category?.takeIf { it in knownCategories } ?: if (initial == null) "دواء" else "أخرى") }
@@ -1350,6 +1350,7 @@ private fun AllergyDialog(memberId: Long, initial: AllergyRecord?, saving: Boole
                     }
                 }
                 if (severity == "أخرى") OutlinedTextField(customSeverity, { customSeverity = it }, label = { Text("اكتبي تصنيف الشدة") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                 OutlinedTextField(notes, { notes = it }, label = { Text("ملاحظات إضافية") },
                     modifier = Modifier.fillMaxWidth(), minLines = 2)
             }

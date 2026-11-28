@@ -45,6 +45,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.mkassis37.sehati.data.AllergyRecord
+import com.mkassis37.sehati.data.isLifeThreateningAllergySeverity
+import com.mkassis37.sehati.data.isSevereAllergySeverity
 import com.mkassis37.sehati.data.BodyMeasurement
 import com.mkassis37.sehati.data.ChronicCondition
 import com.mkassis37.sehati.data.FamilyDiseaseHistory
@@ -228,7 +230,21 @@ private fun SummaryPanel(member: FamilyMember, conditions: List<ChronicCondition
                 if (member.medicalNotes.isNotBlank()) ProfileInfoLine("ملاحظات طبية", member.medicalNotes)
             }
         }
-        val severe = allergies.filter { it.severity.contains("شديد") || it.severity.contains("high", true) }
+        val lifeThreatening = allergies.filter { it.severity.isLifeThreateningAllergySeverity() }
+        val severe = allergies.filter { it.severity.isSevereAllergySeverity() && !it.severity.isLifeThreateningAllergySeverity() }
+        if (lifeThreatening.isNotEmpty()) Card(Modifier.fillMaxWidth(), colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("تحذير مهم: حساسيات مهددة للحياة (${lifeThreatening.size})", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.titleMedium)
+                lifeThreatening.forEach { allergy ->
+                    Text(allergy.substance.ifBlank { allergy.commercialName.ifBlank { allergy.activeIngredient.ifBlank { "حساسية دون اسم" } } }, style = MaterialTheme.typography.titleSmall)
+                    Text("المادة الفعالة: ${allergy.activeIngredient.ifBlank { "غير مسجلة" }}")
+                    Text("رد الفعل: ${allergy.reaction.ifBlank { "غير مسجل" }}")
+                    Text("التصنيف: ${allergy.category} · الشدة: ${allergy.severity}")
+                    if (allergy.notes.isNotBlank()) Text("ملاحظات: ${allergy.notes}")
+                }
+                Text("أبلغي الطبيب أو الطاقم الطبي بهذه الحساسية عند كل زيارة.", color = MaterialTheme.colorScheme.onErrorContainer, style = MaterialTheme.typography.bodySmall)
+            }
+        }
         if (severe.isNotEmpty()) Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp)) {
             Text("حساسيات شديدة مسجلة", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.titleMedium)
             severe.forEach { Text("${it.substance.ifBlank { it.commercialName }} — ${it.reaction}") }
@@ -318,24 +334,38 @@ private fun ProcedurePanel(rows: List<MedicalProcedure>, documents: List<Medical
 
 @Composable
 private fun EmergencyPanel(member: FamilyMember, allergies: List<AllergyRecord>, medications: List<MedicationRecord>, conditions: List<ChronicCondition>, onEdit: () -> Unit) {
+    val lifeThreatening = allergies.filter { it.severity.isLifeThreateningAllergySeverity() }
+    val displayedAllergies = (if (member.emergencyShowAllergies) allergies else lifeThreatening).sortedWith(
+        compareBy<AllergyRecord> { when { it.severity.isLifeThreateningAllergySeverity() -> 0; it.severity.isSevereAllergySeverity() -> 1; else -> 2 } }.thenByDescending { it.createdAt }
+    )
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("بطاقة الطوارئ", style = MaterialTheme.typography.headlineSmall)
         Text("هذه البطاقة داخل التطبيق فقط، ولا تظهر على شاشة القفل. اختاري المعلومات التي تريدين عرضها.", style = MaterialTheme.typography.bodyMedium)
         Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(member.fullName, style = MaterialTheme.typography.titleLarge)
             Text("الميلاد: ${member.dateOfBirth.toDisplayDate().ifBlank { "غير مسجل" }} • فصيلة الدم: ${member.bloodGroup.ifBlank { "غير مسجلة" }}")
-            if (member.emergencyShowAllergies) {
+            if (member.emergencyShowAllergies || lifeThreatening.isNotEmpty()) {
                 Text("الحساسيات", style = MaterialTheme.typography.titleMedium)
-                Text(allergies.joinToString("\n") { "${it.substance.ifBlank { it.commercialName.ifBlank { "غير محددة" } }} — ${it.severity} — ${it.reaction}" }.ifBlank { "لا توجد حساسيات مسجلة" })
+                if (!member.emergencyShowAllergies && lifeThreatening.isNotEmpty()) Text("تم إخفاء بقية الحساسيات حسب الإعداد، مع إبقاء تحذيرات الحساسية المهددة للحياة ظاهرة.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                displayedAllergies.forEach { allergy ->
+                    val critical = allergy.severity.isLifeThreateningAllergySeverity()
+                    Card(Modifier.fillMaxWidth(), colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = if (critical) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceVariant)) {
+                        Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                            if (critical) Text("⚠ تحذير: حساسية مهددة للحياة", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.titleSmall)
+                            Text(allergy.substance.ifBlank { allergy.commercialName.ifBlank { allergy.activeIngredient.ifBlank { "حساسية دون اسم" } } }, style = MaterialTheme.typography.titleMedium)
+                            if (allergy.commercialName.isNotBlank()) Text("الاسم التجاري: ${allergy.commercialName}")
+                            if (allergy.activeIngredient.isNotBlank()) Text("المادة الفعالة: ${allergy.activeIngredient}")
+                            Text("المسبب: ${allergy.substance.ifBlank { "غير مسجل" }}")
+                            Text("التصنيف: ${allergy.category}")
+                            Text("رد الفعل: ${allergy.reaction.ifBlank { "غير مسجل" }}")
+                            Text("درجة الخطورة: ${allergy.severity.ifBlank { "غير محددة" }}")
+                            if (allergy.notes.isNotBlank()) Text("ملاحظات: ${allergy.notes}")
+                        }
+                    }
+                }
             }
-            if (member.emergencyShowMedications) {
-                Text("الأدوية الحالية", style = MaterialTheme.typography.titleMedium)
-                Text(medications.filter { it.isActive }.joinToString("\n") { "${it.name} ${it.strength} — ${it.dosage}" }.ifBlank { "لا توجد أدوية نشطة مسجلة" })
-            }
-            if (member.emergencyShowConditions) {
-                Text("الحالات الصحية", style = MaterialTheme.typography.titleMedium)
-                Text(conditions.filter { it.status != "متوقف" }.joinToString("\n") { "${it.name} — ${it.status}" }.ifBlank { "لا توجد حالات مسجلة" })
-            }
+            if (member.emergencyShowMedications) { Text("الأدوية الحالية", style = MaterialTheme.typography.titleMedium); Text(medications.filter { it.isActive }.joinToString("\n") { "${it.name} ${it.strength} — ${it.dosage}" }.ifBlank { "لا توجد أدوية نشطة مسجلة" }) }
+            if (member.emergencyShowConditions) { Text("الحالات الصحية", style = MaterialTheme.typography.titleMedium); Text(conditions.filter { it.status != "متوقف" }.joinToString("\n") { "${it.name} — ${it.status}" }.ifBlank { "لا توجد حالات مسجلة" }) }
             if (member.emergencyShowNotes && member.medicalNotes.isNotBlank()) Text("ملاحظات مهمة: ${member.medicalNotes}")
             Text("جهة اتصال للطوارئ", style = MaterialTheme.typography.titleMedium)
             Text("${member.emergencyContactName.ifBlank { "غير مسجل" }} • ${member.emergencyContactPhone.ifBlank { "لا يوجد رقم" }} • ${member.emergencyContactRelation.ifBlank { "صلة القرابة غير محددة" }}")
@@ -343,7 +373,6 @@ private fun EmergencyPanel(member: FamilyMember, allergies: List<AllergyRecord>,
         Button(onClick = onEdit, modifier = Modifier.fillMaxWidth()) { Text("تعديل البطاقة ومعلومات العرض") }
     }
 }
-
 @Composable
 private fun TimelinePanel(items: List<MedicalTimelineItem>, onOpen: (String, Long) -> Unit) {
     Column(Modifier.fillMaxSize().padding(16.dp)) {
@@ -468,7 +497,7 @@ private fun EmergencyEditor(member: FamilyMember, onDismiss: () -> Unit, onSave:
             PreferenceRow("إظهار الأدوية النشطة", showMeds) { showMeds = it }
             PreferenceRow("إظهار الحالات المزمنة", showConditions) { showConditions = it }
             PreferenceRow("إظهار الملاحظات الطبية", showNotes) { showNotes = it }
-            Text("لا تظهر هذه البطاقة على شاشة القفل.", style = MaterialTheme.typography.bodySmall)
+            Text("لا تظهر هذه البطاقة على شاشة القفل. تبقى تحذيرات الحساسية المهددة للحياة ظاهرة في بطاقة الطوارئ حتى عند إخفاء بقية الحساسيات.", style = MaterialTheme.typography.bodySmall)
         }
     }, confirmButton = { TextButton(onClick = { onSave(member.copy(emergencyContactName = name.trim(), emergencyContactPhone = phone.trim(), emergencyContactRelation = relation.trim(), emergencyShowAllergies = showAllergies, emergencyShowMedications = showMeds, emergencyShowConditions = showConditions, emergencyShowNotes = showNotes)) }) { Text("حفظ") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("إلغاء") } })
 }

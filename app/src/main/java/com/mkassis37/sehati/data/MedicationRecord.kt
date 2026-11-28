@@ -31,3 +31,21 @@ data class MedicationRecord(
     val updatedAt: Long = System.currentTimeMillis(),
     @ColumnInfo(defaultValue = "0") val completed: Boolean = false
 )
+
+
+/**
+ * Whether this treatment is active on [date], considering its start and end dates.
+ * Blank dates remain supported for legacy records; malformed nonblank dates are
+ * excluded rather than being silently treated as current medication.
+ */
+fun MedicationRecord.isCurrentlyActiveOn(date: java.time.LocalDate): Boolean {
+    if (!isActive || completed) return false
+    val start = startDate.takeIf(String::isNotBlank)?.let {
+        runCatching { java.time.LocalDate.parse(it) }.getOrNull() ?: return false
+    }
+    val end = endDate.takeIf(String::isNotBlank)?.let {
+        runCatching { java.time.LocalDate.parse(it) }.getOrNull() ?: return false
+    }
+    return (start == null || !start.isAfter(date)) &&
+        (end == null || !end.isBefore(date))
+}

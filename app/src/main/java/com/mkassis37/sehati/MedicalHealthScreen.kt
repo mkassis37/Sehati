@@ -435,6 +435,7 @@ private fun MedicalRecordDialog(kind: String, title: String, labels: List<String
     }
     val dateIndices = when (kind) { "condition" -> setOf(1); "procedure" -> setOf(1); "history" -> setOf(2); "measurement" -> setOf(0); else -> emptySet() }
     var validation by remember(kind, initial) { mutableStateOf("") }
+    var saveError by remember(kind, initial) { mutableStateOf("") }
     var expandedIndex by remember(kind, initial) { mutableIntStateOf(-1) }
     var saving by remember(kind, initial) { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -465,6 +466,10 @@ private fun MedicalRecordDialog(kind: String, title: String, labels: List<String
                 } else OutlinedTextField(value = values[index], onValueChange = { updateValue(index, it) }, label = { Text(label) }, modifier = Modifier.fillMaxWidth(), singleLine = label != "ملاحظات")
             }
             if (validation.isNotBlank()) Text(validation, color = MaterialTheme.colorScheme.error)
+            if (saveError.isNotBlank()) {
+                Text(saveError, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
+                Text("لم يُغلق النموذج؛ يمكنك مراجعة البيانات والمحاولة مرة أخرى.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+            }
         } },
         confirmButton = { TextButton(enabled = !saving, onClick = {
             val requiredIndex = if (kind == "history") 1 else if (kind == "family") 1 else 0
@@ -472,9 +477,14 @@ private fun MedicalRecordDialog(kind: String, title: String, labels: List<String
             else if (kind == "condition" && values[3] !in listOf("نشط", "متوقف", "تحت المتابعة")) validation = "اختاري حالة من: نشط، متوقف، تحت المتابعة."
             else scope.launch {
                 saving = true
-                try { onSave(values.toList()) }
-                catch (_: Exception) { }
-                finally { saving = false }
+                saveError = ""
+                try {
+                    onSave(values.toList())
+                } catch (e: Exception) {
+                    saveError = e.message?.takeIf { it.isNotBlank() } ?: "تعذر حفظ السجل بسبب خطأ غير معروف."
+                } finally {
+                    saving = false
+                }
             }
         }) { Text(if (saving) "جارٍ الحفظ..." else "حفظ") } }, dismissButton = { TextButton(enabled = !saving, onClick = onDismiss) { Text("إلغاء") } })
 }

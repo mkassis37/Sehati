@@ -1318,54 +1318,83 @@ private fun DocumentScannerUi(
                 }
             }
 
+            // Camera-style fixed action bar. The shutter stays central and
+            // the device import + PDF actions remain directly accessible.
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.fillMaxWidth().height(82.dp).padding(bottom = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 OutlinedButton(
-                    onClick = onFinish,
-                    enabled = pageCount > 0 && !busy && draftBitmap == null,
-                    modifier = Modifier.weight(1f).height(58.dp),
-                    shape = androidx.compose.foundation.shape.RoundedCornerShape(18.dp),
-                    colors = androidx.compose.material3.ButtonDefaults.outlinedButtonColors(
-                        contentColor = Color(0xFFB6EEE5),
-                        disabledContentColor = Color(0xFF657481)
-                    )
+                    onClick = onPickImage,
+                    enabled = !busy && draftBitmap == null && pageCount < 20,
+                    modifier = Modifier.weight(1f).height(54.dp),
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(15.dp),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 3.dp)
                 ) {
-                    Icon(
-                        androidx.compose.material.icons.Icons.Filled.PictureAsPdf,
-                        contentDescription = null,
-                        modifier = Modifier.size(21.dp)
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text("حفظ PDF", maxLines = 1)
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(1.dp)
+                    ) {
+                        Icon(
+                            androidx.compose.material.icons.Icons.Filled.Description,
+                            contentDescription = null,
+                            modifier = Modifier.size(19.dp)
+                        )
+                        Text("من الجهاز", style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                    }
+                }
+
+                Box(
+                    modifier = Modifier.weight(1f),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(68.dp)
+                            .clip(androidx.compose.foundation.shape.CircleShape)
+                            .background(
+                                if (permissionGranted && !busy && draftBitmap == null && pageCount < 20)
+                                    Color.White else Color(0xFF7C858D)
+                            )
+                            .clickable(
+                                enabled = permissionGranted && !busy && draftBitmap == null && pageCount < 20
+                            ) { onCapture() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            androidx.compose.material.icons.Icons.Filled.CameraAlt,
+                            contentDescription = "التقاط صورة",
+                            tint = Color(0xFF111820),
+                            modifier = Modifier.size(29.dp)
+                        )
+                    }
                 }
 
                 Button(
-                    onClick = onCapture,
-                    enabled = permissionGranted && !busy && draftBitmap == null && pageCount < 20,
-                    modifier = Modifier.weight(1.15f).height(58.dp),
-                    shape = androidx.compose.foundation.shape.RoundedCornerShape(18.dp)
+                    onClick = onFinish,
+                    enabled = pageCount > 0 && !busy && draftBitmap == null,
+                    modifier = Modifier.weight(1f).height(54.dp),
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(15.dp),
+                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF167F82),
+                        disabledContainerColor = Color(0xFF343B42),
+                        contentColor = Color.White,
+                        disabledContentColor = Color(0xFF89939B)
+                    ),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 3.dp)
                 ) {
-                    Icon(
-                        androidx.compose.material.icons.Icons.Filled.CameraAlt,
-                        contentDescription = null,
-                        modifier = Modifier.size(22.dp)
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text("تصوير صفحة", maxLines = 1)
-                }
-                OutlinedButton(
-                    onClick = onPickImage,
-                    enabled = !busy && draftBitmap == null && pageCount < 20,
-                    modifier = Modifier.weight(1f).height(58.dp),
-                    shape = androidx.compose.foundation.shape.RoundedCornerShape(18.dp),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp)
-                ) {
-                    Icon(Icons.Filled.Description, contentDescription = null, modifier = Modifier.size(20.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("من الجهاز", maxLines = 1, style = MaterialTheme.typography.labelMedium)
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(1.dp)
+                    ) {
+                        Icon(
+                            androidx.compose.material.icons.Icons.Filled.PictureAsPdf,
+                            contentDescription = null,
+                            modifier = Modifier.size(19.dp)
+                        )
+                        Text("إنشاء PDF", style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                    }
                 }
             }
         }

@@ -39,7 +39,7 @@ fun String.isLifeThreateningAllergySeverity(): Boolean {
     val phrases = listOf(
         "مهددة للحياة", "مهدده للحياه", "مهددة للحياه", "مهدده للحياة",
         "مهدد للحياة", "مهدد للحياه", "تهدد الحياة", "تهدد الحياه",
-        "خطر على الحياة", "صدمة تحسسية", "صدمة الحساسية", "تأق",
+        "خطر على الحياة", "صدمة تحسسية", "صدمة الحساسية", "تاق",
         "life threatening", "anaphylaxis", "anaphylactic shock", "anaphylactic"
     )
     return phrases.any(normalized::contains)

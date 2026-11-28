@@ -127,6 +127,8 @@ internal fun SettingsSectionScreen(
     onThemeModeSelected: (ThemeMode) -> Unit,
     onResetAppearance: () -> Unit,
     lockEnabled: Boolean,
+    allowScreenshots: Boolean,
+    onAllowScreenshots: (Boolean) -> Unit,
     biometricEnabled: Boolean,
     biometricAvailable: Boolean,
     onLockNow: () -> Unit,
@@ -164,8 +166,8 @@ internal fun SettingsSectionScreen(
             )
             SettingsSection.LANGUAGE -> LanguageRegionSection()
             SettingsSection.SECURITY -> SecuritySection(
-                lockEnabled, biometricEnabled, biometricAvailable, onLockNow, timeoutMinutes, hasPin,
-                onSetPin, onLockEnabled, onBiometric, onTimeout
+                lockEnabled, allowScreenshots, onAllowScreenshots, biometricEnabled, biometricAvailable,
+                onLockNow, timeoutMinutes, hasPin, onSetPin, onLockEnabled, onBiometric, onTimeout
             )
             SettingsSection.BACKUP -> BackupSection(
                 backupLastSuccessAt, backupLastSizeBytes, backupMessage, onExport, onImport
@@ -195,6 +197,8 @@ private fun LanguageRegionSection() {
 @Composable
 private fun SecuritySection(
     lockEnabled: Boolean,
+    allowScreenshots: Boolean,
+    onAllowScreenshots: (Boolean) -> Unit,
     biometricEnabled: Boolean,
     biometricAvailable: Boolean,
     onLockNow: () -> Unit,
@@ -238,6 +242,24 @@ private fun SecuritySection(
         }
     }
     if (lockEnabled) OutlinedButton(onClick = onLockNow) { Text("قفل التطبيق الآن") }
+    InfoCard("لقطات الشاشة ومشاركة المعلومات") {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("السماح بلقطات الشاشة", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    if (allowScreenshots) "مسموح حاليًا؛ يمكنك تصوير الشاشة ومشاركة ما يظهر فيها."
+                    else "محمي حاليًا؛ فعّل الخيار عند الحاجة لإرسال صورة للطبيب.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+            Switch(checked = allowScreenshots, onCheckedChange = onAllowScreenshots)
+        }
+        Text(
+            "تنبيه: عند السماح، قد تظهر المعلومات الطبية في الصور أو تسجيل الشاشة أو معاينة التطبيقات الأخيرة. أوقف الخيار بعد الانتهاء من المشاركة.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error
+        )
+    }
     InfoCard("حالة التشفير") {
         InfoRow("قاعدة البيانات", "SQLCipher مشفر")
         InfoRow("مفتاح قاعدة البيانات", "محمي بواسطة Android Keystore")

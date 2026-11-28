@@ -5,6 +5,7 @@ import com.mkassis37.sehati.data.DoseLog
 import com.mkassis37.sehati.data.DoseStatus
 import com.mkassis37.sehati.data.MedicalAppointment
 import com.mkassis37.sehati.data.MedicationRecord
+import com.mkassis37.sehati.data.isCurrentlyActiveOn
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
@@ -37,7 +38,7 @@ internal fun nextReminder(
     return when (kind) {
         ReminderKind.DOSE -> {
             val records = doses.groupBy { it.medicationId }
-            medications.asSequence().filter { it.isActive && !it.completed }.flatMap { medication ->
+            medications.asSequence().filter { it.isCurrentlyActiveOn(date) }.flatMap { medication ->
                 val logs = records[medication.id].orEmpty().filter { it.memberId == medication.memberId }
                 val bySlot = logs.associateBy { it.date to it.time }
                 val snoozed = logs.asSequence().filter { it.status == DoseStatus.SNOOZED.name }
@@ -65,7 +66,7 @@ internal fun nextReminder(
                         .atZone(zone).toInstant().minusSeconds(30 * 60L)
                 }.getOrNull()
             }
-        ReminderKind.TREATMENT_END -> medications.asSequence().filter { it.isActive && !it.completed }
+        ReminderKind.TREATMENT_END -> medications.asSequence().filter { it.isCurrentlyActiveOn(date) && it.endDate.isNotBlank() }
             .mapNotNull { medication ->
                 runCatching {
                     val end = LocalDate.parse(medication.endDate)

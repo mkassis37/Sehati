@@ -11,6 +11,10 @@ class AllergySeverityTest {
         assertTrue("مهدده للحياه".isLifeThreateningAllergySeverity())
         assertTrue("  مهددة للحياة  ".isLifeThreateningAllergySeverity())
         assertTrue("حساسية مهددة للحياة".isLifeThreateningAllergySeverity())
+        assertTrue("مُهَدِّدَةٌ لِلْحَيَاة".isLifeThreateningAllergySeverity())
+        assertTrue("حساسية مهددة-للحياة".isLifeThreateningAllergySeverity())
+        assertTrue("صدمة تحسسية".isLifeThreateningAllergySeverity())
+        assertTrue("تأق".isLifeThreateningAllergySeverity())
     }
 
     @Test
@@ -18,6 +22,7 @@ class AllergySeverityTest {
         assertTrue("Life-threatening".isLifeThreateningAllergySeverity())
         assertTrue("life threatening".isLifeThreateningAllergySeverity())
         assertTrue("Anaphylaxis".isLifeThreateningAllergySeverity())
+        assertTrue("Anaphylactic shock".isLifeThreateningAllergySeverity())
     }
 
     @Test
@@ -29,10 +34,13 @@ class AllergySeverityTest {
     }
 
     @Test
-    fun doesNotPromoteModerateMildOrUnknownSeverity() {
+    fun doesNotPromoteModerateMildUnknownOrExplicitlyNegatedSeverity() {
         assertFalse("متوسطة".isLifeThreateningAllergySeverity())
         assertFalse("خفيفة".isLifeThreateningAllergySeverity())
         assertFalse("غير معروفة".isLifeThreateningAllergySeverity())
+        assertFalse("غير مهددة للحياة".isLifeThreateningAllergySeverity())
+        assertFalse("ليست مهددة للحياة".isLifeThreateningAllergySeverity())
+        assertFalse("not life-threatening".isLifeThreateningAllergySeverity())
         assertFalse("متوسطة".isSevereAllergySeverity())
         assertFalse("غير معروفة".isSevereAllergySeverity())
     }
